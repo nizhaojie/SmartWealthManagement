@@ -1,0 +1,72 @@
+from functools import lru_cache
+from pathlib import Path
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_BACKEND_DIR = Path(__file__).resolve().parent.parent
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_file=_BACKEND_DIR / ".env",
+        extra="ignore",
+    )
+
+    database_url: str = "mysql+pymysql://wealth_app:wealth_app_pw@127.0.0.1:3307/wealth"
+    test_database_url: str = "mysql+pymysql://wealth_app:wealth_app_pw@127.0.0.1:3307/wealth_test"
+
+    redis_url: str = "redis://127.0.0.1:6380/0"
+    test_redis_url: str = "redis://127.0.0.1:6380/1"
+
+    milvus_uri: str = "http://127.0.0.1:19531"
+    milvus_collection: str = "knowledge_chunks"
+    test_milvus_collection: str = "knowledge_chunks_test"
+
+    etcd_url: str = "http://127.0.0.1:12379"
+
+    neo4j_uri: str = "bolt://127.0.0.1:7688"
+    neo4j_user: str = "neo4j"
+    neo4j_password: str = "wealth_neo4j_pw"
+
+    minio_endpoint: str = "127.0.0.1:9001"
+    minio_access_key: str = "minioadmin"
+    minio_secret_key: str = "minioadmin"
+    minio_bucket: str = "wealth-knowledge"
+    minio_secure: bool = False
+
+    jwt_secret: str = "change-me-before-any-real-use"
+    jwt_algorithm: str = "HS256"
+    access_token_expire_minutes: int = 15
+    refresh_token_expire_days: int = 7
+    customer_token_audience: str = "customer-app"
+    internal_token_audience: str = "internal-app"
+
+    llm_provider: str = "fake"
+    llm_model_name: str = ""
+    llm_api_base: str = ""
+    llm_api_key: str = ""
+
+    embedding_provider: str = "fake"
+    embedding_model_name: str = "text-embedding-v3"
+    embedding_api_base: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    embedding_api_key: str = ""
+    embedding_dimension: int = 1024
+
+    demo_replay: bool = False
+
+    @property
+    def resolved_llm_provider(self) -> str:
+        if not self.llm_api_key:
+            return "fake"
+        return self.llm_provider
+
+    @property
+    def resolved_embedding_provider(self) -> str:
+        if not self.embedding_api_key:
+            return "fake"
+        return self.embedding_provider
+
+
+@lru_cache
+def get_settings() -> Settings:
+    return Settings()

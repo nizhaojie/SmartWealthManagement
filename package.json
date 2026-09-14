@@ -1,0 +1,17 @@
+{
+  "name": "smart-wealth-management",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently -n backend,customer -c blue,green \"pnpm dev:backend\" \"pnpm dev:customer\"",
+    "dev:backend": "node scripts/dev-backend.mjs",
+    "dev:customer": "pnpm --filter @wealth/customer dev",
+    "dev:internal": "pnpm --filter @wealth/internal dev",
+    "build": "pnpm -r --filter \"./apps/**\" --filter \"./packages/**\" build",
+    "test": "pnpm --filter @wealth/customer test && pnpm --filter @wealth/internal test",
+    "typecheck": "pnpm -r --filter \"./apps/**\" --filter \"./packages/**\" typecheck"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  },
+  "packageManager": "pnpm@11.24.0"
+}

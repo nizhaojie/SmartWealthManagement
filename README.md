@@ -17,6 +17,17 @@ python -m venv .venv
 pip install -e ".[dev]"
 ```
 
+迁移与测试数据（可重复执行，开发库 `wealth`；测试走独立库 `wealth_test`）：
+
+```bash
+cd backend
+python -m app.db.setup
+```
+
+`pnpm dev` 启动后端前会再跑一次上述命令。
+
+测试账号密码统一为 `Test@1234`。客户：`wangc1`–`qianc5`（风险承受等级 C1–C5）；员工：`advisor1`（理财顾问）、`manager1`（客户经理）、`risk1`（风控专员）。
+
 一条命令起后端与客户端：
 
 ```bash

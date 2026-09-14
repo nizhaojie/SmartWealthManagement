@@ -20,6 +20,21 @@
 
 四个 Agent 分别落在 1、5、6、8；四张 ECharts 图分别落在 4（两张）、6、7。
 
+每份 spec 已拆成 ticket，存于 `.scratch/<slug>/issues/`，共 43 个。依赖是一条串行链：每份 spec 的第一个 ticket 被上一份 spec 的最后一个 ticket 阻塞，spec 内部亦为顺序推进。唯一的例外是 `foundation-and-customer-service-slice #07`（共享包边界检查），它只依赖 #01，可提前做。
+
+**当前 frontier**：`foundation-and-customer-service-slice #01 — 工程骨架与健康检查贯通`（无前置）。
+
+六条护栏测试（ADR-0009）分布：
+
+| 护栏 | 所在 ticket |
+|---|---|
+| 1 适当性硬过滤 | `customer-profiling-and-suitability #03` |
+| 2 身份域隔离 | `foundation-and-customer-service-slice #03` |
+| 3 只许只读查询 | `data-analysis-agent #02` |
+| 4 产品列表不按收益率排序 | `product-screening-and-customer-assets #01` |
+| 5 未审核内容不可送达 | `advisory-agent-and-review-flow #03` |
+| 6 shared 不含业务语义 | `foundation-and-customer-service-slice #07` |
+
 ## 第 0 步 · 地基
 
 - [ ] pnpm workspace 骨架：`backend/`、`apps/customer/`、`apps/internal/`、`packages/shared/`

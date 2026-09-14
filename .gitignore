@@ -1,0 +1,33 @@
+# ---- 密钥与本地配置 ----
+.env
+.env.local
+*.local
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ---- Node ----
+node_modules/
+dist/
+dist-ssr/
+.vite/
+*.tsbuildinfo
+
+# ---- 日志与运行时产物 ----
+logs/
+*.log
+info.log
+error.log
+
+# ---- 编辑器与系统 ----
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json

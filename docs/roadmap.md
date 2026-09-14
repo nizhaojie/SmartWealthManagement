@@ -2,6 +2,24 @@
 
 原则：先切一刀端到端最薄的完整链路，再横向加宽。任何时点被迫停下，手上都应有一个能演示的完整状态。
 
+## Spec 索引
+
+每份 spec 在 `.scratch/<slug>/spec.md`，自包含，标注了前置依赖。
+
+| 顺序 | Slug | 覆盖 |
+|---|---|---|
+| 1 | `foundation-and-customer-service-slice` | 地基 + 智能客服 Agent + 客户端登录与对话 |
+| 2 | `internal-workbench-shell` | 内部工作台外壳（路由、角色导航）+ 知识库管理界面 |
+| 3 | `customer-profiling-and-suitability` | 画像、风险评测、适当性硬过滤、候选池 |
+| 4 | `product-screening-and-customer-assets` | 产品筛选 + 客户端资产页（配置图、风险分布图）+ 持仓穿透 |
+| 5 | `data-analysis-agent` | 语义视图 + NL2SQL + 查询界面 |
+| 6 | `advisory-agent-and-review-flow` | 投顾助手 Agent + 审核流 + 目标实际对比图 |
+| 7 | `knowledge-graph-and-graphrag` | Neo4j 投影 + GraphRAG + 图谱关系图 |
+| 8 | `risk-monitoring-agent` | 规则引擎 + 预警 + 工单 + 事件广播 |
+| 9 | `memory-confidence-and-integration` | 三层记忆 + 置信度重排 + Agent 协作 + 降级 + 回放模式 |
+
+四个 Agent 分别落在 1、5、6、8；四张 ECharts 图分别落在 4（两张）、6、7。
+
 ## 第 0 步 · 地基
 
 - [ ] pnpm workspace 骨架：`backend/`、`apps/customer/`、`apps/internal/`、`packages/shared/`

@@ -38,6 +38,8 @@ Agent 只产出事实性内容：已披露的产品要素、公开政策条款�
 
 ### 知识库维护者
 
+本组能力在本 slice 中**只实现到接口层**，维护界面属于内部工作台，在 `internal-workbench-shell` spec 中实现。本 slice 通过 Swagger 或导入脚本完成入库。
+
 14. As a 知识库维护者, I want to 上传 txt / md / docx 文档入库, so that Agent 能基于最新资料回答
 15. As a 知识库维护者, I want to 上传时指定知识类型（FAQ / 产品 / 政策）, so that 检索能落在正确的范围里
 16. As a 知识库维护者, I want to 查看已入库文档的列表与状态, so that 我知道知识库里现在有什么
@@ -187,7 +189,7 @@ SSE，`text/event-stream`。**流式只是传输方式，不是决策环节**：
 - 中期与长期记忆的完整实现（本 slice 只做短期记忆）
 - 置信度体系与周期校准
 - 多 Agent 事件通信
-- 内部工作台的任何业务页面
+- 内部工作台的任何业务页面，包括**知识库管理界面**（接口在本 slice，界面在 `internal-workbench-shell`）
 - 前端视觉重构（明确留到 roadmap 收尾阶段）
 - 真实支付通道、真实统一身份认证、短信验证码
 - 移动端原生应用、K8s 部署、CI/CD

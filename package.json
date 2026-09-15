@@ -7,7 +7,7 @@
     "dev:customer": "pnpm --filter @wealth/customer dev",
     "dev:internal": "pnpm --filter @wealth/internal dev",
     "build": "pnpm -r --filter \"./apps/**\" --filter \"./packages/**\" build",
-    "test": "pnpm --filter @wealth/customer test && pnpm --filter @wealth/internal test",
+    "test": "pnpm --filter @wealth/shared test && pnpm --filter @wealth/customer test && pnpm --filter @wealth/internal test",
     "typecheck": "pnpm -r --filter \"./apps/**\" --filter \"./packages/**\" typecheck"
   },
   "devDependencies": {

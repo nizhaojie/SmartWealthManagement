@@ -5,6 +5,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getAssets, listTransactions } from "./api";
 import type { CustomerAssets, Holding, TransactionRecord } from "./types";
 
+// jsdom 里元素尺寸恒为 0，ECharts 拿不到画布尺寸就没有可布局的文字。
+// 给一个稳定的尺寸，让「类别顺序」这类断言能在渲染结果上验。
+Object.defineProperty(HTMLElement.prototype, "clientWidth", { configurable: true, value: 480 });
+Object.defineProperty(HTMLElement.prototype, "clientHeight", { configurable: true, value: 260 });
+
 vi.mock("./api", () => ({
   getAssets: vi.fn(),
   listTransactions: vi.fn(),
@@ -61,6 +66,19 @@ async function mountPage() {
   });
   await flushPromises();
   return wrapper;
+}
+
+const ALLOCATION_CHART_TITLE = "实际配置";
+const RISK_LEVEL_CHART_TITLE = "持仓按产品风险等级的分布";
+
+type PageWrapper = Awaited<ReturnType<typeof mountPage>>;
+
+function chartFrameOf(wrapper: PageWrapper, title: string) {
+  const frame = wrapper
+    .findAll('[data-testid="chart-frame"]')
+    .find((node) => node.find("figcaption").text() === title);
+  if (frame === undefined) throw new Error(`资产页上没有标题为「${title}」的图表`);
+  return frame;
 }
 
 describe("AssetsPage", () => {
@@ -171,6 +189,78 @@ describe("AssetsPage", () => {
 
     expect(wrapper.get('[data-testid="risk-level"]').text()).toBe("尚未测评");
     expect(wrapper.get('[data-testid="total-market-value"]').text()).toBe("20420.00");
+  });
+
+  it("draws both charts from the holdings", async () => {
+    vi.mocked(getAssets).mockResolvedValue(
+      makeAssets({
+        holdings: [
+          makeHolding({ product_type: "债券基金", product_risk_level: "R2", market_value: "90000.00" }),
+          makeHolding({
+            product_code: "F000004",
+            product_type: "股票基金",
+            product_risk_level: "R4",
+            market_value: "80000.00",
+          }),
+        ],
+      }),
+    );
+    const wrapper = await mountPage();
+
+    expect(chartFrameOf(wrapper, ALLOCATION_CHART_TITLE).find('[data-testid="chart-canvas"]').exists()).toBe(true);
+    expect(
+      chartFrameOf(wrapper, RISK_LEVEL_CHART_TITLE).find('[data-testid="chart-canvas"]').exists(),
+    ).toBe(true);
+  });
+
+  it("keeps the risk level categories in R1 to R5 order instead of sorting by size", async () => {
+    vi.mocked(getAssets).mockResolvedValue(
+      makeAssets({
+        holdings: [
+          makeHolding({ product_risk_level: "R4", market_value: "80000.00" }),
+          makeHolding({
+            product_code: "F000005",
+            product_type: "股票基金",
+            product_risk_level: "R5",
+            market_value: "30000.00",
+          }),
+          makeHolding({
+            product_code: "F000002",
+            product_type: "债券基金",
+            product_risk_level: "R2",
+            market_value: "2000.00",
+          }),
+        ],
+      }),
+    );
+    const wrapper = await mountPage();
+
+    // 读的是图上类别标签的先后顺序，不涉及任何几何位置或像素。
+    const labels = chartFrameOf(wrapper, RISK_LEVEL_CHART_TITLE)
+      .findAll("svg text")
+      .map((node) => node.text())
+      .filter((text) => /^R[1-5]$/.test(text));
+
+    expect(labels).toEqual(["R1", "R2", "R3", "R4", "R5"]);
+  });
+
+  it("leaves no blank chart area when there is nothing to plot", async () => {
+    vi.mocked(getAssets).mockResolvedValue(
+      makeAssets({ total_market_value: "0.00", holding_count: 0, holdings: [] }),
+    );
+    const wrapper = await mountPage();
+
+    expect(wrapper.findAll('[data-testid="chart-empty"]')).toHaveLength(2);
+    expect(wrapper.findAll('[data-testid="chart-canvas"]')).toHaveLength(0);
+    expect(chartFrameOf(wrapper, ALLOCATION_CHART_TITLE).text()).toContain("还没有可以统计的持仓");
+  });
+
+  it("shows an explicit loading state for both charts", async () => {
+    vi.mocked(getAssets).mockReturnValue(new Promise<CustomerAssets>(() => {}));
+    const wrapper = await mountPage();
+
+    expect(wrapper.findAll('[data-testid="chart-loading"]')).toHaveLength(2);
+    expect(wrapper.findAll('[data-testid="chart-canvas"]')).toHaveLength(0);
   });
 
   it("surfaces a failure to load assets instead of leaving the page blank", async () => {

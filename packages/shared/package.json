@@ -10,12 +10,14 @@
   "scripts": {
     "build": "node scripts/check-boundary.mjs && tsc --noEmit",
     "typecheck": "tsc --noEmit",
-    "test": "node --test scripts/business-semantics-guard.test.mjs"
+    "test": "vitest run && node --test scripts/business-semantics-guard.test.mjs"
   },
   "dependencies": {
+    "echarts": "^6.1.0",
     "vue": "^3.5.21"
   },
   "devDependencies": {
-    "typescript": "~5.9.2"
+    "typescript": "~5.9.2",
+    "vitest": "^3.2.7"
   }
 }

@@ -2,6 +2,8 @@
 import { computed, onMounted, reactive, ref } from "vue";
 import { ApiError } from "@wealth/shared";
 import { RISK_LEVEL_LABELS } from "../risk-assessment/grades";
+import ActualAllocationChart from "./ActualAllocationChart.vue";
+import RiskLevelDistributionChart from "./RiskLevelDistributionChart.vue";
 import { getAssets, listTransactions } from "./api";
 import type { CustomerAssets, TransactionFilters, TransactionRecord } from "./types";
 
@@ -97,6 +99,11 @@ onMounted(async () => {
         测评有效期至 {{ assets.risk_level_valid_until }}
       </p>
     </section>
+
+    <div v-if="loading || assets" class="charts">
+      <ActualAllocationChart :holdings="assets?.holdings ?? []" :loading="loading" />
+      <RiskLevelDistributionChart :holdings="assets?.holdings ?? []" :loading="loading" />
+    </div>
 
     <h2>持仓明细</h2>
 
@@ -212,6 +219,13 @@ form {
   gap: 0.75rem 1rem;
   align-items: flex-end;
   margin: 1rem 0;
+}
+
+.charts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 1rem;
+  margin: 1.25rem 0;
 }
 
 .table-wrap {

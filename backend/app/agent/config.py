@@ -1,0 +1,17 @@
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class AgentConfig:
+    # ADR-0007：四个 Agent 共用一套 LangGraph 运行时，各自只是这里的一份配置。
+    name: str
+    tools: tuple[str, ...]
+    content_classification_default: str
+    retrieval_top_k: int = 5
+
+
+CUSTOMER_SERVICE_CONFIG = AgentConfig(
+    name="customer_service",
+    tools=("knowledge_search",),
+    content_classification_default="事实性内容",
+)

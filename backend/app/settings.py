@@ -54,6 +54,11 @@ class Settings(BaseSettings):
 
     demo_replay: bool = False
 
+    retrieval_score_threshold: float = 0.35
+    chat_memory_ttl_minutes: int = 30
+    chat_memory_token_budget: int = 2000
+    human_service_channel: str = "95588"
+
     @property
     def resolved_llm_provider(self) -> str:
         if not self.llm_api_key:

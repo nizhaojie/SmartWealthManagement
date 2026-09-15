@@ -7,6 +7,10 @@ def _token_spans(text: str) -> list[tuple[int, int]]:
     return [(m.start(), m.end()) for m in _TOKEN_PATTERN.finditer(text)]
 
 
+def count_tokens(text: str) -> int:
+    return len(_token_spans(text))
+
+
 def chunk_text(text: str, *, chunk_size: int = 512, overlap: int = 64) -> list[str]:
     spans = _token_spans(text)
     if not spans:

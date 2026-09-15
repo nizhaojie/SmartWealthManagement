@@ -123,15 +123,22 @@ def submit_assessment(
     return customer_visible_result(risk_level=risk_level, valid_until=valid_until)
 
 
-def get_current_result(db: Session, *, customer_id: int) -> dict:
+def find_current_result(db: Session, *, customer_id: int) -> dict | None:
     assessment = db.scalar(
         select(RiskAssessment)
         .where(RiskAssessment.customer_id == customer_id)
         .order_by(RiskAssessment.id.desc())
     )
     if assessment is None:
-        raise AppError(404, ASSESSMENT_MISSING_MESSAGE)
+        return None
     return customer_visible_result(risk_level=assessment.risk_level, valid_until=assessment.valid_until)
+
+
+def get_current_result(db: Session, *, customer_id: int) -> dict:
+    result = find_current_result(db, customer_id=customer_id)
+    if result is None:
+        raise AppError(404, ASSESSMENT_MISSING_MESSAGE)
+    return result
 
 
 def list_assessments(db: Session, *, customer_id: int) -> list[dict]:

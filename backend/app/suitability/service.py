@@ -85,6 +85,13 @@ def _allowed_for_customer(
     return allowed
 
 
+def resolve_allowed_product_risk_levels(
+    db: Session, *, customer_id: int, now: datetime
+) -> tuple[str, ...]:
+    assessment = _latest_assessment(db, customer_id)
+    return _allowed_for_customer(db, customer_id=customer_id, assessment=assessment, now=now)
+
+
 def _serialize_product(product: Product) -> dict:
     return {
         "product_code": product.product_code,

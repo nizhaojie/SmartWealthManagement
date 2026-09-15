@@ -151,6 +151,7 @@ class Product(Base):
     min_amount: Mapped[Decimal] = mapped_column(Numeric(16, 2), comment="起投金额")
     term_days: Mapped[int] = mapped_column(comment="期限天数")
     fund_manager: Mapped[str | None] = mapped_column(String(64), comment="基金经理")
+    fee_rate: Mapped[Decimal] = mapped_column(Numeric(7, 4), comment="费率")
     status: Mapped[str] = mapped_column(String(16), comment="产品状态")
     create_time: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     update_time: Mapped[datetime] = mapped_column(

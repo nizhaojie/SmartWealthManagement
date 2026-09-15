@@ -18,6 +18,11 @@ vi.mock("./risk-assessment/api", () => ({
   submitAssessment: vi.fn(),
 }));
 
+vi.mock("./products/api", () => ({
+  listProducts: vi.fn().mockResolvedValue({ products: [] }),
+  getProduct: vi.fn(),
+}));
+
 async function submitLogin(wrapper: ReturnType<typeof mount>, username: string, password: string) {
   await wrapper.find('input[name="username"]').setValue(username);
   await wrapper.find('input[name="password"]').setValue(password);
@@ -96,5 +101,20 @@ describe("App", () => {
     expect(wrapper.text()).toContain("保守型");
     expect(wrapper.text()).toContain("2027-03-15");
     expect(wrapper.text()).not.toContain("置信度");
+  });
+
+  it("opens product screening from customer navigation", async () => {
+    vi.mocked(loginRequest).mockResolvedValue({
+      access_token: "access-token",
+      refresh_token: "refresh-token",
+    });
+    const wrapper = mount(App, { global: { plugins: [ElementPlus] } });
+    await submitLogin(wrapper, "wangc1", "Test@1234");
+
+    await wrapper.get('button[name="nav-products"]').trigger("click");
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("这是符合条件的产品清单，不是推荐");
+    expect(wrapper.text()).toContain("请顾问出具方案");
   });
 });

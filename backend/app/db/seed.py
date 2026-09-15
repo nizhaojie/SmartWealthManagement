@@ -38,6 +38,7 @@ class ProductSeed(TypedDict):
     min_amount: Decimal
     term_days: int
     fund_manager: str
+    fee_rate: Decimal
     status: str
 
 
@@ -100,6 +101,7 @@ _PRODUCTS: tuple[ProductSeed, ...] = (
         "min_amount": Decimal("1000.00"),
         "term_days": 0,
         "fund_manager": "吴宁",
+        "fee_rate": Decimal("0.2500"),
         "status": "在售",
     },
     {
@@ -107,10 +109,11 @@ _PRODUCTS: tuple[ProductSeed, ...] = (
         "product_name": "天玑债券基金",
         "product_type": "债券基金",
         "risk_level": "R2",
-        "expected_return": Decimal("4.2000"),
+        "expected_return": Decimal("1.8000"),
         "min_amount": Decimal("1000.00"),
         "term_days": 0,
         "fund_manager": "郑岚",
+        "fee_rate": Decimal("0.4000"),
         "status": "在售",
     },
     {
@@ -122,6 +125,7 @@ _PRODUCTS: tuple[ProductSeed, ...] = (
         "min_amount": Decimal("1000.00"),
         "term_days": 0,
         "fund_manager": "冯川",
+        "fee_rate": Decimal("1.2000"),
         "status": "在售",
     },
     {
@@ -131,8 +135,9 @@ _PRODUCTS: tuple[ProductSeed, ...] = (
         "risk_level": "R4",
         "expected_return": Decimal("12.0000"),
         "min_amount": Decimal("1000.00"),
-        "term_days": 0,
+        "term_days": 365,
         "fund_manager": "曹越",
+        "fee_rate": Decimal("1.5000"),
         "status": "在售",
     },
     {
@@ -144,6 +149,7 @@ _PRODUCTS: tuple[ProductSeed, ...] = (
         "min_amount": Decimal("5000.00"),
         "term_days": 0,
         "fund_manager": "蒋远",
+        "fee_rate": Decimal("1.5000"),
         "status": "在售",
     },
 )
@@ -330,6 +336,10 @@ def _seed_products(session: Session) -> dict[str, Product]:
             product = Product(**item)
             session.add(product)
             session.flush()
+        else:
+            for key, value in item.items():
+                if key != "product_code":
+                    setattr(product, key, value)
         by_code[item["product_code"]] = product
     return by_code
 

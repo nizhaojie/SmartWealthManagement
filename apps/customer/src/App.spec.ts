@@ -10,14 +10,6 @@ vi.mock("./auth/api", () => ({
   logout: vi.fn(),
 }));
 
-vi.mock("./api/health", () => ({
-  fetchHealth: vi.fn().mockResolvedValue({
-    status: "ok",
-    llm_provider: "fake",
-    dependencies: {},
-  }),
-}));
-
 async function submitLogin(wrapper: ReturnType<typeof mount>, username: string, password: string) {
   await wrapper.find('input[name="username"]').setValue(username);
   await wrapper.find('input[name="password"]').setValue(password);
@@ -36,10 +28,10 @@ describe("App", () => {
     const wrapper = mount(App, { global: { plugins: [ElementPlus] } });
 
     expect(wrapper.text()).toContain("客户登录");
-    expect(wrapper.text()).not.toContain("系统健康状态");
+    expect(wrapper.find('input[name="chat-message"]').exists()).toBe(false);
   });
 
-  it("shows the protected content after a successful login", async () => {
+  it("shows the protected chat page after a successful login", async () => {
     vi.mocked(loginRequest).mockResolvedValue({
       access_token: "access-token",
       refresh_token: "refresh-token",
@@ -48,7 +40,7 @@ describe("App", () => {
 
     await submitLogin(wrapper, "wangc1", "Test@1234");
 
-    expect(wrapper.text()).toContain("系统健康状态");
+    expect(wrapper.find('input[name="chat-message"]').exists()).toBe(true);
   });
 
   it("shows an inline error instead of throwing when login fails", async () => {

@@ -10,13 +10,16 @@ class Citation:
     title: str
     source_file: str
     heading_path: list[str]
+    marker: int
 
 
 def build_citations(chunks: list[ChunkResult], cited_chunk_numbers: list[int]) -> list[Citation]:
     """把模型输出的引用序号（1-based，对应 chunks 列表位置）映射为结构化引用。
 
     序号在本次检索结果范围之外的一律剔除——模型编出一个不存在的引用，
-    不能让它蒙混过关变成看起来有依据的角标。
+    不能让它蒙混过关变成看起来有依据的角标。`marker` 原样保留这个序号，
+    前端据此把回答文本里的 [N] 角标与结构化引用精确对应，而不必假设
+    两者出现的顺序一致。
     """
     citations: list[Citation] = []
     seen: set[tuple[int, int]] = set()
@@ -36,6 +39,7 @@ def build_citations(chunks: list[ChunkResult], cited_chunk_numbers: list[int]) -
                 title=chunk.title,
                 source_file=chunk.source_file,
                 heading_path=chunk.heading_path,
+                marker=number,
             )
         )
     return citations

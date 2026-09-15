@@ -11,6 +11,7 @@ class CitationResponse(BaseModel):
     title: str
     source_file: str
     heading_path: list[str]
+    marker: int
 
 
 class ChatResponse(BaseModel):

@@ -1,27 +1,21 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
-import LoginPage from "./auth/LoginPage.vue";
-import { isAuthenticated } from "./auth/store";
-import { fetchHealth, type HealthSnapshot } from "./api/health";
+import { watch } from "vue";
+import { useRouter } from "vue-router";
+import { currentEmployee, isAuthenticated } from "./auth/store";
 
-const snapshot = ref<HealthSnapshot | null>(null);
-const error = ref(false);
+const router = useRouter();
 
-onMounted(async () => {
-  try {
-    snapshot.value = await fetchHealth();
-  } catch {
-    error.value = true;
+// A passive 401 from any API call clears tokens via the http client directly
+// (see api/http.ts's onUnauthorized), bypassing auth/store.ts's own session
+// helpers — so this is the one place that always resets identity + redirects.
+watch(isAuthenticated, (authenticated) => {
+  if (!authenticated) {
+    currentEmployee.value = null;
+    router.push("/login");
   }
 });
 </script>
 
 <template>
-  <LoginPage v-if="!isAuthenticated" />
-  <el-card v-else>
-    <h1>内部工作台</h1>
-    <p v-if="error">无法获取健康状态</p>
-    <p v-else-if="snapshot">后端状态：{{ snapshot.status }}</p>
-    <p v-else>加载中…</p>
-  </el-card>
+  <router-view />
 </template>

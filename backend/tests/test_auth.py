@@ -1,14 +1,18 @@
 import jwt as pyjwt
 from fastapi import Depends
 
-from app.auth.dependencies import AuthContext, require_customer, require_internal
+from app.auth import roles
+from app.auth.dependencies import AuthContext, require_customer, require_employee_role, require_internal
 from app.auth.tokens import issue_access_token
+from app.db.models import Employee
 from app.http import ok
 from app.main import app
 from app.settings import get_settings
 
 CUSTOMER_USERNAME = "wangc1"
 EMPLOYEE_USERNAME = "advisor1"
+RISK_OFFICER_USERNAME = "risk1"
+ACCOUNT_MANAGER_USERNAME = "manager1"
 SEEDED_PASSWORD = "Test@1234"
 
 
@@ -20,6 +24,11 @@ def _customer_protected(auth: AuthContext = Depends(require_customer)):
 @app.get("/api/__test__/internal-protected")
 def _internal_protected(auth: AuthContext = Depends(require_internal)):
     return ok({"subject_id": auth.subject_id})
+
+
+@app.get("/api/__test__/advisor-only")
+def _advisor_only(employee: Employee = Depends(require_employee_role(roles.ADVISOR))):
+    return ok({"employee_role": employee.employee_role})
 
 
 def _subject_id_of(access_token: str) -> int:
@@ -181,3 +190,57 @@ def test_logout_invalidates_both_access_and_refresh_token(auth_client):
         "/api/customer/auth/refresh", json={"refresh_token": refresh_token}
     )
     assert refresh_response.status_code == 401
+
+
+def _login_employee(auth_client, username: str) -> str:
+    response = auth_client.post(
+        "/api/internal/auth/login",
+        json={"username": username, "password": SEEDED_PASSWORD},
+    )
+    return response.json()["data"]["access_token"]
+
+
+def test_internal_me_returns_the_authenticated_employees_identity(auth_client):
+    token = _login_employee(auth_client, EMPLOYEE_USERNAME)
+
+    response = auth_client.get("/api/internal/auth/me", headers={"Authorization": f"Bearer {token}"})
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data == {"real_name": "陈顾问", "employee_role": "理财顾问"}
+
+
+def test_internal_logout_invalidates_the_session(auth_client):
+    login_response = auth_client.post(
+        "/api/internal/auth/login",
+        json={"username": EMPLOYEE_USERNAME, "password": SEEDED_PASSWORD},
+    )
+    access_token = login_response.json()["data"]["access_token"]
+
+    logout_response = auth_client.post(
+        "/api/internal/auth/logout", headers={"Authorization": f"Bearer {access_token}"}
+    )
+    assert logout_response.status_code == 200
+
+    me_response = auth_client.get(
+        "/api/internal/auth/me", headers={"Authorization": f"Bearer {access_token}"}
+    )
+    assert me_response.status_code == 401
+
+
+def test_role_restricted_endpoint_rejects_other_employee_roles(auth_client):
+    advisor_token = _login_employee(auth_client, EMPLOYEE_USERNAME)
+    risk_officer_token = _login_employee(auth_client, RISK_OFFICER_USERNAME)
+    manager_token = _login_employee(auth_client, ACCOUNT_MANAGER_USERNAME)
+
+    advisor_response = auth_client.get(
+        "/api/__test__/advisor-only", headers={"Authorization": f"Bearer {advisor_token}"}
+    )
+    assert advisor_response.status_code == 200
+    assert advisor_response.json()["data"]["employee_role"] == "理财顾问"
+
+    for token in (risk_officer_token, manager_token):
+        response = auth_client.get(
+            "/api/__test__/advisor-only", headers={"Authorization": f"Bearer {token}"}
+        )
+        assert response.status_code == 403

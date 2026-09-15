@@ -1,10 +1,11 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
-from app.auth.dependencies import AuthContext, require_customer
-from app.auth.schemas import AccessTokenOnly, LoginRequest, RefreshRequest, TokenPair
+from app.auth.dependencies import AuthContext, current_employee, require_customer, require_internal
+from app.auth.schemas import AccessTokenOnly, EmployeeIdentity, LoginRequest, RefreshRequest, TokenPair
 from app.auth.service import login_customer, login_employee, logout as perform_logout
 from app.auth.service import refresh_customer_access_token, refresh_employee_access_token
+from app.db.models import Employee
 from app.db.session import get_session
 from app.http import ok
 from app.redis_client import get_redis
@@ -75,3 +76,15 @@ def internal_refresh(
     access = refresh_employee_access_token(cache, refresh_token=body.refresh_token, settings=settings)
     token = AccessTokenOnly(access_token=access, expires_in=settings.access_token_expire_minutes * 60)
     return ok(token.model_dump())
+
+
+@router.post("/internal/auth/logout")
+def internal_logout(auth: AuthContext = Depends(require_internal), cache=Depends(get_redis)):
+    perform_logout(cache, auth.session_id)
+    return ok(None)
+
+
+@router.get("/internal/auth/me")
+def internal_me(employee: Employee = Depends(current_employee)):
+    identity = EmployeeIdentity(real_name=employee.real_name, employee_role=employee.employee_role)
+    return ok(identity.model_dump())

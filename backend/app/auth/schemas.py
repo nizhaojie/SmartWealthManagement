@@ -21,3 +21,8 @@ class AccessTokenOnly(BaseModel):
     access_token: str
     token_type: str = "bearer"
     expires_in: int
+
+
+class EmployeeIdentity(BaseModel):
+    real_name: str
+    employee_role: str

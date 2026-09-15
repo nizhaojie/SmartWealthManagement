@@ -1,6 +1,10 @@
 <script setup lang="ts">
 import { ref } from "vue";
-import { login } from "./store";
+import { useRouter } from "vue-router";
+import { defaultPathFor } from "../shell/modules";
+import { currentEmployee, login } from "./store";
+
+const router = useRouter();
 
 const username = ref("");
 const password = ref("");
@@ -12,6 +16,7 @@ async function onSubmit() {
   submitting.value = true;
   try {
     await login(username.value, password.value);
+    await router.push(defaultPathFor(currentEmployee.value?.employee_role));
   } catch {
     errorMessage.value = "账号或密码错误";
   } finally {

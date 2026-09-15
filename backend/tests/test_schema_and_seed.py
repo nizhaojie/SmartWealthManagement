@@ -11,6 +11,8 @@ EXPECTED_TABLES = {
     "sys_employee",
     "fin_customer_profile",
     "fin_product",
+    "fin_underlying_asset",
+    "fin_product_underlying",
     "fin_transaction",
     "fin_holdings",
     "fin_risk_assessment",
@@ -33,7 +35,7 @@ def _test_engine():
     return create_engine(_test_url())
 
 
-def test_apply_schema_creates_eleven_identity_split_tables():
+def test_apply_schema_creates_the_identity_split_tables():
     apply_schema(_test_url())
 
     with _test_engine().connect() as connection:
@@ -194,7 +196,7 @@ def test_seed_can_be_run_twice_without_duplicating_rows():
         employees = connection.execute(text("SELECT COUNT(*) FROM sys_employee")).scalar()
 
     assert customers == 5
-    assert products == 5
+    assert products == 7
     assert holdings == 5
     assert transactions == 5
     assert assessments == 5

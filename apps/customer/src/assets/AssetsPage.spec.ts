@@ -2,8 +2,14 @@ import ElementPlus from "element-plus";
 import { ApiError } from "@wealth/shared";
 import { flushPromises, mount } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getAssets, listTransactions } from "./api";
-import type { CustomerAssets, Holding, TransactionRecord } from "./types";
+import { getAssets, getHoldingLookThrough, listTransactions } from "./api";
+import type {
+  CustomerAssets,
+  Holding,
+  LookThrough,
+  LookThroughNode,
+  TransactionRecord,
+} from "./types";
 
 // jsdom 里元素尺寸恒为 0，ECharts 拿不到画布尺寸就没有可布局的文字。
 // 给一个稳定的尺寸，让「类别顺序」这类断言能在渲染结果上验。
@@ -12,6 +18,7 @@ Object.defineProperty(HTMLElement.prototype, "clientHeight", { configurable: tru
 
 vi.mock("./api", () => ({
   getAssets: vi.fn(),
+  getHoldingLookThrough: vi.fn(),
   listTransactions: vi.fn(),
 }));
 
@@ -59,6 +66,78 @@ function makeTransaction(overrides: Partial<TransactionRecord> = {}): Transactio
   };
 }
 
+function makeNode(overrides: Partial<LookThroughNode> = {}): LookThroughNode {
+  return {
+    kind: "asset",
+    code: "CASH-0001",
+    name: "同业存单",
+    depth: 3,
+    share: "0.030000",
+    market_value: "3240.00",
+    asset_category: "现金",
+    children: [],
+    ...overrides,
+  };
+}
+
+// 与后端种子数据同形：F000003 直接持有两只基金，其中 F000002 自己还有一层底层资产。
+function makeLookThrough(): LookThrough {
+  return {
+    product_code: "F000003",
+    product_name: "天璇混合基金",
+    market_value: "108000.00",
+    root: {
+      kind: "product",
+      code: "F000003",
+      name: "天璇混合基金",
+      depth: 1,
+      share: "1.000000",
+      market_value: "108000.00",
+      asset_category: null,
+      children: [
+        {
+          kind: "product",
+          code: "F000002",
+          name: "天玑债券基金",
+          depth: 2,
+          share: "0.300000",
+          market_value: "32400.00",
+          asset_category: null,
+          children: [
+            makeNode({ code: "BOND-0001", name: "22 国债 05", share: "0.135000", market_value: "14580.00", asset_category: "债券" }),
+            makeNode({ code: "BOND-0002", name: "23 国开债 10", share: "0.090000", market_value: "9720.00", asset_category: "债券" }),
+            makeNode({ code: "BOND-0003", name: "中铁建公司债", share: "0.045000", market_value: "4860.00", asset_category: "债券" }),
+            makeNode({ code: "CASH-0001", name: "同业存单", share: "0.030000", market_value: "3240.00", asset_category: "现金" }),
+          ],
+        },
+        {
+          kind: "product",
+          code: "F000001",
+          name: "天枢货币基金",
+          depth: 2,
+          share: "0.100000",
+          market_value: "10800.00",
+          asset_category: null,
+          children: [
+            makeNode({ code: "CASH-0001", name: "同业存单", share: "0.060000", market_value: "6480.00" }),
+            makeNode({ code: "CASH-0002", name: "7 天通知存款", share: "0.040000", market_value: "4320.00" }),
+          ],
+        },
+        makeNode({ code: "EQTY-0001", name: "沪深 300 成份股组合", depth: 2, share: "0.400000", market_value: "43200.00", asset_category: "股票" }),
+        makeNode({ code: "BOND-0001", name: "22 国债 05", depth: 2, share: "0.200000", market_value: "21600.00", asset_category: "债券" }),
+      ],
+    },
+    underlying_assets: [
+      { asset_code: "EQTY-0001", asset_name: "沪深 300 成份股组合", asset_category: "股票", market_value: "43200.00", share: "0.400000", path_count: 1 },
+      { asset_code: "BOND-0001", asset_name: "22 国债 05", asset_category: "债券", market_value: "36180.00", share: "0.335000", path_count: 2 },
+      { asset_code: "BOND-0002", asset_name: "23 国开债 10", asset_category: "债券", market_value: "9720.00", share: "0.090000", path_count: 1 },
+      { asset_code: "CASH-0001", asset_name: "同业存单", asset_category: "现金", market_value: "9720.00", share: "0.090000", path_count: 2 },
+      { asset_code: "BOND-0003", asset_name: "中铁建公司债", asset_category: "债券", market_value: "4860.00", share: "0.045000", path_count: 1 },
+      { asset_code: "CASH-0002", asset_name: "7 天通知存款", asset_category: "现金", market_value: "4320.00", share: "0.040000", path_count: 1 },
+    ],
+  };
+}
+
 async function mountPage() {
   const wrapper = mount(AssetsPage, {
     attachTo: document.body,
@@ -81,11 +160,29 @@ function chartFrameOf(wrapper: PageWrapper, title: string) {
   return frame;
 }
 
+function entryOf(wrapper: PageWrapper, productCode: string) {
+  return wrapper.get(
+    `[data-testid="look-through-entry"][data-product-code="${productCode}"]`,
+  );
+}
+
+function toggleNode(wrapper: PageWrapper, code: string) {
+  return wrapper.get(`[data-testid="look-through-toggle"][data-code="${code}"]`).trigger("click");
+}
+
+function visibleNodeCodes(wrapper: PageWrapper): string[] {
+  return wrapper
+    .findAll('[data-testid="look-through-node"]')
+    .map((node) => node.attributes("data-code") ?? "");
+}
+
 describe("AssetsPage", () => {
   beforeEach(() => {
     vi.mocked(getAssets).mockReset();
+    vi.mocked(getHoldingLookThrough).mockReset();
     vi.mocked(listTransactions).mockReset();
     vi.mocked(getAssets).mockResolvedValue(makeAssets());
+    vi.mocked(getHoldingLookThrough).mockResolvedValue(makeLookThrough());
     vi.mocked(listTransactions).mockResolvedValue({ transactions: [makeTransaction()] });
   });
 
@@ -271,5 +368,146 @@ describe("AssetsPage", () => {
 
     expect(wrapper.get('[data-testid="assets-error"]').text()).toContain("资产信息加载失败");
     expect(wrapper.find('[data-testid="asset-summary"]').exists()).toBe(false);
+  });
+
+  it("opens a holding into its underlying assets one level at a time", async () => {
+    vi.mocked(getAssets).mockResolvedValue(
+      makeAssets({
+        holding_count: 1,
+        total_market_value: "108000.00",
+        holdings: [
+          makeHolding({
+            product_code: "F000003",
+            product_name: "天璇混合基金",
+            product_type: "混合基金",
+            product_risk_level: "R3",
+            market_value: "108000.00",
+          }),
+        ],
+      }),
+    );
+    const wrapper = await mountPage();
+
+    expect(wrapper.find('[data-testid="look-through-panel"]').exists()).toBe(false);
+
+    await wrapper.get('[data-testid="look-through-entry"]').trigger("click");
+    await flushPromises();
+
+    expect(getHoldingLookThrough).toHaveBeenCalledWith("F000003");
+    // 展开持仓后先看到直接持有的下一层，更深的层级还收着。
+    expect(visibleNodeCodes(wrapper)).toEqual([
+      "F000003",
+      "F000002",
+      "F000001",
+      "EQTY-0001",
+      "BOND-0001",
+    ]);
+
+    await toggleNode(wrapper, "F000002");
+    expect(visibleNodeCodes(wrapper)).toEqual([
+      "F000003",
+      "F000002",
+      "BOND-0001",
+      "BOND-0002",
+      "BOND-0003",
+      "CASH-0001",
+      "F000001",
+      "EQTY-0001",
+      "BOND-0001",
+    ]);
+
+    // 第 3 层的占比是沿路径乘出来的（30% × 45%），不是它相对 F000002 的 45%，
+    // 否则同一行里占比与市值会各说各话。
+    const deepest = wrapper
+      .findAll('[data-testid="look-through-node"]')
+      .find((node) => node.attributes("data-code") === "BOND-0001" && node.text().includes("第 3 层"));
+    expect(deepest?.text()).toContain("13.50%");
+    expect(deepest?.text()).toContain("14580.00");
+
+    await toggleNode(wrapper, "F000002");
+    expect(visibleNodeCodes(wrapper)).toEqual([
+      "F000003",
+      "F000002",
+      "F000001",
+      "EQTY-0001",
+      "BOND-0001",
+    ]);
+
+    await wrapper.get('[data-testid="look-through-entry"]').trigger("click");
+    expect(wrapper.find('[data-testid="look-through-panel"]').exists()).toBe(false);
+  });
+
+  it("merges the paths that end on the same underlying asset into one row", async () => {
+    const wrapper = await mountPage();
+    await wrapper.get('[data-testid="look-through-entry"]').trigger("click");
+    await flushPromises();
+
+    const rows = wrapper.findAll('[data-testid="look-through-asset"]');
+    expect(rows.map((row) => row.attributes("data-asset-code"))).toEqual([
+      "EQTY-0001",
+      "BOND-0001",
+      "BOND-0002",
+      "CASH-0001",
+      "BOND-0003",
+      "CASH-0002",
+    ]);
+
+    const bond = rows.find((row) => row.attributes("data-asset-code") === "BOND-0001");
+    expect(bond?.text()).toContain("36180.00");
+    expect(bond?.text()).toContain("2 条");
+
+    // 合并是相加，不是给每条路径各留一份市值。
+    const merged = rows.reduce((sum, row) => sum + Number(row.findAll("td")[2].text()), 0);
+    expect(merged).toBeCloseTo(108000, 2);
+  });
+
+  it("loads each holding's look-through on demand and keeps one open at a time", async () => {
+    vi.mocked(getAssets).mockResolvedValue(
+      makeAssets({
+        holding_count: 2,
+        holdings: [
+          makeHolding(),
+          makeHolding({
+            product_code: "F000002",
+            product_name: "天玑债券基金",
+            product_type: "债券基金",
+            product_risk_level: "R2",
+          }),
+        ],
+      }),
+    );
+    const wrapper = await mountPage();
+
+    await entryOf(wrapper, "F000001").trigger("click");
+    await flushPromises();
+    expect(getHoldingLookThrough).toHaveBeenLastCalledWith("F000001");
+    expect(wrapper.findAll('[data-testid="look-through-panel"]')).toHaveLength(1);
+
+    await entryOf(wrapper, "F000002").trigger("click");
+    await flushPromises();
+    expect(getHoldingLookThrough).toHaveBeenLastCalledWith("F000002");
+    expect(wrapper.findAll('[data-testid="look-through-panel"]')).toHaveLength(1);
+
+    await entryOf(wrapper, "F000001").trigger("click");
+    await flushPromises();
+    expect(getHoldingLookThrough).toHaveBeenCalledTimes(2);
+  });
+
+  it("reports a cyclic holding relation instead of leaving the panel blank", async () => {
+    vi.mocked(getHoldingLookThrough).mockRejectedValue(
+      new ApiError({
+        code: 1003,
+        message: "持仓穿透发现成环的底层持有关系：F900001 > F900002 > F900001，展开已停止。",
+        data: null,
+        trace_id: "",
+      }),
+    );
+    const wrapper = await mountPage();
+
+    await wrapper.get('[data-testid="look-through-entry"]').trigger("click");
+    await flushPromises();
+
+    expect(wrapper.find('[data-testid="look-through-panel"]').exists()).toBe(false);
+    expect(wrapper.get('[data-testid="look-through-error"]').text()).toContain("成环");
   });
 });

@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.auth.dependencies import AuthContext, require_customer
+from app.customer_assets.look_through import look_through
 from app.customer_assets.service import get_assets, list_transactions
 from app.db.session import get_session
 from app.http import ok
@@ -17,6 +18,15 @@ def customer_assets(
     db: Session = Depends(get_session),
 ):
     return ok(get_assets(db, customer_id=auth.subject_id))
+
+
+@router.get("/holdings/{product_code}/look-through")
+def customer_holding_look_through(
+    product_code: str,
+    auth: AuthContext = Depends(require_customer),
+    db: Session = Depends(get_session),
+):
+    return ok(look_through(db, customer_id=auth.subject_id, product_code=product_code))
 
 
 @router.get("/transactions")

@@ -159,6 +159,61 @@ class Product(Base):
     )
 
 
+class UnderlyingAsset(Base):
+    __tablename__ = "fin_underlying_asset"
+    __table_args__ = (
+        CheckConstraint(
+            "asset_category IN ('现金','债券','股票','另类')",
+            name="ck_underlying_asset_category",
+        ),
+        {"comment": "底层资产"},
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    asset_code: Mapped[str] = mapped_column(String(32), unique=True, comment="底层资产代码")
+    asset_name: Mapped[str] = mapped_column(String(128), comment="底层资产名称")
+    asset_category: Mapped[str] = mapped_column(String(32), comment="资产大类")
+    create_time: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    update_time: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class ProductUnderlying(Base):
+    """产品底层持有关系：一条记录指向一个底层资产，而底层资产可以是另一个产品的份额。"""
+
+    __tablename__ = "fin_product_underlying"
+    __table_args__ = (
+        UniqueConstraint("product_id", "child_product_id", name="uk_product_underlying_child"),
+        UniqueConstraint(
+            "product_id", "underlying_asset_id", name="uk_product_underlying_asset"
+        ),
+        CheckConstraint(
+            "(child_product_id IS NOT NULL AND underlying_asset_id IS NULL)"
+            " OR (child_product_id IS NULL AND underlying_asset_id IS NOT NULL)",
+            name="ck_product_underlying_single_target",
+        ),
+        CheckConstraint("weight > 0", name="ck_product_underlying_weight"),
+        {"comment": "产品底层持有关系"},
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    product_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("fin_product.id"), comment="产品标识"
+    )
+    child_product_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("fin_product.id"), comment="作为底层资产的产品标识"
+    )
+    underlying_asset_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("fin_underlying_asset.id"), comment="底层资产标识"
+    )
+    weight: Mapped[Decimal] = mapped_column(Numeric(9, 6), comment="占该产品的比例")
+    create_time: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    update_time: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now()
+    )
+
+
 class Transaction(Base):
     __tablename__ = "fin_transaction"
     __table_args__ = (

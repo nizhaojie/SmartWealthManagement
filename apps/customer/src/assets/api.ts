@@ -1,5 +1,5 @@
 import { http } from "../api/http";
-import type { CustomerAssets, TransactionFilters, TransactionList } from "./types";
+import type { CustomerAssets, LookThrough, TransactionFilters, TransactionList } from "./types";
 
 function queryString(filters: TransactionFilters): string {
   const params = new URLSearchParams();
@@ -12,6 +12,11 @@ function queryString(filters: TransactionFilters): string {
 
 export function getAssets(): Promise<CustomerAssets> {
   return http.get<CustomerAssets>("/api/customer/assets");
+}
+
+export function getHoldingLookThrough(productCode: string): Promise<LookThrough> {
+  const path = `/api/customer/assets/holdings/${encodeURIComponent(productCode)}/look-through`;
+  return http.get<LookThrough>(path);
 }
 
 export function listTransactions(filters: TransactionFilters = {}): Promise<TransactionList> {

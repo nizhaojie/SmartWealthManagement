@@ -3,9 +3,15 @@ import { computed, onMounted, reactive, ref } from "vue";
 import { ApiError } from "@wealth/shared";
 import { RISK_LEVEL_LABELS } from "../risk-assessment/grades";
 import ActualAllocationChart from "./ActualAllocationChart.vue";
+import HoldingLookThrough from "./HoldingLookThrough.vue";
 import RiskLevelDistributionChart from "./RiskLevelDistributionChart.vue";
-import { getAssets, listTransactions } from "./api";
-import type { CustomerAssets, TransactionFilters, TransactionRecord } from "./types";
+import { getAssets, getHoldingLookThrough, listTransactions } from "./api";
+import type {
+  CustomerAssets,
+  LookThrough,
+  TransactionFilters,
+  TransactionRecord,
+} from "./types";
 
 const HOLDINGS_EMPTY_HINT = "你还没有持有任何产品。买入后这里会列出每一笔持仓的份额、成本、市值与盈亏。";
 const TRANSACTIONS_EMPTY_HINT = "没有符合条件的交易记录。可放宽时间范围，或换成全部交易类型再查一次。";
@@ -19,6 +25,11 @@ const errorMessage = ref("");
 const transactions = ref<TransactionRecord[]>([]);
 const transactionsLoading = ref(true);
 const transactionsError = ref("");
+
+const openedLookThrough = ref("");
+const lookThroughs = ref<Record<string, LookThrough>>({});
+const lookThroughLoading = ref("");
+const lookThroughError = ref("");
 
 const filters = reactive<TransactionFilters>({
   start_date: "",
@@ -65,6 +76,29 @@ async function loadTransactions() {
       error instanceof ApiError ? error.message : "交易流水加载失败";
   } finally {
     transactionsLoading.value = false;
+  }
+}
+
+async function toggleLookThrough(productCode: string) {
+  if (openedLookThrough.value === productCode) {
+    openedLookThrough.value = "";
+    lookThroughError.value = "";
+    return;
+  }
+  openedLookThrough.value = productCode;
+  lookThroughError.value = "";
+  if (lookThroughs.value[productCode]) return;
+
+  lookThroughLoading.value = productCode;
+  try {
+    lookThroughs.value = {
+      ...lookThroughs.value,
+      [productCode]: await getHoldingLookThrough(productCode),
+    };
+  } catch (error) {
+    lookThroughError.value = error instanceof ApiError ? error.message : "持仓穿透加载失败";
+  } finally {
+    lookThroughLoading.value = "";
   }
 }
 
@@ -124,22 +158,42 @@ onMounted(async () => {
             <th>市值（元）</th>
             <th>盈亏（元）</th>
             <th>盈亏比例（%）</th>
+            <th>底层</th>
           </tr>
         </thead>
         <tbody>
-          <tr
-            v-for="holding in assets.holdings"
-            :key="holding.product_code"
-            :data-product-code="holding.product_code"
-          >
-            <td>{{ holding.product_name }}（{{ holding.product_code }}）</td>
-            <td>{{ holding.product_type }}</td>
-            <td>{{ holding.shares }}</td>
-            <td>{{ holding.cost_amount }}</td>
-            <td>{{ holding.market_value }}</td>
-            <td>{{ holding.profit_loss }}</td>
-            <td>{{ holding.profit_ratio }}</td>
-          </tr>
+          <template v-for="holding in assets.holdings" :key="holding.product_code">
+            <tr :data-product-code="holding.product_code">
+              <td>{{ holding.product_name }}（{{ holding.product_code }}）</td>
+              <td>{{ holding.product_type }}</td>
+              <td>{{ holding.shares }}</td>
+              <td>{{ holding.cost_amount }}</td>
+              <td>{{ holding.market_value }}</td>
+              <td>{{ holding.profit_loss }}</td>
+              <td>{{ holding.profit_ratio }}</td>
+              <td>
+                <el-button
+                  data-testid="look-through-entry"
+                  :data-product-code="holding.product_code"
+                  @click="toggleLookThrough(holding.product_code)"
+                >
+                  {{ openedLookThrough === holding.product_code ? "收起穿透" : "展开穿透" }}
+                </el-button>
+              </td>
+            </tr>
+            <tr v-if="openedLookThrough === holding.product_code">
+              <td colspan="8">
+                <p v-if="lookThroughLoading === holding.product_code">正在穿透…</p>
+                <p v-else-if="lookThroughError" role="alert" data-testid="look-through-error">
+                  {{ lookThroughError }}
+                </p>
+                <HoldingLookThrough
+                  v-else-if="lookThroughs[holding.product_code]"
+                  :look-through="lookThroughs[holding.product_code]"
+                />
+              </td>
+            </tr>
+          </template>
         </tbody>
       </table>
     </div>

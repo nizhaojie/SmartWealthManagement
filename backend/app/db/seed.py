@@ -13,9 +13,11 @@ from app.db.models import (
     Employee,
     Holding,
     Product,
+    ProductUnderlying,
     ProfileTag,
     RiskAssessment,
     Transaction,
+    UnderlyingAsset,
 )
 from app.settings import get_settings
 
@@ -40,6 +42,19 @@ class ProductSeed(TypedDict):
     fund_manager: str
     fee_rate: Decimal
     status: str
+
+
+class UnderlyingAssetSeed(TypedDict):
+    asset_code: str
+    asset_name: str
+    asset_category: str
+
+
+class ProductUnderlyingSeed(TypedDict):
+    product_code: str
+    target_kind: str  # "asset" 指向具体标的，"product" 指向另一个产品的份额
+    target_code: str
+    weight: Decimal
 
 
 class CustomerSeed(TypedDict):
@@ -152,6 +167,71 @@ _PRODUCTS: tuple[ProductSeed, ...] = (
         "fee_rate": Decimal("1.5000"),
         "status": "在售",
     },
+    # 这两只互为底层：成环的持有关系，用于验证穿透查询有界终止而不是挂死。
+    # 停售且无人持有，因此不出现在客户可见的任何清单里。
+    {
+        "product_code": "F900001",
+        "product_name": "回环一号 FOF",
+        "product_type": "混合基金",
+        "risk_level": "R3",
+        "expected_return": Decimal("5.0000"),
+        "min_amount": Decimal("1000.00"),
+        "term_days": 0,
+        "fund_manager": "邵行",
+        "fee_rate": Decimal("1.0000"),
+        "status": "停售",
+    },
+    {
+        "product_code": "F900002",
+        "product_name": "回环二号 FOF",
+        "product_type": "混合基金",
+        "risk_level": "R3",
+        "expected_return": Decimal("5.5000"),
+        "min_amount": Decimal("1000.00"),
+        "term_days": 0,
+        "fund_manager": "邵行",
+        "fee_rate": Decimal("1.0000"),
+        "status": "停售",
+    },
+)
+
+_UNDERLYING_ASSETS: tuple[UnderlyingAssetSeed, ...] = (
+    {"asset_code": "CASH-0001", "asset_name": "同业存单", "asset_category": "现金"},
+    {"asset_code": "CASH-0002", "asset_name": "7 天通知存款", "asset_category": "现金"},
+    {"asset_code": "BOND-0001", "asset_name": "22 国债 05", "asset_category": "债券"},
+    {"asset_code": "BOND-0002", "asset_name": "23 国开债 10", "asset_category": "债券"},
+    {"asset_code": "BOND-0003", "asset_name": "中铁建公司债", "asset_category": "债券"},
+    {"asset_code": "EQTY-0001", "asset_name": "沪深 300 成份股组合", "asset_category": "股票"},
+    {"asset_code": "EQTY-0002", "asset_name": "中证 500 成份股组合", "asset_category": "股票"},
+    {"asset_code": "EQTY-0003", "asset_name": "港股通科技股组合", "asset_category": "股票"},
+    {"asset_code": "ALTV-0001", "asset_name": "黄金 ETF", "asset_category": "另类"},
+    {"asset_code": "ALTV-0002", "asset_name": "原油 ETF", "asset_category": "另类"},
+)
+
+# F000003 通过 F000002 / F000001 持有一层嵌套的产品，穿透后有两层；
+# BOND-0001 与 CASH-0001 各有两条路径，用于验证同一底层资产的多条路径会被合并。
+_PRODUCT_UNDERLYINGS: tuple[ProductUnderlyingSeed, ...] = (
+    {"product_code": "F000001", "target_kind": "asset", "target_code": "CASH-0001", "weight": Decimal("0.600000")},
+    {"product_code": "F000001", "target_kind": "asset", "target_code": "CASH-0002", "weight": Decimal("0.400000")},
+    {"product_code": "F000002", "target_kind": "asset", "target_code": "BOND-0001", "weight": Decimal("0.450000")},
+    {"product_code": "F000002", "target_kind": "asset", "target_code": "BOND-0002", "weight": Decimal("0.300000")},
+    {"product_code": "F000002", "target_kind": "asset", "target_code": "BOND-0003", "weight": Decimal("0.150000")},
+    {"product_code": "F000002", "target_kind": "asset", "target_code": "CASH-0001", "weight": Decimal("0.100000")},
+    {"product_code": "F000003", "target_kind": "product", "target_code": "F000002", "weight": Decimal("0.300000")},
+    {"product_code": "F000003", "target_kind": "product", "target_code": "F000001", "weight": Decimal("0.100000")},
+    {"product_code": "F000003", "target_kind": "asset", "target_code": "EQTY-0001", "weight": Decimal("0.400000")},
+    {"product_code": "F000003", "target_kind": "asset", "target_code": "BOND-0001", "weight": Decimal("0.200000")},
+    {"product_code": "F000004", "target_kind": "asset", "target_code": "EQTY-0001", "weight": Decimal("0.500000")},
+    {"product_code": "F000004", "target_kind": "asset", "target_code": "EQTY-0002", "weight": Decimal("0.350000")},
+    {"product_code": "F000004", "target_kind": "asset", "target_code": "CASH-0001", "weight": Decimal("0.150000")},
+    {"product_code": "F000005", "target_kind": "asset", "target_code": "EQTY-0002", "weight": Decimal("0.450000")},
+    {"product_code": "F000005", "target_kind": "asset", "target_code": "EQTY-0003", "weight": Decimal("0.250000")},
+    {"product_code": "F000005", "target_kind": "asset", "target_code": "ALTV-0001", "weight": Decimal("0.200000")},
+    {"product_code": "F000005", "target_kind": "asset", "target_code": "CASH-0001", "weight": Decimal("0.100000")},
+    {"product_code": "F900001", "target_kind": "product", "target_code": "F900002", "weight": Decimal("0.700000")},
+    {"product_code": "F900001", "target_kind": "asset", "target_code": "CASH-0001", "weight": Decimal("0.300000")},
+    {"product_code": "F900002", "target_kind": "product", "target_code": "F900001", "weight": Decimal("0.800000")},
+    {"product_code": "F900002", "target_kind": "asset", "target_code": "BOND-0001", "weight": Decimal("0.200000")},
 )
 
 _CUSTOMERS: tuple[CustomerSeed, ...] = (
@@ -307,6 +387,7 @@ def seed(database_url: str | None = None) -> None:
         with Session(engine) as session:
             employees = _seed_employees(session, password_hash)
             products = _seed_products(session)
+            _seed_underlyings(session)
             advisor = employees["advisor1"]
             _seed_customers(session, password_hash, products, advisor.id)
             session.commit()
@@ -342,6 +423,63 @@ def _seed_products(session: Session) -> dict[str, Product]:
                     setattr(product, key, value)
         by_code[item["product_code"]] = product
     return by_code
+
+
+def _seed_underlyings(session: Session) -> None:
+    assets: dict[str, UnderlyingAsset] = {}
+    for item in _UNDERLYING_ASSETS:
+        asset = session.scalar(
+            select(UnderlyingAsset).where(UnderlyingAsset.asset_code == item["asset_code"])
+        )
+        if asset is None:
+            asset = UnderlyingAsset(**item)
+            session.add(asset)
+            session.flush()
+        else:
+            asset.asset_name = item["asset_name"]
+            asset.asset_category = item["asset_category"]
+        assets[item["asset_code"]] = asset
+
+    for item in _PRODUCT_UNDERLYINGS:
+        product = session.scalar(
+            select(Product).where(Product.product_code == item["product_code"])
+        )
+        if product is None:
+            continue
+        child_id: int | None = None
+        asset_id: int | None = None
+        if item["target_kind"] == "product":
+            child = session.scalar(
+                select(Product).where(Product.product_code == item["target_code"])
+            )
+            if child is None:
+                continue
+            child_id = child.id
+        else:
+            asset = assets.get(item["target_code"])
+            if asset is None:
+                continue
+            asset_id = asset.id
+
+        # 一条关系只指向一个目标，因此按非空的那一列去比对即可。
+        stmt = select(ProductUnderlying).where(ProductUnderlying.product_id == product.id)
+        stmt = (
+            stmt.where(ProductUnderlying.child_product_id == child_id)
+            if child_id is not None
+            else stmt.where(ProductUnderlying.underlying_asset_id == asset_id)
+        )
+        relation = session.scalar(stmt)
+        if relation is None:
+            session.add(
+                ProductUnderlying(
+                    product_id=product.id,
+                    child_product_id=child_id,
+                    underlying_asset_id=asset_id,
+                    weight=item["weight"],
+                )
+            )
+        else:
+            relation.weight = item["weight"]
 
 
 def _seed_customers(

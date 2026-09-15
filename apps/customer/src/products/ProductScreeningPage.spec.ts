@@ -1,6 +1,8 @@
 import ElementPlus from "element-plus";
+import { ApiError } from "@wealth/shared";
 import { flushPromises, mount } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { AdvisoryRequest } from "../advisory/types";
 import type { Product } from "./types";
 
 const { listProducts, getProduct } = vi.hoisted(() => ({
@@ -8,7 +10,13 @@ const { listProducts, getProduct } = vi.hoisted(() => ({
   getProduct: vi.fn(),
 }));
 
+const { listAdvisoryRequests, submitAdvisoryRequest } = vi.hoisted(() => ({
+  listAdvisoryRequests: vi.fn(),
+  submitAdvisoryRequest: vi.fn(),
+}));
+
 vi.mock("./api", () => ({ listProducts, getProduct }));
+vi.mock("../advisory/api", () => ({ listAdvisoryRequests, submitAdvisoryRequest }));
 
 import ProductScreeningPage from "./ProductScreeningPage.vue";
 
@@ -41,6 +49,18 @@ function productsOfCount(count: number): Product[] {
   });
 }
 
+function makeRequest(overrides: Partial<AdvisoryRequest> = {}): AdvisoryRequest {
+  return {
+    id: 1,
+    request_no: "AR20260915A1B2C3",
+    customer_id: 7,
+    status: "待处理",
+    filters: { product_type: "债券基金" },
+    submitted_at: "2026-09-15T08:30:00",
+    ...overrides,
+  };
+}
+
 async function mountPage() {
   const wrapper = mount(ProductScreeningPage, { global: { plugins: [ElementPlus] } });
   await flushPromises();
@@ -51,7 +71,10 @@ describe("ProductScreeningPage", () => {
   beforeEach(() => {
     listProducts.mockReset();
     getProduct.mockReset();
+    listAdvisoryRequests.mockReset();
+    submitAdvisoryRequest.mockReset();
     listProducts.mockResolvedValue({ products: [makeProduct()] });
+    listAdvisoryRequests.mockResolvedValue({ requests: [] });
   });
 
   afterEach(() => {
@@ -107,6 +130,48 @@ describe("ProductScreeningPage", () => {
     expect(button.attributes("disabled")).toBeUndefined();
     await button.trigger("click");
     expect(wrapper.get('button[name="request-advisory"]').text()).toContain("请顾问出具方案");
+  });
+
+  it("submits a 方案请求 under the current filters and shows the resulting status", async () => {
+    submitAdvisoryRequest.mockResolvedValue(makeRequest());
+    const wrapper = await mountPage();
+
+    await wrapper.get('select[name="product_type"]').setValue("债券基金");
+    await wrapper.get('button[name="request-advisory"]').trigger("click");
+    await flushPromises();
+
+    expect(submitAdvisoryRequest).toHaveBeenCalledWith({ product_type: "债券基金" });
+    const panel = wrapper.get('[data-testid="advisory-request"]').text();
+    expect(panel).toContain("待处理");
+    expect(panel).toContain("AR20260915A1B2C3");
+    expect(panel).toContain("债券基金");
+  });
+
+  it("shows the status of a 方案请求 submitted earlier", async () => {
+    listAdvisoryRequests.mockResolvedValue({
+      requests: [
+        makeRequest({ status: "处理中" }),
+        makeRequest({ id: 2, request_no: "AR20260914AAAAAA", status: "已完成" }),
+      ],
+    });
+    const wrapper = await mountPage();
+
+    expect(submitAdvisoryRequest).not.toHaveBeenCalled();
+    const panel = wrapper.get('[data-testid="advisory-request"]').text();
+    expect(panel).toContain("处理中");
+    expect(panel).toContain("AR20260915A1B2C3");
+  });
+
+  it("surfaces a failure to submit the 方案请求", async () => {
+    submitAdvisoryRequest.mockRejectedValue(
+      new ApiError({ code: 1002, message: "方案请求提交失败", data: null, trace_id: "" }),
+    );
+    const wrapper = await mountPage();
+
+    await wrapper.get('button[name="request-advisory"]').trigger("click");
+    await flushPromises();
+
+    expect(wrapper.get('[data-testid="advisory-error"]').text()).toContain("方案请求提交失败");
   });
 
   it("explains that empty results come from filters that are too strict", async () => {

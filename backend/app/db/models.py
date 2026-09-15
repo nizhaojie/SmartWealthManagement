@@ -309,6 +309,32 @@ class WorkOrder(Base):
     )
 
 
+class AdvisoryRequest(Base):
+    __tablename__ = "biz_advisory_request"
+    __table_args__ = (
+        Index("ix_advisory_request_customer_fingerprint", "customer_id", "condition_fingerprint"),
+        CheckConstraint(
+            "status IN ('待处理','处理中','已完成','已关闭')",
+            name="ck_advisory_request_status",
+        ),
+        {"comment": "方案请求"},
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    request_no: Mapped[str] = mapped_column(String(32), unique=True, comment="请求编号")
+    customer_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("sys_customer.id"), comment="客户标识"
+    )
+    status: Mapped[str] = mapped_column(String(16), comment="请求状态")
+    filters: Mapped[dict] = mapped_column(JSON, comment="触发它的筛选条件")
+    condition_fingerprint: Mapped[str] = mapped_column(String(64), comment="筛选条件指纹")
+    submitted_at: Mapped[datetime] = mapped_column(DateTime, comment="提交时间")
+    create_time: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    update_time: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now()
+    )
+
+
 class ConversationArchive(Base):
     __tablename__ = "conversation_archive"
     __table_args__ = (

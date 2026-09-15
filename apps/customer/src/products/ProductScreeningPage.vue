@@ -1,6 +1,8 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from "vue";
+import { computed, onMounted, reactive, ref } from "vue";
 import { ApiError } from "@wealth/shared";
+import { listAdvisoryRequests, submitAdvisoryRequest } from "../advisory/api";
+import type { AdvisoryRequest } from "../advisory/types";
 import { getProduct, listProducts } from "./api";
 import type { Product, ProductFilters } from "./types";
 
@@ -19,11 +21,40 @@ const filters = reactive<ProductFilters>({
   max_term_days: "",
 });
 
+const STATUS_HINTS: Record<string, string> = {
+  待处理: "顾问尚未开始处理",
+  处理中: "顾问正在处理",
+  已完成: "顾问已出具方案",
+  已关闭: "该请求已关闭",
+};
+
+const FILTER_LABELS: Record<string, string> = {
+  product_type: "产品类型",
+  risk_level: "产品风险等级",
+  min_amount: "起投金额（上限）",
+  min_expected_return: "业绩基准（下限）",
+  max_term_days: "期限（天，上限）",
+};
+
 const products = ref<Product[]>([]);
 const loading = ref(true);
 const errorMessage = ref("");
 const selected = ref<Product | null>(null);
 const detailError = ref("");
+const advisoryRequests = ref<AdvisoryRequest[]>([]);
+const advisoryError = ref("");
+
+const latestAdvisoryRequest = computed<AdvisoryRequest | null>(
+  () => advisoryRequests.value[0] ?? null,
+);
+
+const advisoryCondition = computed<string>(() => {
+  const request = latestAdvisoryRequest.value;
+  if (!request) return "";
+  return Object.entries(request.filters)
+    .map(([key, value]) => `${FILTER_LABELS[key] ?? key}：${value}`)
+    .join("；");
+});
 
 function filledFilters(): ProductFilters {
   const next: ProductFilters = {};
@@ -60,11 +91,32 @@ async function openDetail(product: Product) {
   }
 }
 
-function requestAdvisory() {
-  // 方案请求的提交与状态在下一张 ticket。
+async function loadAdvisoryRequests() {
+  try {
+    const payload = await listAdvisoryRequests();
+    advisoryRequests.value = payload.requests;
+  } catch {
+    advisoryRequests.value = [];
+  }
 }
 
-onMounted(loadProducts);
+async function requestAdvisory() {
+  advisoryError.value = "";
+  try {
+    const request = await submitAdvisoryRequest(filledFilters());
+    advisoryRequests.value = [
+      request,
+      ...advisoryRequests.value.filter((row) => row.request_no !== request.request_no),
+    ];
+  } catch (error) {
+    advisoryError.value = error instanceof ApiError ? error.message : "方案请求提交失败";
+  }
+}
+
+onMounted(async () => {
+  await loadProducts();
+  await loadAdvisoryRequests();
+});
 </script>
 
 <template>
@@ -145,6 +197,19 @@ onMounted(loadProducts);
     </div>
 
     <el-button name="request-advisory" @click="requestAdvisory">请顾问出具方案</el-button>
+
+    <p v-if="advisoryError" role="alert" data-testid="advisory-error">{{ advisoryError }}</p>
+
+    <section v-if="latestAdvisoryRequest" data-testid="advisory-request">
+      <h2>我的方案请求</h2>
+      <p>
+        状态：<strong data-testid="advisory-status">{{ latestAdvisoryRequest.status }}</strong>
+        <span>{{ STATUS_HINTS[latestAdvisoryRequest.status] }}</span>
+      </p>
+      <p>请求编号：{{ latestAdvisoryRequest.request_no }}</p>
+      <p>提交时间：{{ latestAdvisoryRequest.submitted_at }}</p>
+      <p v-if="advisoryCondition">触发条件：{{ advisoryCondition }}</p>
+    </section>
 
     <section v-if="selected" data-testid="product-detail">
       <h2>产品详情</h2>

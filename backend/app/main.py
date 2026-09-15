@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from app.api.auth import router as auth_router
 from app.api.health import router as health_router
 from app.exceptions import AppError
 from app.http import fail
@@ -85,3 +86,4 @@ async def handle_uncaught_error(_request: Request, _exc: Exception):
 
 
 app.include_router(health_router)
+app.include_router(auth_router)

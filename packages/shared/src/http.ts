@@ -26,30 +26,61 @@ export function unwrap<T>(envelope: Envelope<T>): T {
 
 export type HttpClient = {
   get<T>(path: string): Promise<T>;
+  post<T>(path: string, body?: unknown): Promise<T>;
 };
 
-export function createHttpClient(options: {
+export type HttpClientOptions = {
   baseUrl: string;
   fetchImpl?: typeof fetch;
-}): HttpClient {
+  getToken?: () => string | null | undefined;
+  onUnauthorized?: () => void;
+};
+
+export function createHttpClient(options: HttpClientOptions): HttpClient {
   const fetchImpl = options.fetchImpl ?? fetch;
   const prefix = options.baseUrl.replace(/\/$/, "");
 
+  async function request<T>(method: "GET" | "POST", path: string, body?: unknown): Promise<T> {
+    const headers: Record<string, string> = {};
+    const token = options.getToken?.();
+    if (token) {
+      headers["Authorization"] = `Bearer ${token}`;
+    }
+    if (body !== undefined) {
+      headers["Content-Type"] = "application/json";
+    }
+
+    const response = await fetchImpl(`${prefix}${path}`, {
+      method,
+      headers,
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    });
+
+    let envelope: Envelope<T>;
+    try {
+      envelope = (await response.json()) as Envelope<T>;
+    } catch {
+      throw new ApiError({
+        code: response.ok ? 500 : response.status,
+        message: "服务内部错误",
+        data: null,
+        trace_id: "",
+      });
+    }
+
+    if (envelope.code === 401) {
+      options.onUnauthorized?.();
+    }
+
+    return unwrap(envelope);
+  }
+
   return {
-    async get<T>(path: string): Promise<T> {
-      const response = await fetchImpl(`${prefix}${path}`);
-      let envelope: Envelope<T>;
-      try {
-        envelope = (await response.json()) as Envelope<T>;
-      } catch {
-        throw new ApiError({
-          code: response.ok ? 500 : response.status,
-          message: "服务内部错误",
-          data: null,
-          trace_id: "",
-        });
-      }
-      return unwrap(envelope);
+    get<T>(path: string): Promise<T> {
+      return request<T>("GET", path);
+    },
+    post<T>(path: string, body?: unknown): Promise<T> {
+      return request<T>("POST", path, body);
     },
   };
 }

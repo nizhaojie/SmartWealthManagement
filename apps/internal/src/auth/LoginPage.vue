@@ -1,0 +1,37 @@
+<script setup lang="ts">
+import { ref } from "vue";
+import { login } from "./store";
+
+const username = ref("");
+const password = ref("");
+const errorMessage = ref("");
+const submitting = ref(false);
+
+async function onSubmit() {
+  errorMessage.value = "";
+  submitting.value = true;
+  try {
+    await login(username.value, password.value);
+  } catch {
+    errorMessage.value = "账号或密码错误";
+  } finally {
+    submitting.value = false;
+  }
+}
+</script>
+
+<template>
+  <el-card>
+    <h1>员工登录</h1>
+    <form @submit.prevent="onSubmit">
+      <el-form-item label="账号">
+        <el-input v-model="username" name="username" />
+      </el-form-item>
+      <el-form-item label="密码">
+        <el-input v-model="password" name="password" type="password" />
+      </el-form-item>
+      <p v-if="errorMessage" role="alert">{{ errorMessage }}</p>
+      <el-button type="primary" native-type="submit" :loading="submitting">登录</el-button>
+    </form>
+  </el-card>
+</template>

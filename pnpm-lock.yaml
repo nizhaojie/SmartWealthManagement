@@ -81,6 +81,10 @@ importers:
         version: 3.3.11(typescript@5.9.3)
 
   packages/shared:
+    dependencies:
+      vue:
+        specifier: ^3.5.21
+        version: 3.5.42(typescript@5.9.3)
     devDependencies:
       typescript:
         specifier: ~5.9.2

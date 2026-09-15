@@ -10,6 +10,8 @@ from app.api.auth import router as auth_router
 from app.api.chat import router as chat_router
 from app.api.health import router as health_router
 from app.api.knowledge import router as knowledge_router
+from app.api.customer_profile import internal_router as customer_profile_internal_router
+from app.api.customer_profile import router as customer_profile_router
 from app.api.risk_assessment import internal_router as risk_assessment_internal_router
 from app.api.risk_assessment import router as risk_assessment_router
 from app.exceptions import AppError
@@ -95,3 +97,5 @@ app.include_router(knowledge_router)
 app.include_router(chat_router)
 app.include_router(risk_assessment_router)
 app.include_router(risk_assessment_internal_router)
+app.include_router(customer_profile_router)
+app.include_router(customer_profile_internal_router)

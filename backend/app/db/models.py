@@ -88,6 +88,50 @@ class CustomerProfile(Base):
     )
 
 
+class ProfileTag(Base):
+    __tablename__ = "fin_profile_tag"
+    __table_args__ = (
+        UniqueConstraint("customer_id", "tag_key", name="uk_profile_tag_customer_key"),
+        {"comment": "客户画像标签"},
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    customer_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("sys_customer.id"), comment="客户标识"
+    )
+    tag_key: Mapped[str] = mapped_column(String(32), comment="标签键")
+    tag_value: Mapped[object] = mapped_column(JSON, comment="标签值")
+    source: Mapped[str] = mapped_column(String(32), comment="来源")
+    evidence_count: Mapped[int] = mapped_column(comment="证据条数")
+    observed_at: Mapped[datetime] = mapped_column(DateTime, comment="写入时间")
+    reason: Mapped[str | None] = mapped_column(Text, comment="修正理由")
+    create_time: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    update_time: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class ProfileTagConflict(Base):
+    __tablename__ = "fin_profile_tag_conflict"
+    __table_args__ = (
+        Index("ix_profile_tag_conflict_customer_key", "customer_id", "tag_key"),
+        {"comment": "客户画像标签冲突记录"},
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    customer_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("sys_customer.id"), comment="客户标识"
+    )
+    tag_key: Mapped[str] = mapped_column(String(32), comment="标签键")
+    old_value: Mapped[object] = mapped_column(JSON, comment="旧值")
+    old_source: Mapped[str] = mapped_column(String(32), comment="旧来源")
+    new_value: Mapped[object] = mapped_column(JSON, comment="新值")
+    new_source: Mapped[str] = mapped_column(String(32), comment="新来源")
+    changed_at: Mapped[datetime] = mapped_column(DateTime, comment="覆盖时间")
+    reason: Mapped[str | None] = mapped_column(Text, comment="修正理由")
+    create_time: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
 class Product(Base):
     __tablename__ = "fin_product"
     __table_args__ = (

@@ -5,6 +5,8 @@ import redis
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.customer_profile.confidence import SOURCE_QUESTIONNAIRE
+from app.customer_profile.service import write_tag
 from app.db.models import CustomerProfile, RiskAssessment
 from app.exceptions import AppError
 from app.risk_assessment.grading import grade_total_score, valid_until_from
@@ -107,10 +109,16 @@ def submit_assessment(
     profile = db.scalar(select(CustomerProfile).where(CustomerProfile.customer_id == customer_id))
     if profile is None:
         raise AppError(404, PROFILE_MISSING_MESSAGE)
-    profile.risk_level = risk_level
     profile.risk_score = total
-
-    db.commit()
+    write_tag(
+        db,
+        cache,
+        customer_id=customer_id,
+        tag_key="risk_level",
+        value=risk_level,
+        source=SOURCE_QUESTIONNAIRE,
+        now=now,
+    )
     clear_draft(cache, customer_id=customer_id)
     return customer_visible_result(risk_level=risk_level, valid_until=valid_until)
 

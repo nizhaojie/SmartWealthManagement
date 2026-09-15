@@ -2,6 +2,7 @@
 import { computed } from "vue";
 import { currentEmployee } from "../auth/store";
 import KnowledgeWorkspace from "../knowledge/KnowledgeWorkspace.vue";
+import ProfileWorkspace from "../profile/ProfileWorkspace.vue";
 import ModuleForbidden from "./ModuleForbidden.vue";
 import ModulePlaceholder from "./ModulePlaceholder.vue";
 import { useCurrentModule } from "./useCurrentModule";
@@ -21,5 +22,6 @@ const allowed = computed(() => {
 <template>
   <ModuleForbidden v-if="module && !allowed" :module="module" />
   <KnowledgeWorkspace v-else-if="module?.id === 'knowledge'" />
+  <ProfileWorkspace v-else-if="module?.id === 'advisory'" />
   <ModulePlaceholder v-else-if="module" :module="module" />
 </template>

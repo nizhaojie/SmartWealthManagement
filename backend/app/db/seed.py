@@ -6,12 +6,14 @@ from argon2 import PasswordHasher
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
+from app.customer_profile.confidence import SOURCE_QUESTIONNAIRE
 from app.db.models import (
     Customer,
     CustomerProfile,
     Employee,
     Holding,
     Product,
+    ProfileTag,
     RiskAssessment,
     Transaction,
 )
@@ -372,6 +374,8 @@ def _seed_customers(
                 )
             )
 
+        _seed_profile_tags(session, customer.id, item)
+
         if session.scalar(
             select(RiskAssessment).where(
                 RiskAssessment.customer_id == customer.id,
@@ -432,6 +436,35 @@ def _seed_customers(
                     create_time=item["trade_at"],
                 )
             )
+
+
+def _seed_profile_tags(session: Session, customer_id: int, item: CustomerSeed) -> None:
+    tags = (
+        ("risk_level", item["risk_level"]),
+        ("investment_experience", item["investment_experience"]),
+        ("annual_income_range", item["annual_income_range"]),
+        ("total_assets", str(item["total_assets"])),
+        ("target_allocation", item["target_allocation"]),
+        ("product_preference", item["product_preference"]),
+    )
+    for tag_key, value in tags:
+        if session.scalar(
+            select(ProfileTag).where(
+                ProfileTag.customer_id == customer_id,
+                ProfileTag.tag_key == tag_key,
+            )
+        ) is not None:
+            continue
+        session.add(
+            ProfileTag(
+                customer_id=customer_id,
+                tag_key=tag_key,
+                tag_value=value,
+                source=SOURCE_QUESTIONNAIRE,
+                evidence_count=0,
+                observed_at=item["computed_at"],
+            )
+        )
 
 
 if __name__ == "__main__":

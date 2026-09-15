@@ -27,6 +27,8 @@ export function unwrap<T>(envelope: Envelope<T>): T {
 export type HttpClient = {
   get<T>(path: string): Promise<T>;
   post<T>(path: string, body?: unknown): Promise<T>;
+  postForm<T>(path: string, form: FormData): Promise<T>;
+  delete<T>(path: string): Promise<T>;
 };
 
 export type HttpClientOptions = {
@@ -40,20 +42,26 @@ export function createHttpClient(options: HttpClientOptions): HttpClient {
   const fetchImpl = options.fetchImpl ?? fetch;
   const prefix = options.baseUrl.replace(/\/$/, "");
 
-  async function request<T>(method: "GET" | "POST", path: string, body?: unknown): Promise<T> {
+  async function request<T>(
+    method: "GET" | "POST" | "DELETE",
+    path: string,
+    body?: unknown,
+  ): Promise<T> {
     const headers: Record<string, string> = {};
     const token = options.getToken?.();
     if (token) {
       headers["Authorization"] = `Bearer ${token}`;
     }
-    if (body !== undefined) {
+
+    const isFormData = body instanceof FormData;
+    if (body !== undefined && !isFormData) {
       headers["Content-Type"] = "application/json";
     }
 
     const response = await fetchImpl(`${prefix}${path}`, {
       method,
       headers,
-      body: body !== undefined ? JSON.stringify(body) : undefined,
+      body: body === undefined ? undefined : isFormData ? body : JSON.stringify(body),
     });
 
     let envelope: Envelope<T>;
@@ -81,6 +89,12 @@ export function createHttpClient(options: HttpClientOptions): HttpClient {
     },
     post<T>(path: string, body?: unknown): Promise<T> {
       return request<T>("POST", path, body);
+    },
+    postForm<T>(path: string, form: FormData): Promise<T> {
+      return request<T>("POST", path, form);
+    },
+    delete<T>(path: string): Promise<T> {
+      return request<T>("DELETE", path);
     },
   };
 }

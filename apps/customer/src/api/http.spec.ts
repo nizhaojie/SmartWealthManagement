@@ -52,4 +52,30 @@ describe("createHttpClient", () => {
     const [, init] = vi.mocked(fetchImpl).mock.calls[0];
     expect((init?.headers as Record<string, string>)["Authorization"]).toBe("Bearer the-token");
   });
+
+  it("posts a FormData body without setting a Content-Type header", async () => {
+    const fetchImpl = fakeFetch({ code: 200, message: "success", data: { ok: true }, trace_id: "t" });
+    const http = createHttpClient({ baseUrl: "", fetchImpl });
+    const form = new FormData();
+    form.append("file", new Blob(["hello"]), "hello.txt");
+
+    await http.postForm("/api/internal/knowledge/documents", form);
+
+    const [url, init] = vi.mocked(fetchImpl).mock.calls[0];
+    expect(url).toBe("/api/internal/knowledge/documents");
+    expect(init?.method).toBe("POST");
+    expect(init?.body).toBe(form);
+    expect((init?.headers as Record<string, string>)["Content-Type"]).toBeUndefined();
+  });
+
+  it("sends a DELETE request and unwraps the response", async () => {
+    const fetchImpl = fakeFetch({ code: 200, message: "success", data: { deleted: true }, trace_id: "t" });
+    const http = createHttpClient({ baseUrl: "", fetchImpl });
+
+    const result = await http.delete("/api/internal/knowledge/documents/1");
+
+    const [, init] = vi.mocked(fetchImpl).mock.calls[0];
+    expect(init?.method).toBe("DELETE");
+    expect(result).toEqual({ deleted: true });
+  });
 });

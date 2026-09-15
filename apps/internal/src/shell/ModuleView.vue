@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { currentEmployee } from "../auth/store";
+import KnowledgePage from "../knowledge/KnowledgePage.vue";
 import ModuleForbidden from "./ModuleForbidden.vue";
 import ModulePlaceholder from "./ModulePlaceholder.vue";
 import { useCurrentModule } from "./useCurrentModule";
@@ -19,5 +20,6 @@ const allowed = computed(() => {
 
 <template>
   <ModuleForbidden v-if="module && !allowed" :module="module" />
+  <KnowledgePage v-else-if="module?.id === 'knowledge'" />
   <ModulePlaceholder v-else-if="module" :module="module" />
 </template>

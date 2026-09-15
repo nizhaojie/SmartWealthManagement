@@ -272,6 +272,8 @@ class KnowledgeMeta(Base):
     milvus_collection: Mapped[str | None] = mapped_column(String(128), comment="向量集合名")
     version: Mapped[str] = mapped_column(String(32), comment="版本")
     status: Mapped[str] = mapped_column(String(16), comment="状态")
+    stage: Mapped[str | None] = mapped_column(String(16), comment="处理阶段")
+    failure_reason: Mapped[str | None] = mapped_column(Text, comment="失败原因")
     chunk_count: Mapped[int] = mapped_column(default=0, comment="分块数")
     expire_at: Mapped[datetime | None] = mapped_column(DateTime, comment="过期时间")
     create_time: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), comment="入库时间")

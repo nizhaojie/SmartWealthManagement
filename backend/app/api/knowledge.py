@@ -1,6 +1,7 @@
+from datetime import datetime, timezone
 from typing import cast
 
-from fastapi import APIRouter, Depends, Form, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, Form, UploadFile
 from sqlalchemy.orm import Session
 
 from app.auth.dependencies import AuthContext, require_internal
@@ -10,11 +11,19 @@ from app.http import ok
 from app.knowledge.schemas import (
     ChunkHitResponse,
     DocumentResponse,
+    DocumentStatus,
+    IngestStage,
     KnowledgeType,
     SearchRequest,
     SearchResponse,
 )
-from app.knowledge.service import delete_document, ingest_document, search_chunks
+from app.knowledge.service import (
+    create_pending_document,
+    delete_document,
+    list_documents,
+    process_ingestion,
+    search_chunks,
+)
 from app.settings import Settings, get_settings
 
 router = APIRouter(prefix="/api/internal/knowledge")
@@ -23,15 +32,22 @@ router = APIRouter(prefix="/api/internal/knowledge")
 def _document_response(meta: KnowledgeMeta) -> dict:
     return DocumentResponse(
         knowledge_id=meta.id,
-        title=meta.title,
         knowledge_type=cast(KnowledgeType, meta.knowledge_type),
-        status=meta.status,
+        title=meta.title,
+        source_file=meta.source_file,
+        version=meta.version,
+        status=cast(DocumentStatus, meta.status),
         chunk_count=meta.chunk_count,
-    ).model_dump()
+        expire_at=meta.expire_at,
+        create_time=meta.create_time,
+        stage=cast("IngestStage | None", meta.stage),
+        failure_reason=meta.failure_reason,
+    ).model_dump(mode="json")
 
 
 @router.post("/documents")
 def upload_document(
+    background_tasks: BackgroundTasks,
     file: UploadFile,
     knowledge_type: KnowledgeType = Form(...),
     title: str | None = Form(default=None),
@@ -40,15 +56,35 @@ def upload_document(
     _auth: AuthContext = Depends(require_internal),
 ):
     content = file.file.read()
-    meta = ingest_document(
+    filename = file.filename or ""
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    meta = create_pending_document(
+        db, filename=filename, knowledge_type=knowledge_type, title=title, now=now
+    )
+    # `db` 是本次请求注入的 session，直接交给后台任务而不是另开一个：background_tasks
+    # 在 yield 依赖的收尾代码之前执行，此时这个 session 还没被关闭。姊妹项目
+    # app/api/customer/chat.py::_persist_turn 用的是同一个取舍。
+    background_tasks.add_task(
+        process_ingestion,
         db,
         settings,
-        filename=file.filename or "",
+        meta.id,
+        filename=filename,
         content=content,
         knowledge_type=knowledge_type,
-        title=title,
     )
     return ok(_document_response(meta))
+
+
+@router.get("/documents")
+def list_knowledge_documents(
+    knowledge_type: KnowledgeType | None = None,
+    status: str | None = None,
+    db: Session = Depends(get_session),
+    _auth: AuthContext = Depends(require_internal),
+):
+    metas = list_documents(db, knowledge_type=knowledge_type, status=status)
+    return ok([_document_response(meta) for meta in metas])
 
 
 @router.delete("/documents/{knowledge_id}")

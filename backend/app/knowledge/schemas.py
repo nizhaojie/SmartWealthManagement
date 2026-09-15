@@ -1,16 +1,25 @@
+from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel
 
 KnowledgeType = Literal["FAQ", "产品", "政策"]
+DocumentStatus = Literal["processing", "active", "failed", "expired"]
+IngestStage = Literal["parse", "chunk", "embed", "store"]
 
 
 class DocumentResponse(BaseModel):
     knowledge_id: int
-    title: str
     knowledge_type: KnowledgeType
-    status: str
+    title: str
+    source_file: str
+    version: str
+    status: DocumentStatus
     chunk_count: int
+    expire_at: datetime | None
+    create_time: datetime
+    stage: IngestStage | None = None
+    failure_reason: str | None = None
 
 
 class SearchRequest(BaseModel):

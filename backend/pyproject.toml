@@ -17,6 +17,8 @@ dependencies = [
     "pymilvus>=2.4.9",
     "minio>=7.2.0",
     "neo4j>=5.26.0",
+    "python-docx>=1.1.0",
+    "python-multipart>=0.0.12",
 ]
 
 [project.optional-dependencies]

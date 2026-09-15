@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, delete, select
 from sqlalchemy.orm import Session as OrmSession
 
-from app.db.models import Customer, CustomerProfile, RiskAssessment
+from app.db.models import Customer, CustomerProfile, RiskAssessment, SuitabilityDecision
 from app.risk_assessment.service import ASSESSOR_TYPE
 from app.settings import get_settings
 
@@ -28,6 +28,7 @@ CUSTOMER_HIDDEN_FIELDS = {
 
 def _purge_self_assessments_and_restore_wangc1(engine) -> None:
     with OrmSession(engine) as session:
+        session.execute(delete(SuitabilityDecision))
         session.execute(delete(RiskAssessment).where(RiskAssessment.assessor_type == ASSESSOR_TYPE))
         customer = session.scalar(select(Customer).where(Customer.username == CUSTOMER_USERNAME))
         assert customer is not None

@@ -234,6 +234,30 @@ class RiskAssessment(Base):
     create_time: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 
+class SuitabilityDecision(Base):
+    __tablename__ = "fin_suitability_decision"
+    __table_args__ = (
+        Index("ix_suitability_decision_customer_id", "customer_id"),
+        CheckConstraint(
+            "customer_risk_level IN ('C1','C2','C3','C4','C5')",
+            name="ck_suitability_customer_risk_level",
+        ),
+        {"comment": "适当性判定记录"},
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    customer_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("sys_customer.id"), comment="客户标识"
+    )
+    assessment_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("fin_risk_assessment.id"), comment="依据的评测"
+    )
+    customer_risk_level: Mapped[str] = mapped_column(String(8), comment="判定时的风险承受等级")
+    allowed_product_risk_levels: Mapped[list] = mapped_column(JSON, comment="允许的产品风险等级")
+    decided_at: Mapped[datetime] = mapped_column(DateTime, comment="判定时间")
+    create_time: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
 class RiskAlert(Base):
     __tablename__ = "fin_risk_alert"
     __table_args__ = {"comment": "预警"}

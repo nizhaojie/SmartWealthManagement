@@ -16,6 +16,7 @@ from app.db.models import (
     ProfileTag,
     ProfileTagConflict,
     RiskAssessment,
+    SuitabilityDecision,
     Transaction,
 )
 from app.main import app
@@ -96,6 +97,7 @@ def _purge_profile_writes(engine) -> None:
             select(Customer).where(Customer.username.not_in(SEEDED_USERNAMES))
         ).all()
         extra_ids = [row.id for row in extras]
+        session.execute(delete(SuitabilityDecision))
         session.execute(delete(ProfileTagConflict))
         session.execute(delete(ProfileTag))
         session.execute(delete(RiskAssessment).where(RiskAssessment.assessor_type == ASSESSOR_TYPE))

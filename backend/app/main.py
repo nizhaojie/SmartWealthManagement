@@ -14,6 +14,8 @@ from app.api.customer_profile import internal_router as customer_profile_interna
 from app.api.customer_profile import router as customer_profile_router
 from app.api.risk_assessment import internal_router as risk_assessment_internal_router
 from app.api.risk_assessment import router as risk_assessment_router
+from app.api.suitability import internal_router as suitability_internal_router
+from app.api.suitability import router as suitability_router
 from app.exceptions import AppError
 from app.http import fail
 from app.logging_setup import setup_logging
@@ -99,3 +101,5 @@ app.include_router(risk_assessment_router)
 app.include_router(risk_assessment_internal_router)
 app.include_router(customer_profile_router)
 app.include_router(customer_profile_internal_router)
+app.include_router(suitability_router)
+app.include_router(suitability_internal_router)

@@ -4,10 +4,18 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App.vue";
 import { login as loginRequest, logout as logoutRequest } from "./auth/api";
 import { clearTokens } from "./auth/tokenStore";
+import { getCurrentAssessment } from "./risk-assessment/api";
 
 vi.mock("./auth/api", () => ({
   login: vi.fn(),
   logout: vi.fn(),
+}));
+
+vi.mock("./risk-assessment/api", () => ({
+  getCurrentAssessment: vi.fn(),
+  getQuestionnaire: vi.fn(),
+  saveDraft: vi.fn(),
+  submitAssessment: vi.fn(),
 }));
 
 async function submitLogin(wrapper: ReturnType<typeof mount>, username: string, password: string) {
@@ -22,6 +30,7 @@ describe("App", () => {
     clearTokens();
     vi.mocked(loginRequest).mockReset();
     vi.mocked(logoutRequest).mockReset();
+    vi.mocked(getCurrentAssessment).mockReset();
   });
 
   it("directs to the login page when not authenticated", () => {
@@ -62,10 +71,30 @@ describe("App", () => {
     const wrapper = mount(App, { global: { plugins: [ElementPlus] } });
     await submitLogin(wrapper, "wangc1", "Test@1234");
 
-    await wrapper.find("button").trigger("click");
+    await wrapper.get('button[name="logout"]').trigger("click");
     await flushPromises();
 
     expect(logoutRequest).toHaveBeenCalled();
     expect(wrapper.text()).toContain("客户登录");
+  });
+
+  it("opens the risk assessment result from customer navigation", async () => {
+    vi.mocked(loginRequest).mockResolvedValue({
+      access_token: "access-token",
+      refresh_token: "refresh-token",
+    });
+    vi.mocked(getCurrentAssessment).mockResolvedValue({
+      risk_level: "C1",
+      valid_until: "2027-03-15",
+    });
+    const wrapper = mount(App, { global: { plugins: [ElementPlus] } });
+    await submitLogin(wrapper, "wangc1", "Test@1234");
+
+    await wrapper.get('button[name="nav-risk-assessment"]').trigger("click");
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("保守型");
+    expect(wrapper.text()).toContain("2027-03-15");
+    expect(wrapper.text()).not.toContain("置信度");
   });
 });

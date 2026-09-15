@@ -68,6 +68,18 @@ describe("createHttpClient", () => {
     expect((init?.headers as Record<string, string>)["Content-Type"]).toBeUndefined();
   });
 
+  it("sends a PUT request with a JSON body", async () => {
+    const fetchImpl = fakeFetch({ code: 200, message: "success", data: { saved: true }, trace_id: "t" });
+    const http = createHttpClient({ baseUrl: "", fetchImpl });
+
+    const result = await http.put("/api/customer/risk-assessment/draft", { answers: { q01: "A" } });
+
+    const [, init] = vi.mocked(fetchImpl).mock.calls[0];
+    expect(init?.method).toBe("PUT");
+    expect(init?.body).toBe(JSON.stringify({ answers: { q01: "A" } }));
+    expect(result).toEqual({ saved: true });
+  });
+
   it("sends a DELETE request and unwraps the response", async () => {
     const fetchImpl = fakeFetch({ code: 200, message: "success", data: { deleted: true }, trace_id: "t" });
     const http = createHttpClient({ baseUrl: "", fetchImpl });

@@ -26,6 +26,7 @@ export function unwrap<T>(envelope: Envelope<T>): T {
 
 export type HttpClient = {
   get<T>(path: string): Promise<T>;
+  put<T>(path: string, body?: unknown): Promise<T>;
   post<T>(path: string, body?: unknown): Promise<T>;
   postForm<T>(path: string, form: FormData): Promise<T>;
   delete<T>(path: string): Promise<T>;
@@ -43,7 +44,7 @@ export function createHttpClient(options: HttpClientOptions): HttpClient {
   const prefix = options.baseUrl.replace(/\/$/, "");
 
   async function request<T>(
-    method: "GET" | "POST" | "DELETE",
+    method: "GET" | "PUT" | "POST" | "DELETE",
     path: string,
     body?: unknown,
   ): Promise<T> {
@@ -86,6 +87,9 @@ export function createHttpClient(options: HttpClientOptions): HttpClient {
   return {
     get<T>(path: string): Promise<T> {
       return request<T>("GET", path);
+    },
+    put<T>(path: string, body?: unknown): Promise<T> {
+      return request<T>("PUT", path, body);
     },
     post<T>(path: string, body?: unknown): Promise<T> {
       return request<T>("POST", path, body);

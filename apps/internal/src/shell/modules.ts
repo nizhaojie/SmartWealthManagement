@@ -26,6 +26,13 @@ export const MODULES: ModuleDefinition[] = [
     roles: ALL_ROLES,
   },
   {
+    id: "profile",
+    path: "/profile",
+    label: "客户画像",
+    description: "查看客户的风险承受等级、投资经验、资产规模、目标配置与产品偏好。",
+    roles: [ADVISOR],
+  },
+  {
     id: "advisory",
     path: "/advisory",
     label: "投顾助手",

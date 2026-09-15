@@ -7,14 +7,16 @@ import { currentEmployee } from "../auth/store";
 import ModuleView from "./ModuleView.vue";
 import { MODULES } from "./modules";
 
-const { listCustomers, getCustomerProfile } = vi.hoisted(() => ({
+const { listCustomers, getCustomerProfile, listRiskAssessments } = vi.hoisted(() => ({
   listCustomers: vi.fn(),
   getCustomerProfile: vi.fn(),
+  listRiskAssessments: vi.fn(),
 }));
 
 vi.mock("../profile/api", () => ({
   listCustomers,
   getCustomerProfile,
+  listRiskAssessments,
   writeProfileTag: vi.fn(),
 }));
 
@@ -39,7 +41,9 @@ describe("ModuleView", () => {
   beforeEach(() => {
     listCustomers.mockReset();
     getCustomerProfile.mockReset();
+    listRiskAssessments.mockReset();
     listCustomers.mockResolvedValue([]);
+    listRiskAssessments.mockResolvedValue([]);
   });
 
   afterEach(() => {
@@ -55,21 +59,34 @@ describe("ModuleView", () => {
     expect(wrapper.text()).toContain("数据分析");
   });
 
-  it("opens the customer profile workspace in the advisory module", async () => {
+  it("opens the customer profile workspace on its own route", async () => {
     currentEmployee.value = { real_name: "陈顾问", employee_role: ADVISOR };
 
-    const wrapper = await mountModuleViewAt("/advisory");
+    const wrapper = await mountModuleViewAt("/profile");
 
     expect(wrapper.text()).toContain("选择一位客户查看画像");
     expect(wrapper.text()).not.toContain("该模块尚未实现");
   });
 
-  it("explicitly rejects a role visiting a route it has no access to, instead of hiding it", async () => {
-    currentEmployee.value = { real_name: "周风控", employee_role: RISK_OFFICER };
+  it("leaves the advisory module as a placeholder until that slice lands", async () => {
+    currentEmployee.value = { real_name: "陈顾问", employee_role: ADVISOR };
 
     const wrapper = await mountModuleViewAt("/advisory");
 
-    expect(wrapper.text()).toContain("无权访问");
-    expect(wrapper.text()).not.toContain("该模块尚未实现");
+    expect(wrapper.text()).toContain("该模块尚未实现");
+    expect(wrapper.text()).toContain("投顾助手");
+    expect(wrapper.text()).not.toContain("选择一位客户查看画像");
+  });
+
+  it("explicitly rejects a role visiting a route it has no access to, instead of hiding it", async () => {
+    currentEmployee.value = { real_name: "周风控", employee_role: RISK_OFFICER };
+
+    const advisory = await mountModuleViewAt("/advisory");
+    expect(advisory.text()).toContain("无权访问");
+    expect(advisory.text()).not.toContain("该模块尚未实现");
+
+    const profile = await mountModuleViewAt("/profile");
+    expect(profile.text()).toContain("无权访问");
+    expect(profile.text()).not.toContain("选择一位客户查看画像");
   });
 });

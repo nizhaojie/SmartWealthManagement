@@ -17,6 +17,10 @@ vi.mock("../knowledge/KnowledgeWorkspace.vue", () => ({
   default: { name: "KnowledgeWorkspace", template: "<div />" },
 }));
 
+vi.mock("../profile/ProfileWorkspace.vue", () => ({
+  default: { name: "ProfileWorkspace", template: "<div />" },
+}));
+
 function createShellRouter() {
   return createRouter({
     history: createMemoryHistory(),
@@ -54,6 +58,7 @@ describe("WorkbenchShell", () => {
     const advisorWrapper = await mountShellAt("/knowledge", ADVISOR);
     const advisorNav = advisorWrapper.find(".workbench-shell__aside").text();
     expect(advisorNav).toContain("投顾助手");
+    expect(advisorNav).toContain("客户画像");
     expect(advisorNav).not.toContain("风控监测");
     expect(advisorNav).not.toContain("客户关系");
 
@@ -61,12 +66,14 @@ describe("WorkbenchShell", () => {
     const riskNav = riskWrapper.find(".workbench-shell__aside").text();
     expect(riskNav).toContain("风控监测");
     expect(riskNav).not.toContain("投顾助手");
+    expect(riskNav).not.toContain("客户画像");
     expect(riskNav).not.toContain("客户关系");
 
     const managerWrapper = await mountShellAt("/knowledge", ACCOUNT_MANAGER);
     const managerNav = managerWrapper.find(".workbench-shell__aside").text();
     expect(managerNav).toContain("客户关系");
     expect(managerNav).not.toContain("投顾助手");
+    expect(managerNav).not.toContain("客户画像");
     expect(managerNav).not.toContain("风控监测");
   });
 

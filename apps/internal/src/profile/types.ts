@@ -46,6 +46,14 @@ export type CustomerProfileView = {
   judgement: Judgement;
 };
 
+export type RiskAssessmentRecord = {
+  id: number;
+  assessment_date: string;
+  risk_level: string;
+  total_score: number;
+  valid_until: string;
+};
+
 export type CustomerListItem = {
   id: number;
   username: string;

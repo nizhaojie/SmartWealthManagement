@@ -1,5 +1,5 @@
 import { http } from "../api/http";
-import type { CustomerListItem, CustomerProfileView } from "./types";
+import type { CustomerListItem, CustomerProfileView, RiskAssessmentRecord } from "./types";
 
 export function listCustomers(): Promise<CustomerListItem[]> {
   return http.get<CustomerListItem[]>("/api/internal/customers");
@@ -7,6 +7,10 @@ export function listCustomers(): Promise<CustomerListItem[]> {
 
 export function getCustomerProfile(customerId: number): Promise<CustomerProfileView> {
   return http.get<CustomerProfileView>(`/api/internal/customers/${customerId}/profile`);
+}
+
+export function listRiskAssessments(customerId: number): Promise<RiskAssessmentRecord[]> {
+  return http.get<RiskAssessmentRecord[]>(`/api/internal/customers/${customerId}/risk-assessments`);
 }
 
 export function writeProfileTag(input: {

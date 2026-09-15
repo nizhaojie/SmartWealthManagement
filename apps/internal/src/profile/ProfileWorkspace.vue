@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
-import { getCustomerProfile, listCustomers, writeProfileTag } from "./api";
+import { getCustomerProfile, listCustomers, listRiskAssessments, writeProfileTag } from "./api";
 import ProfilePanel from "./ProfilePanel.vue";
-import type { CustomerListItem, CustomerProfileView } from "./types";
+import type { CustomerListItem, CustomerProfileView, RiskAssessmentRecord } from "./types";
 
 const customers = ref<CustomerListItem[]>([]);
 const selectedId = ref<number | null>(null);
 const profile = ref<CustomerProfileView | null>(null);
+const assessments = ref<RiskAssessmentRecord[]>([]);
 const loadError = ref("");
 
 async function loadCustomers() {
@@ -25,9 +26,15 @@ async function selectCustomer(customerId: number) {
   selectedId.value = customerId;
   loadError.value = "";
   try {
-    profile.value = await getCustomerProfile(customerId);
+    const [nextProfile, nextAssessments] = await Promise.all([
+      getCustomerProfile(customerId),
+      listRiskAssessments(customerId),
+    ]);
+    profile.value = nextProfile;
+    assessments.value = nextAssessments;
   } catch (error) {
     profile.value = null;
+    assessments.value = [];
     loadError.value = error instanceof Error ? error.message : "加载客户画像失败";
   }
 }
@@ -67,7 +74,12 @@ onMounted(loadCustomers);
         <span>{{ customer.risk_level ?? "未评测" }} · {{ customer.customer_level }}</span>
       </button>
     </aside>
-    <ProfilePanel v-if="profile" :profile="profile" @correct="correctTag" />
+    <ProfilePanel
+      v-if="profile"
+      :profile="profile"
+      :assessments="assessments"
+      @correct="correctTag"
+    />
     <p v-else-if="!loadError" class="profile-workspace__empty">选择一位客户查看画像</p>
   </div>
 </template>
@@ -78,20 +90,21 @@ onMounted(loadCustomers);
   grid-template-columns: 240px minmax(0, 1fr);
   gap: 20px;
   min-height: 70vh;
-  --ink: #1b2a4a;
-  --vellum: #f7f4ec;
+  --blotter: #10263a;
+  --paper: #f3f6f8;
 }
 
 .profile-workspace__list {
-  background: #fffdf7;
+  background: white;
   padding: 16px;
-  border: 1px solid color-mix(in srgb, var(--ink) 12%, transparent);
+  border-top: 3px solid var(--blotter);
 }
 
 .profile-workspace__list h2 {
   margin: 0 0 12px;
-  font-size: 14px;
-  letter-spacing: 0.16em;
+  font-size: 12px;
+  letter-spacing: 0.2em;
+  color: var(--blotter);
 }
 
 .profile-workspace__list button {
@@ -109,17 +122,17 @@ onMounted(loadCustomers);
 }
 
 .profile-workspace__list button.is-active {
-  border-left-color: #c4a35a;
-  background: var(--vellum);
+  border-left-color: #9a7b4f;
+  background: var(--paper);
 }
 
 .profile-workspace__list span {
-  color: #6b6560;
+  color: #5c6570;
   font-size: 12px;
 }
 
 .profile-workspace__error {
-  color: #9b2c2c;
+  color: #b42318;
 }
 
 .profile-workspace__empty {

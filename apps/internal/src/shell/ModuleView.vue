@@ -22,6 +22,6 @@ const allowed = computed(() => {
 <template>
   <ModuleForbidden v-if="module && !allowed" :module="module" />
   <KnowledgeWorkspace v-else-if="module?.id === 'knowledge'" />
-  <ProfileWorkspace v-else-if="module?.id === 'advisory'" />
+  <ProfileWorkspace v-else-if="module?.id === 'profile'" />
   <ModulePlaceholder v-else-if="module" :module="module" />
 </template>

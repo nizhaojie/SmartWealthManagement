@@ -137,7 +137,9 @@ def test_uploaded_document_is_retrievable_by_exact_chunk_text(knowledge_client):
     try:
         search_response = _search(knowledge_client, query=chunk_text)
         assert search_response.status_code == 200
-        hits = search_response.json()["data"]["hits"]
+        payload = search_response.json()["data"]
+        assert payload["score_threshold"] == 0.35
+        hits = payload["hits"]
         assert any(hit["knowledge_id"] == knowledge_id for hit in hits)
         matched = next(hit for hit in hits if hit["knowledge_id"] == knowledge_id)
         assert matched["content"] == chunk_text

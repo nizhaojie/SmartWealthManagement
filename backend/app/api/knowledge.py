@@ -125,6 +125,7 @@ def search_knowledge(
                 source_file=result.source_file,
             )
             for result in results
-        ]
+        ],
+        score_threshold=settings.retrieval_score_threshold,
     )
     return ok(response.model_dump())

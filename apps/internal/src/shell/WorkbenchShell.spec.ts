@@ -13,6 +13,10 @@ vi.mock("../auth/api", () => ({
   requestLogout: vi.fn().mockResolvedValue(null),
 }));
 
+vi.mock("../knowledge/KnowledgeWorkspace.vue", () => ({
+  default: { name: "KnowledgeWorkspace", template: "<div />" },
+}));
+
 function createShellRouter() {
   return createRouter({
     history: createMemoryHistory(),

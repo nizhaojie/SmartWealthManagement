@@ -1,5 +1,5 @@
 import { http } from "../api/http";
-import type { DocumentStatus, KnowledgeDocument, KnowledgeType } from "./types";
+import type { DocumentStatus, KnowledgeDocument, KnowledgeType, SearchResult } from "./types";
 
 export type DocumentFilters = {
   knowledgeType?: KnowledgeType;
@@ -29,4 +29,17 @@ export function uploadDocument(file: File, knowledgeType: KnowledgeType): Promis
 
 export function deleteDocument(knowledgeId: number): Promise<KnowledgeDocument> {
   return http.delete<KnowledgeDocument>(`/api/internal/knowledge/documents/${knowledgeId}`);
+}
+
+export type SearchInput = {
+  query: string;
+  knowledgeType?: KnowledgeType;
+};
+
+export function searchKnowledge(input: SearchInput): Promise<SearchResult> {
+  return http.post<SearchResult>("/api/internal/knowledge/search", {
+    query: input.query,
+    knowledge_type: input.knowledgeType,
+    top_k: 10,
+  });
 }

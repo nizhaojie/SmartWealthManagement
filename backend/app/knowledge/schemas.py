@@ -41,3 +41,4 @@ class ChunkHitResponse(BaseModel):
 
 class SearchResponse(BaseModel):
     hits: list[ChunkHitResponse]
+    score_threshold: float

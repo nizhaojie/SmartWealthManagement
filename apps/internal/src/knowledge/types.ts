@@ -2,6 +2,22 @@ export type KnowledgeType = "FAQ" | "产品" | "政策";
 export type DocumentStatus = "processing" | "active" | "failed" | "expired";
 export type IngestStage = "parse" | "chunk" | "embed" | "store";
 
+export type ChunkHit = {
+  knowledge_id: number;
+  knowledge_type: KnowledgeType;
+  chunk_index: number;
+  heading_path: string[];
+  content: string;
+  score: number;
+  title: string;
+  source_file: string;
+};
+
+export type SearchResult = {
+  hits: ChunkHit[];
+  score_threshold: number;
+};
+
 export type KnowledgeDocument = {
   knowledge_id: number;
   knowledge_type: KnowledgeType;

@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Any
 
 from pydantic import BaseModel
 
@@ -54,3 +55,35 @@ class IndustryExposure(BaseModel):
     industry: str
     exposure: float
     share: float
+
+
+class GraphNode(BaseModel):
+    """客户关系图（ticket 04）里的一个节点：客户、产品、行业、基金经理四类之一。
+
+    `attrs` 按节点类型放不同字段，供前端点击节点时原样展示，不必为每种
+    类型单开一个 schema。`marked` 只对行业节点有意义（持仓集中度超阈值），
+    其余类型恒为 False。
+    """
+
+    id: str
+    type: str
+    label: str
+    attrs: dict[str, Any]
+    marked: bool = False
+
+
+class GraphEdge(BaseModel):
+    """客户关系图里的一条连线：HOLDS / BELONGS_TO_INDUSTRY / MANAGED_BY 之一。"""
+
+    source: str
+    target: str
+    type: str
+
+
+class CustomerGraphView(BaseModel):
+    """客户关系图接口的响应体：默认两跳（客户→产品→行业），基金经理按需展开。"""
+
+    customer_id: int
+    nodes: list[GraphNode]
+    edges: list[GraphEdge]
+    synced_at: datetime | None

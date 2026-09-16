@@ -3,7 +3,7 @@
 // 这里只有形状的取舍（饼图表达部分与整体、横向条形便于沿同一基线比较长度），
 // 没有任何业务含义——类别叫什么、按什么顺序来，由调用方决定并原样保留。
 
-import type { BarSeriesOption, PieSeriesOption } from "echarts/charts";
+import type { BarSeriesOption, GraphSeriesOption, PieSeriesOption } from "echarts/charts";
 import type {
   GridComponentOption,
   LegendComponentOption,
@@ -13,6 +13,7 @@ import type { ComposeOption } from "echarts/core";
 import {
   CATEGORICAL_PALETTE,
   CHART_LABEL_COLOR,
+  CHART_MARK_BORDER_COLOR,
   CHART_MUTED_LABEL_COLOR,
   CHART_SPLIT_LINE_COLOR,
   CHART_SURFACE_COLOR,
@@ -22,6 +23,7 @@ import {
 export type ChartOption = ComposeOption<
   | BarSeriesOption
   | PieSeriesOption
+  | GraphSeriesOption
   | GridComponentOption
   | LegendComponentOption
   | TooltipComponentOption
@@ -145,6 +147,63 @@ export function toComparisonBarOption(series: readonly [NamedSeries, NamedSeries
           },
         },
         data: second.data.map((item, index) => toDatum(item, index, categoricalColorAt(1))),
+      },
+    ],
+  };
+}
+
+export type GraphNodeDatum = { id: string; name: string; category: number; marked?: boolean };
+export type GraphEdgeDatum = { source: string; target: string };
+export type GraphCategoryDatum = { name: string };
+
+/**
+ * 力导向关系图：节点数量与连线在运行前不固定，用它铺开一张网络而不预设坐标。
+ * 类别顺序决定取色顺序，供调用方区分不同种类的节点；`marked` 的节点额外描边，
+ * 供调用方标出需要着重提示的数据点，标记的判断本身不在这里做。
+ *
+ * 没有连线的图看不出关系，和没有节点一样视为没有可画的东西。
+ */
+export function toGraphOption(
+  nodes: readonly GraphNodeDatum[],
+  edges: readonly GraphEdgeDatum[],
+  categories: readonly GraphCategoryDatum[],
+): ChartOption | null {
+  if (nodes.length === 0 || edges.length === 0) return null;
+
+  return {
+    tooltip: { trigger: "item" },
+    legend: [
+      {
+        data: categories.map((category) => category.name),
+        bottom: 0,
+        icon: "circle",
+        itemWidth: 10,
+        itemHeight: 10,
+        itemGap: 16,
+        textStyle: { color: CHART_LABEL_COLOR, fontSize: 12 },
+      },
+    ],
+    series: [
+      {
+        type: "graph",
+        layout: "force",
+        roam: true,
+        draggable: true,
+        label: { show: true, position: "right", color: CHART_LABEL_COLOR, fontSize: 12 },
+        lineStyle: { color: CHART_SPLIT_LINE_COLOR, curveness: 0.1 },
+        force: { repulsion: 140, edgeLength: 80 },
+        categories: categories.map((category, index) => ({
+          name: category.name,
+          itemStyle: { color: categoricalColorAt(index) },
+        })),
+        data: nodes.map((node) => ({
+          id: node.id,
+          name: node.name,
+          category: node.category,
+          symbolSize: node.marked ? 42 : 30,
+          ...(node.marked ? { itemStyle: { borderColor: CHART_MARK_BORDER_COLOR, borderWidth: 3 } } : {}),
+        })),
+        links: edges.map((edge) => ({ source: edge.source, target: edge.target })),
       },
     ],
   };

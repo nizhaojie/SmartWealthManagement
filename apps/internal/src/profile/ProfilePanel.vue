@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
+import CustomerGraphPanel from "../graph/CustomerGraphPanel.vue";
 import AllocationComparisonChart from "./AllocationComparisonChart.vue";
 import type { CustomerProfileView, Holding, ProfileTag, RiskAssessmentRecord } from "./types";
 
@@ -201,6 +202,8 @@ function submitCorrection() {
       :target-allocation="targetAllocation"
       :holdings="holdings"
     />
+
+    <CustomerGraphPanel class="customer-file__graph" :customer-id="profile.customer_id" />
 
     <section class="customer-file__tags">
       <article

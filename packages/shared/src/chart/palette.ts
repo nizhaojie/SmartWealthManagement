@@ -39,6 +39,9 @@ export const CATEGORICAL_PALETTE = [
   "#B2477E",
 ] as const;
 
+/** 标记态强调色：图表里需要着重标出的数据点用它描边，和分类色板独立，不参与类别轮转。 */
+export const CHART_MARK_BORDER_COLOR = "#B3261E";
+
 /** 系列色相对底色的最低对比度（WCAG 非文本对比度）。 */
 export const MIN_SERIES_CONTRAST_RATIO = 3;
 

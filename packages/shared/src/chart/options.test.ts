@@ -5,9 +5,9 @@
 // （ADR-0003），连测试夹具里的「R1」「债券」也算是把业务词带进了这个包。
 
 import { describe, expect, it } from "vitest";
-import { CATEGORICAL_PALETTE, categoricalColorAt } from "./palette";
-import { toBarOption, toComparisonBarOption, toDonutOption } from "./options";
-import type { CategoryValue, NamedSeries } from "./options";
+import { CATEGORICAL_PALETTE, CHART_MARK_BORDER_COLOR, categoricalColorAt } from "./palette";
+import { toBarOption, toComparisonBarOption, toDonutOption, toGraphOption } from "./options";
+import type { CategoryValue, GraphCategoryDatum, GraphEdgeDatum, GraphNodeDatum, NamedSeries } from "./options";
 
 const FIVE_CATEGORIES: CategoryValue[] = [
   { name: "A", value: 10000 },
@@ -150,5 +150,60 @@ describe("成对横向条形图配置", () => {
   it("只要有一组存在非零数值就正常画图", () => {
     const zero: NamedSeries = { name: "空", data: [{ name: "A", value: 0 }] };
     expect(toComparisonBarOption([zero, FIRST])).not.toBeNull();
+  });
+});
+
+describe("关系图配置", () => {
+  const CATEGORIES: GraphCategoryDatum[] = [{ name: "甲" }, { name: "乙" }];
+  const NODES: GraphNodeDatum[] = [
+    { id: "n1", name: "N1", category: 0 },
+    { id: "n2", name: "N2", category: 1 },
+    { id: "n3", name: "N3", category: 1, marked: true },
+  ];
+  const EDGES: GraphEdgeDatum[] = [
+    { source: "n1", target: "n2" },
+    { source: "n1", target: "n3" },
+  ];
+
+  it("节点与连线原样映射进图配置，顺序与传入一致", () => {
+    const option = toGraphOption(NODES, EDGES, CATEGORIES);
+    expect(option).not.toBeNull();
+    const series = option?.series as {
+      data: { id: string; name: string; category: number }[];
+      links: { source: string; target: string }[];
+    }[];
+    expect(series).toHaveLength(1);
+    expect(series[0].data.map((item) => item.id)).toEqual(["n1", "n2", "n3"]);
+    expect(series[0].data.map((item) => item.category)).toEqual([0, 1, 1]);
+    expect(series[0].links).toEqual([
+      { source: "n1", target: "n2" },
+      { source: "n1", target: "n3" },
+    ]);
+  });
+
+  it("类别按传入顺序取分类色板颜色，用于四类节点的视觉区分", () => {
+    const option = toGraphOption(NODES, EDGES, CATEGORIES);
+    const series = option?.series as { categories: { name: string; itemStyle: { color: string } }[] }[];
+    expect(series[0].categories.map((item) => item.name)).toEqual(["甲", "乙"]);
+    expect(series[0].categories.map((item) => item.itemStyle.color)).toEqual([
+      categoricalColorAt(0),
+      categoricalColorAt(1),
+    ]);
+  });
+
+  it("标记的节点用强调色描边，未标记的节点没有描边", () => {
+    const option = toGraphOption(NODES, EDGES, CATEGORIES);
+    const series = option?.series as {
+      data: { id: string; itemStyle?: { borderColor: string } }[];
+    }[];
+    const marked = series[0].data.find((item) => item.id === "n3");
+    const unmarked = series[0].data.find((item) => item.id === "n1");
+    expect(marked?.itemStyle?.borderColor).toBe(CHART_MARK_BORDER_COLOR);
+    expect(unmarked?.itemStyle).toBeUndefined();
+  });
+
+  it("没有节点或没有连线时返回 null，交给调用方渲染空状态", () => {
+    expect(toGraphOption([], EDGES, CATEGORIES)).toBeNull();
+    expect(toGraphOption(NODES, [], CATEGORIES)).toBeNull();
   });
 });

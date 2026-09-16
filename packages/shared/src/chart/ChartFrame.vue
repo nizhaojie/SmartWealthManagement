@@ -25,6 +25,10 @@ const props = withDefaults(
   },
 );
 
+const emit = defineEmits<{
+  elementClick: [params: unknown];
+}>();
+
 const host = ref<HTMLDivElement | null>(null);
 let instance: ChartInstance | null = null;
 let observer: ResizeObserver | null = null;
@@ -41,6 +45,7 @@ function draw() {
 
   if (instance === null) {
     instance = echarts.init(host.value, undefined, { renderer: "svg" });
+    instance.on("click", (params) => emit("elementClick", params));
     if (typeof ResizeObserver !== "undefined") {
       observer = new ResizeObserver(() => instance?.resize());
       observer.observe(host.value);

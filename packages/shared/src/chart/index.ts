@@ -1,9 +1,17 @@
 export { default as ChartFrame } from "./ChartFrame.vue";
-export { toBarOption, toComparisonBarOption, toDonutOption } from "./options";
-export type { CategoryValue, ChartOption, NamedSeries } from "./options";
+export { toBarOption, toComparisonBarOption, toDonutOption, toGraphOption } from "./options";
+export type {
+  CategoryValue,
+  ChartOption,
+  GraphCategoryDatum,
+  GraphEdgeDatum,
+  GraphNodeDatum,
+  NamedSeries,
+} from "./options";
 export {
   CATEGORICAL_PALETTE,
   CHART_LABEL_COLOR,
+  CHART_MARK_BORDER_COLOR,
   CHART_MUTED_LABEL_COLOR,
   CHART_SPLIT_LINE_COLOR,
   CHART_SURFACE_COLOR,

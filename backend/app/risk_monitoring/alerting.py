@@ -37,6 +37,7 @@ from app.event_bus import (
 )
 from app.exceptions import AppError
 from app.risk_monitoring import service
+from app.risk_monitoring.alert_status import ALERT_STATUS_OPEN
 from app.risk_monitoring.context import CustomerSnapshot, MonitoringContext, RuleSpec, TransactionEvent
 from app.risk_monitoring.evaluator import match_rules
 from app.risk_monitoring.fields import OPPOSITE_TRANSACTION_TYPES
@@ -62,8 +63,9 @@ TRANSACTION_TYPES: tuple[str, ...] = (*OPPOSITE_TRANSACTION_TYPES, TRANSFER)
 
 TRANSACTION_STATUS_CONFIRMED = "已确认"
 
-# 预警落库时的初始状态：一个事实陈述（还没有人处置过），不是工单流程节点。
-ALERT_STATUS_OPEN = "未处理"
+# 预警落库时的初始状态来自 `alert_status`：一个事实陈述（还没有人处置过），不是
+# 工单流程节点。这里只写一次，离开它的两条路径（排除 / 升级）在
+# `app.risk_monitoring.disposition`。
 
 DAY_HOURS = 24
 
@@ -343,5 +345,8 @@ def alert_response(alert: RiskAlert) -> dict:
         "transaction_ids": list(alert.transaction_ids or []),
         "trigger_detail": alert.trigger_detail,
         "status": alert.status,
+        # 处置留痕：还没处置时两列都为空，「未处理」是它们的搭档状态。
+        "handler_id": alert.handler_id,
+        "handle_result": alert.handle_result,
         "created_at": alert.create_time.isoformat(),
     }

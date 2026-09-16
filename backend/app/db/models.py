@@ -459,13 +459,35 @@ class RiskAlert(Base):
 
 
 class WorkOrder(Base):
+    """工单：处置某一事项的流程载体（CONTEXT「工单」）。
+
+    生命周期是 `待处理 → 处理中 → 已完成 | 已关闭`，`current_node` 与 `status`
+    同步推进——这里没有并行分支，一个字段就是当前状态。
+
+    `source_alert_id` 是唯一约束：**一条预警最多派生一张工单**。预警之外的来源
+    （客户投诉、转人工）留空，而 MySQL 的唯一索引允许多个 NULL，所以这类工单
+    不受限制。
+
+    `handler_id` 是受理人（建单时即确定的责任人），`handle_result` 是处置结论。
+    「谁在什么时候因为什么把工单推到了哪个状态」不在这一行上，而在只追加的
+    `biz_work_order_transition` 里——行只保留最近一次的理由。
+    """
+
     __tablename__ = "biz_work_order"
-    __table_args__ = {"comment": "工单"}
+    __table_args__ = (
+        UniqueConstraint("source_alert_id", name="uk_work_order_source_alert"),
+        {"comment": "工单"},
+    )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     work_order_no: Mapped[str] = mapped_column(String(64), unique=True, comment="工单编号")
     order_type: Mapped[str] = mapped_column(String(32), comment="工单类型")
     sub_type: Mapped[str | None] = mapped_column(String(32), comment="子类型")
+    source_alert_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey("fin_risk_alert.id"),
+        comment="来源预警标识；一条预警最多派生一张工单",
+    )
     customer_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("sys_customer.id"), comment="关联客户"
     )
@@ -479,10 +501,48 @@ class WorkOrder(Base):
     status: Mapped[str] = mapped_column(String(16), comment="工单状态")
     biz_content: Mapped[dict | None] = mapped_column(JSON, comment="业务内容")
     handle_reason: Mapped[str | None] = mapped_column(Text, comment="最近一次流转理由")
+    handle_result: Mapped[str | None] = mapped_column(Text, comment="处置结论")
     create_time: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     update_time: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now(), onupdate=func.now()
     )
+
+
+class WorkOrderTransition(Base):
+    """工单状态流转留痕：每一次流转的处置人、时间与非空理由。
+
+    与 `biz_advisory_review_audit` 同一形状：当前状态留在工单那一行，而「谁把它
+    推到了这个状态」留在这张只追加的表里。**建单也记一条**（`from_status` 为空），
+    于是工单的每一个状态都有出处，不存在凭空出现的状态。
+
+    `reason` 非空由数据库与代码两侧共同保证：理由为空的流转请求在服务层就被拒绝，
+    即使绕过服务层也写不进这一列。
+    """
+
+    __tablename__ = "biz_work_order_transition"
+    __table_args__ = (
+        Index("ix_work_order_transition_work_order_id", "work_order_id"),
+        CheckConstraint(
+            "to_status IN ('待处理','处理中','已完成','已关闭')",
+            name="ck_work_order_transition_to_status",
+        ),
+        {"comment": "工单状态流转留痕"},
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    work_order_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("biz_work_order.id"), comment="对应的工单"
+    )
+    from_status: Mapped[str | None] = mapped_column(
+        String(16), comment="流转前状态；建单时为空"
+    )
+    to_status: Mapped[str] = mapped_column(String(16), comment="流转后状态")
+    handler_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("sys_employee.id"), comment="处置人"
+    )
+    reason: Mapped[str] = mapped_column(Text, comment="流转理由")
+    handled_at: Mapped[datetime] = mapped_column(DateTime, comment="处置时间")
+    create_time: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 
 class AdvisoryRequest(Base):

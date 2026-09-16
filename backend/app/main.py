@@ -20,6 +20,7 @@ from app.api.health import router as health_router
 from app.api.knowledge import router as knowledge_router
 from app.api.customer_profile import internal_router as customer_profile_internal_router
 from app.api.customer_profile import router as customer_profile_router
+from app.api.risk_alerts import router as risk_alerts_router
 from app.api.risk_assessment import internal_router as risk_assessment_internal_router
 from app.api.risk_assessment import router as risk_assessment_router
 from app.api.products import router as products_router
@@ -27,6 +28,7 @@ from app.api.risk_rules import router as risk_rules_router
 from app.api.suitability import internal_router as suitability_internal_router
 from app.api.suitability import router as suitability_router
 from app.api.transaction_events import router as transaction_events_router
+from app.api.work_orders import router as work_orders_router
 from app.exceptions import AppError
 from app.http import fail
 from app.logging_setup import setup_logging
@@ -125,3 +127,5 @@ app.include_router(advisory_customer_router)
 app.include_router(graph_router)
 app.include_router(risk_rules_router)
 app.include_router(transaction_events_router)
+app.include_router(risk_alerts_router)
+app.include_router(work_orders_router)

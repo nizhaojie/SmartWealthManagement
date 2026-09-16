@@ -590,6 +590,36 @@ class AnalyticsQueryAudit(Base):
     create_time: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 
+class GraphSyncRun(Base):
+    """知识图谱全量重建记录。
+
+    `lock_key` 进行中时固定取值，结束（成功或失败）后置空——靠它在 `UNIQUE`
+    约束上做并发互斥，同一时刻只能有一条记录持有这个值，见 app.knowledge_graph.service。
+    """
+
+    __tablename__ = "biz_graph_sync_run"
+    __table_args__ = (
+        UniqueConstraint("lock_key", name="uk_graph_sync_run_lock"),
+        CheckConstraint(
+            "status IN ('进行中','成功','失败')",
+            name="ck_graph_sync_run_status",
+        ),
+        {"comment": "知识图谱全量重建记录"},
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    lock_key: Mapped[str | None] = mapped_column(
+        String(16), comment="进行中时固定取值用于并发互斥，结束后置空"
+    )
+    status: Mapped[str] = mapped_column(String(16), comment="重建状态")
+    node_count: Mapped[int | None] = mapped_column(comment="节点数")
+    relationship_count: Mapped[int | None] = mapped_column(comment="关系数")
+    started_at: Mapped[datetime] = mapped_column(DateTime, comment="触发时间")
+    duration_ms: Mapped[int | None] = mapped_column(comment="耗时（毫秒）")
+    failure_reason: Mapped[str | None] = mapped_column(Text, comment="失败原因")
+    create_time: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
 class KnowledgeMeta(Base):
     __tablename__ = "fin_knowledge_meta"
     __table_args__ = {"comment": "知识元数据"}

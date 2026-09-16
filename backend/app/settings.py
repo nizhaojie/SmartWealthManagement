@@ -39,6 +39,10 @@ class Settings(BaseSettings):
     neo4j_uri: str = "bolt://127.0.0.1:7688"
     neo4j_user: str = "neo4j"
     neo4j_password: str = "wealth_neo4j_pw"
+    # Neo4j Community 版只有一个数据库，测试库与开发库靠这个属性分开（同一实例内隔离），
+    # 而不是像 MySQL 那样连不同的库。
+    neo4j_graph_namespace: str = "wealth"
+    test_neo4j_graph_namespace: str = "wealth_test"
 
     minio_endpoint: str = "127.0.0.1:9001"
     minio_access_key: str = "minioadmin"

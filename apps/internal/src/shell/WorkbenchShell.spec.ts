@@ -21,6 +21,10 @@ vi.mock("../profile/ProfileWorkspace.vue", () => ({
   default: { name: "ProfileWorkspace", template: "<div />" },
 }));
 
+vi.mock("../analytics/DataAnalysisWorkspace.vue", () => ({
+  default: { name: "DataAnalysisWorkspace", template: "<div />" },
+}));
+
 function createShellRouter() {
   return createRouter({
     history: createMemoryHistory(),
@@ -89,7 +93,7 @@ describe("WorkbenchShell", () => {
   });
 
   it("renders the placeholder explanation with navigation and logout still present for an unimplemented module", async () => {
-    const wrapper = await mountShellAt("/data-analysis", ADVISOR);
+    const wrapper = await mountShellAt("/advisory", ADVISOR);
 
     expect(wrapper.text()).toContain("该模块尚未实现");
     expect(wrapper.find(".workbench-shell__aside").exists()).toBe(true);

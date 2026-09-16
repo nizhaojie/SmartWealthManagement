@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
+import DataAnalysisWorkspace from "../analytics/DataAnalysisWorkspace.vue";
 import { currentEmployee } from "../auth/store";
 import KnowledgeWorkspace from "../knowledge/KnowledgeWorkspace.vue";
 import ProfileWorkspace from "../profile/ProfileWorkspace.vue";
@@ -22,6 +23,7 @@ const allowed = computed(() => {
 <template>
   <ModuleForbidden v-if="module && !allowed" :module="module" />
   <KnowledgeWorkspace v-else-if="module?.id === 'knowledge'" />
+  <DataAnalysisWorkspace v-else-if="module?.id === 'data-analysis'" />
   <ProfileWorkspace v-else-if="module?.id === 'profile'" />
   <ModulePlaceholder v-else-if="module" :module="module" />
 </template>

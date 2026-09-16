@@ -15,3 +15,10 @@ CUSTOMER_SERVICE_CONFIG = AgentConfig(
     tools=("knowledge_search",),
     content_classification_default="事实性内容",
 )
+
+DATA_ANALYSIS_CONFIG = AgentConfig(
+    name="data_analysis",
+    tools=("analytics_query_generation", "analytics_query_execution"),
+    content_classification_default="事实性内容",
+    # 数据分析不使用知识库检索，retrieval_top_k 保持缺省。
+)

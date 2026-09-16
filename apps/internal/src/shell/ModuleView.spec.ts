@@ -20,6 +20,12 @@ vi.mock("../profile/api", () => ({
   writeProfileTag: vi.fn(),
 }));
 
+vi.mock("../analytics/api", () => ({
+  runAnalyticsQuery: vi.fn(),
+  listAnalyticsHistory: vi.fn().mockResolvedValue([]),
+  listAnalyticsExamples: vi.fn().mockResolvedValue([]),
+}));
+
 async function mountModuleViewAt(path: string) {
   const router = createRouter({
     history: createMemoryHistory(),
@@ -51,12 +57,21 @@ describe("ModuleView", () => {
   });
 
   it("renders the placeholder explanation for a module the role is allowed to see", async () => {
+    currentEmployee.value = { real_name: "周风控", employee_role: RISK_OFFICER };
+
+    const wrapper = await mountModuleViewAt("/risk-monitoring");
+
+    expect(wrapper.text()).toContain("该模块尚未实现");
+    expect(wrapper.text()).toContain("风控监测");
+  });
+
+  it("opens the data analysis workspace on its own route", async () => {
     currentEmployee.value = { real_name: "陈顾问", employee_role: ADVISOR };
 
     const wrapper = await mountModuleViewAt("/data-analysis");
 
-    expect(wrapper.text()).toContain("该模块尚未实现");
-    expect(wrapper.text()).toContain("数据分析");
+    expect(wrapper.text()).not.toContain("该模块尚未实现");
+    expect(wrapper.text()).toContain("历史查询");
   });
 
   it("opens the customer profile workspace on its own route", async () => {

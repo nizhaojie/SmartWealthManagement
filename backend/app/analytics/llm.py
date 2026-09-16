@@ -39,6 +39,7 @@ class FakeGenerationCall:
     view_names: list[str]
     view_definitions: str
     examples: list[QueryExample]
+    history: list[dict]
 
 
 fake_generation_calls: list[FakeGenerationCall] = []
@@ -61,10 +62,14 @@ def generate_query(
     view_definitions: str,
     examples: list[QueryExample],
     settings: Settings,
+    history: list[dict] | None = None,
 ) -> str:
+    history = history or []
     if settings.resolved_llm_provider == "fake":
-        return _fake_generate(question, view_names, view_definitions, examples)
-    return _openai_compatible_generate(question, view_definitions, examples, settings)
+        return _fake_generate(question, view_names, view_definitions, examples, history)
+    return _openai_compatible_generate(
+        question, view_definitions, examples, settings, history
+    )
 
 
 def _fake_generate(
@@ -72,6 +77,7 @@ def _fake_generate(
     view_names: list[str],
     view_definitions: str,
     examples: list[QueryExample],
+    history: list[dict],
 ) -> str:
     fake_generation_calls.append(
         FakeGenerationCall(
@@ -79,6 +85,7 @@ def _fake_generate(
             view_names=view_names,
             view_definitions=view_definitions,
             examples=examples,
+            history=history,
         )
     )
     if question in _fake_overrides:
@@ -94,9 +101,13 @@ def _openai_compatible_generate(
     view_definitions: str,
     examples: list[QueryExample],
     settings: Settings,
+    history: list[dict],
 ) -> str:
     example_text = "\n".join(
         f"问题：{example.question}\n查询：{example.sql}" for example in examples
+    )
+    history_text = "\n".join(
+        f"{message['role']}：{message['content']}" for message in history
     )
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
@@ -105,6 +116,7 @@ def _openai_compatible_generate(
             "content": (
                 f"语义视图定义：\n{view_definitions}\n\n"
                 f"示例：\n{example_text}\n\n"
+                f"对话历史：\n{history_text}\n\n"
                 f"问题：{question}"
             ),
         },

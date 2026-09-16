@@ -416,6 +416,30 @@ class ConversationArchive(Base):
     create_time: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 
+class AnalyticsQueryAudit(Base):
+    __tablename__ = "biz_analytics_query_audit"
+    __table_args__ = (
+        Index("ix_analytics_query_audit_employee_id", "employee_id"),
+        CheckConstraint(
+            "status IN ('成功','超出可查范围','生成失败','校验拒绝','查询超时','执行失败')",
+            name="ck_analytics_query_audit_status",
+        ),
+        {"comment": "数据分析查询留痕"},
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    employee_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("sys_employee.id"), comment="提问人"
+    )
+    question: Mapped[str] = mapped_column(Text, comment="自然语言问题")
+    generated_sql: Mapped[str | None] = mapped_column(Text, comment="生成的查询")
+    status: Mapped[str] = mapped_column(String(16), comment="结果状态")
+    row_count: Mapped[int | None] = mapped_column(comment="返回行数")
+    truncated: Mapped[bool] = mapped_column(default=False, comment="是否被截断")
+    error_code: Mapped[int | None] = mapped_column(comment="业务错误码")
+    create_time: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
 class KnowledgeMeta(Base):
     __tablename__ = "fin_knowledge_meta"
     __table_args__ = {"comment": "知识元数据"}

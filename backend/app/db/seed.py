@@ -451,23 +451,23 @@ def _seed_underlyings(session: Session) -> None:
             asset.asset_category = item["asset_category"]
         assets[item["asset_code"]] = asset
 
-    for item in _PRODUCT_UNDERLYINGS:
+    for link in _PRODUCT_UNDERLYINGS:
         product = session.scalar(
-            select(Product).where(Product.product_code == item["product_code"])
+            select(Product).where(Product.product_code == link["product_code"])
         )
         if product is None:
             continue
         child_id: int | None = None
         asset_id: int | None = None
-        if item["target_kind"] == "product":
+        if link["target_kind"] == "product":
             child = session.scalar(
-                select(Product).where(Product.product_code == item["target_code"])
+                select(Product).where(Product.product_code == link["target_code"])
             )
             if child is None:
                 continue
             child_id = child.id
         else:
-            asset = assets.get(item["target_code"])
+            asset = assets.get(link["target_code"])
             if asset is None:
                 continue
             asset_id = asset.id
@@ -486,11 +486,11 @@ def _seed_underlyings(session: Session) -> None:
                     product_id=product.id,
                     child_product_id=child_id,
                     underlying_asset_id=asset_id,
-                    weight=item["weight"],
+                    weight=link["weight"],
                 )
             )
         else:
-            relation.weight = item["weight"]
+            relation.weight = link["weight"]
 
 
 def _seed_customers(

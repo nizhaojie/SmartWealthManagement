@@ -60,7 +60,8 @@ def _fake_chitchat_reply() -> str:
     )
 
 
-def _chat_completion(messages: list[dict], settings: Settings) -> str:
+def chat_completion(messages: list[dict], settings: Settings) -> str:
+    """调用 OpenAI 兼容的 chat 接口；失败统一折算成业务错误码。"""
     body = json.dumps(
         {"model": settings.llm_model_name, "messages": messages, "temperature": 0.2}
     ).encode("utf-8")
@@ -95,7 +96,7 @@ def _openai_compatible_grounded_answer(
         *history,
         {"role": "user", "content": f"检索片段：\n{numbered_chunks}\n\n问题：{question}"},
     ]
-    content = _chat_completion(messages, settings)
+    content = chat_completion(messages, settings)
     try:
         parsed = json.loads(content)
         return GroundedAnswer(
@@ -111,4 +112,4 @@ def _openai_compatible_chitchat_reply(question: str, settings: Settings) -> str:
         {"role": "system", "content": CHITCHAT_SYSTEM_PROMPT},
         {"role": "user", "content": question},
     ]
-    return _chat_completion(messages, settings)
+    return chat_completion(messages, settings)

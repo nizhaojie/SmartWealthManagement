@@ -20,6 +20,12 @@ class Settings(BaseSettings):
     # 数据分析 Agent 的受限执行账号：只对语义视图有 SELECT 权限（ADR-0010）。
     analytics_db_user: str = "wealth_analytics"
     analytics_db_password: str = "wealth_analytics_pw"
+    # 结果行数上限：超出时截断并在响应中带截断标记。
+    analytics_max_rows: int = 200
+    # 查询超时上限（MySQL max_execution_time，毫秒）。
+    analytics_query_timeout_ms: int = 5000
+    # 「问题 → 查询」示例文件；空则使用随仓库提供的 query_examples.json。
+    analytics_examples_path: str = ""
 
     redis_url: str = "redis://127.0.0.1:6380/0"
     test_redis_url: str = "redis://127.0.0.1:6380/1"

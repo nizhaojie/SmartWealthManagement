@@ -1,0 +1,17 @@
+[
+  {
+    "question": "各产品类型的持仓市值分布",
+    "sql": "SELECT product_type, SUM(current_value) AS total_value FROM va_holding_distribution GROUP BY product_type ORDER BY total_value DESC",
+    "views": ["va_holding_distribution"]
+  },
+  {
+    "question": "资产规模超过一百万的客户有多少",
+    "sql": "SELECT COUNT(*) AS customer_count FROM va_customer_overview WHERE asset_scale > 1000000",
+    "views": ["va_customer_overview"]
+  },
+  {
+    "question": "最近一个月各产品的申购金额",
+    "sql": "SELECT product_name, SUM(amount) AS total_amount FROM va_transaction_stat WHERE transaction_type = '申购' AND trade_time >= DATE_SUB(CURDATE(), INTERVAL 1 MONTH) GROUP BY product_name ORDER BY total_amount DESC",
+    "views": ["va_transaction_stat"]
+  }
+]

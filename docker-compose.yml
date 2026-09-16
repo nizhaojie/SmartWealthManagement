@@ -2,6 +2,9 @@ services:
   mysql:
     image: mysql:8.0
     restart: unless-stopped
+    # 语义视图的行级权限函数（NO SQL，只读会话变量）由迁移账号创建；
+    # binlog 默认开启，信任不读写数据的函数创建者。
+    command: ["--log-bin-trust-function-creators=ON"]
     environment:
       MYSQL_ROOT_PASSWORD: root_pw
       MYSQL_DATABASE: wealth

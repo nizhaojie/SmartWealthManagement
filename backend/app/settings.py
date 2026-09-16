@@ -15,6 +15,12 @@ class Settings(BaseSettings):
     database_url: str = "mysql+pymysql://wealth_app:wealth_app_pw@127.0.0.1:3307/wealth"
     test_database_url: str = "mysql+pymysql://wealth_app:wealth_app_pw@127.0.0.1:3307/wealth_test"
 
+    # root 连接仅用于创建受限执行账号（迁移账号没有 CREATE USER / GRANT 权限）。
+    mysql_root_url: str = "mysql+pymysql://root:root_pw@127.0.0.1:3307"
+    # 数据分析 Agent 的受限执行账号：只对语义视图有 SELECT 权限（ADR-0010）。
+    analytics_db_user: str = "wealth_analytics"
+    analytics_db_password: str = "wealth_analytics_pw"
+
     redis_url: str = "redis://127.0.0.1:6380/0"
     test_redis_url: str = "redis://127.0.0.1:6380/1"
 

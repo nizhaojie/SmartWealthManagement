@@ -64,6 +64,7 @@ class CustomerSeed(TypedDict):
     phone: str
     customer_level: str
     status: str
+    manager_username: str
     opened_at: datetime
     risk_level: str
     risk_score: int
@@ -95,6 +96,12 @@ _EMPLOYEES: tuple[EmployeeSeed, ...] = (
     {
         "username": "manager1",
         "real_name": "刘经理",
+        "employee_role": "客户经理",
+        "status": "正常",
+    },
+    {
+        "username": "manager2",
+        "real_name": "孙经理",
         "employee_role": "客户经理",
         "status": "正常",
     },
@@ -242,6 +249,7 @@ _CUSTOMERS: tuple[CustomerSeed, ...] = (
         "phone": "13800138001",
         "customer_level": "普通",
         "status": "正常",
+        "manager_username": "manager1",
         "opened_at": datetime(2022, 3, 1, 10, 0, 0),
         "risk_level": "C1",
         "risk_score": 18,
@@ -270,6 +278,7 @@ _CUSTOMERS: tuple[CustomerSeed, ...] = (
         "phone": "13800138002",
         "customer_level": "金卡",
         "status": "正常",
+        "manager_username": "manager1",
         "opened_at": datetime(2021, 6, 1, 9, 0, 0),
         "risk_level": "C2",
         "risk_score": 36,
@@ -298,6 +307,7 @@ _CUSTOMERS: tuple[CustomerSeed, ...] = (
         "phone": "13800138003",
         "customer_level": "白金",
         "status": "正常",
+        "manager_username": "manager1",
         "opened_at": datetime(2020, 4, 12, 14, 0, 0),
         "risk_level": "C3",
         "risk_score": 55,
@@ -326,6 +336,7 @@ _CUSTOMERS: tuple[CustomerSeed, ...] = (
         "phone": "13800138004",
         "customer_level": "钻石",
         "status": "正常",
+        "manager_username": "manager2",
         "opened_at": datetime(2019, 9, 8, 11, 0, 0),
         "risk_level": "C4",
         "risk_score": 74,
@@ -354,6 +365,7 @@ _CUSTOMERS: tuple[CustomerSeed, ...] = (
         "phone": "13800138005",
         "customer_level": "私行",
         "status": "正常",
+        "manager_username": "manager2",
         "opened_at": datetime(2018, 1, 16, 10, 0, 0),
         "risk_level": "C5",
         "risk_score": 92,
@@ -388,8 +400,7 @@ def seed(database_url: str | None = None) -> None:
             employees = _seed_employees(session, password_hash)
             products = _seed_products(session)
             _seed_underlyings(session)
-            advisor = employees["advisor1"]
-            _seed_customers(session, password_hash, products, advisor.id)
+            _seed_customers(session, password_hash, products, employees)
             session.commit()
     finally:
         engine.dispose()
@@ -486,8 +497,9 @@ def _seed_customers(
     session: Session,
     password_hash: str,
     products: dict[str, Product],
-    operator_id: int,
+    employees: dict[str, Employee],
 ) -> None:
+    operator_id = employees["advisor1"].id
     for item in _CUSTOMERS:
         customer = session.scalar(select(Customer).where(Customer.username == item["username"]))
         if customer is None:
@@ -502,6 +514,11 @@ def _seed_customers(
                 opened_at=item["opened_at"],
             )
             session.add(customer)
+            session.flush()
+        # 客户关系归属人：新客户落库时设置，已有客户在重复 seed 时对齐。
+        manager = employees[item["manager_username"]]
+        if customer.manager_id != manager.id:
+            customer.manager_id = manager.id
             session.flush()
 
         if session.scalar(

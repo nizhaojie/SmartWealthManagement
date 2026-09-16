@@ -200,7 +200,7 @@ def test_seed_can_be_run_twice_without_duplicating_rows():
     assert holdings == 5
     assert transactions == 5
     assert assessments == 5
-    assert employees == 3
+    assert employees == 4
 
 
 def test_schema_and_seed_target_the_test_database():

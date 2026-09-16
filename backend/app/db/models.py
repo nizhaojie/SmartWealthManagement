@@ -33,6 +33,12 @@ class Customer(Base):
     phone: Mapped[str] = mapped_column(String(11), comment="手机号")
     customer_level: Mapped[str] = mapped_column(String(16), comment="客户分层")
     status: Mapped[str] = mapped_column(String(16), comment="账号状态")
+    manager_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey("sys_employee.id"),
+        index=True,
+        comment="客户关系归属人（客户经理）",
+    )
     opened_at: Mapped[datetime] = mapped_column(DateTime, comment="开户时间")
     create_time: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     update_time: Mapped[datetime] = mapped_column(

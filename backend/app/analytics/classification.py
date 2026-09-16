@@ -8,18 +8,23 @@
 已知的边界：判定看的是**问题**的关键词，而非生成内容本身。问法不含
 关键词但输出实质是报告时不会附声明——这是启发式的固有缺口，方向是
 保守的（宁可多附），更严格的判定留给需要它的 slice。
+
+分类常量与免责声明模板本身在 ``app.agent.classification``——投顾助手
+Agent 同样要用同一份声明文本，不各自维护一份。
 """
 
-FACTUAL_CONTENT = "事实性内容"
-ADVISORY_CONTENT = "投顾内容"
+from app.agent.classification import ADVISORY_CONTENT, DISCLAIMER, FACTUAL_CONTENT, disclaimer_for
 
 # 面向客户的报告类问法。命中即按投顾内容对待：宁可多附一次声明。
 _REPORT_CLASS_KEYWORDS = ("研报", "财富报告", "行业分析", "投资报告")
 
-DISCLAIMER = (
-    "本内容仅为投资分析参考，不构成任何直接投资建议，"
-    "不构成对任何产品的收益承诺，据此操作风险自负，请谨慎对待。"
-)
+__all__ = [
+    "FACTUAL_CONTENT",
+    "ADVISORY_CONTENT",
+    "DISCLAIMER",
+    "classify_output",
+    "disclaimer_for",
+]
 
 
 def classify_output(question: str, *, default: str = FACTUAL_CONTENT) -> str:
@@ -27,7 +32,3 @@ def classify_output(question: str, *, default: str = FACTUAL_CONTENT) -> str:
     if any(keyword in question for keyword in _REPORT_CLASS_KEYWORDS):
         return ADVISORY_CONTENT
     return default
-
-
-def disclaimer_for(content_classification: str) -> str | None:
-    return DISCLAIMER if content_classification == ADVISORY_CONTENT else None

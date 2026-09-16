@@ -396,6 +396,39 @@ class AdvisoryRequest(Base):
     )
 
 
+class AdvisoryDraft(Base):
+    """AI 原稿；没有 update_time 是刻意的，见 app.advisory.draft。"""
+
+    __tablename__ = "biz_advisory_draft"
+    __table_args__ = (
+        Index("ix_advisory_draft_customer_id", "customer_id"),
+        CheckConstraint(
+            "content_classification IN ('投顾内容','事实性内容')",
+            name="ck_advisory_draft_content_classification",
+        ),
+        {"comment": "AI 原稿"},
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    customer_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("sys_customer.id"), comment="客户标识"
+    )
+    advisor_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("sys_employee.id"), comment="发起生成的理财顾问"
+    )
+    tilt: Mapped[str] = mapped_column(String(16), comment="生成时指定的侧重")
+    content_classification: Mapped[str] = mapped_column(String(32), comment="内容分类")
+    candidates: Mapped[list] = mapped_column(JSON, comment="排序后的候选产品与推荐理由")
+    allocation_suggestion: Mapped[dict] = mapped_column(JSON, comment="资产配置比例建议")
+    warnings: Mapped[list] = mapped_column(JSON, comment="画像警示")
+    profile_computed_at: Mapped[datetime] = mapped_column(
+        DateTime, comment="生成时使用的画像版本（画像计算时间）"
+    )
+    candidate_pool_snapshot: Mapped[dict] = mapped_column(JSON, comment="生成时的候选池快照")
+    generated_at: Mapped[datetime] = mapped_column(DateTime, comment="生成时间")
+    create_time: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
 class ConversationArchive(Base):
     __tablename__ = "conversation_archive"
     __table_args__ = (

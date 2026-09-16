@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session as OrmSession
 
 from app.customer_profile.confidence import SOURCE_QUESTIONNAIRE
 from app.db.models import (
+    AdvisoryDraft,
     Customer,
     CustomerProfile,
     Holding,
@@ -168,6 +169,7 @@ def _delete_customer(customer_id: int) -> None:
     engine = _engine()
     try:
         with OrmSession(engine) as session:
+            session.execute(delete(AdvisoryDraft).where(AdvisoryDraft.customer_id == customer_id))
             session.execute(delete(Holding).where(Holding.customer_id == customer_id))
             session.execute(delete(ProfileTag).where(ProfileTag.customer_id == customer_id))
             session.execute(
@@ -187,6 +189,14 @@ def _generate_plan(client: TestClient, customer_id: int, *, tilt: str | None = N
         headers=_employee_headers(client, employee),
         json={"tilt": tilt},
     )
+
+
+def _customer_headers(client: TestClient, username: str = "wangc1") -> dict[str, str]:
+    response = client.post(
+        "/api/customer/auth/login",
+        json={"username": username, "password": SEEDED_PASSWORD},
+    )
+    return {"Authorization": f"Bearer {response.json()['data']['access_token']}"}
 
 
 def test_plan_only_ranks_products_from_the_candidate_pool_and_excludes_already_held_ones(
@@ -263,3 +273,100 @@ def test_stale_profile_surfaces_as_a_warning_without_blocking_generation(auth_cl
         assert "PROFILE_STALE" in codes
     finally:
         _delete_customer(created_id)
+
+
+# --- AI 原稿落库与内容分类（issue 02） ---
+
+
+def test_generating_a_plan_persists_an_ai_draft_that_can_be_read_back(
+    auth_client: TestClient, customer_id: int
+):
+    generated = _generate_plan(auth_client, customer_id).json()["data"]
+    draft_id = generated["id"]
+
+    fetched = auth_client.get(
+        f"/api/internal/advisory/drafts/{draft_id}",
+        headers=_employee_headers(auth_client),
+    ).json()["data"]
+
+    assert fetched["id"] == draft_id
+    assert fetched["candidates"] == generated["candidates"]
+    assert fetched["content_classification"] == "投顾内容"
+
+
+def test_each_generation_persists_a_new_immutable_draft(
+    auth_client: TestClient, customer_id: int
+):
+    first = _generate_plan(auth_client, customer_id).json()["data"]
+    second = _generate_plan(auth_client, customer_id).json()["data"]
+    assert first["id"] != second["id"]
+
+    # 重新生成不会改写第一条原稿——再次读取第一条，内容仍与生成时一致。
+    refetched_first = auth_client.get(
+        f"/api/internal/advisory/drafts/{first['id']}",
+        headers=_employee_headers(auth_client),
+    ).json()["data"]
+    assert refetched_first["candidates"] == first["candidates"]
+
+
+def test_ai_draft_records_generation_time_profile_version_and_candidate_pool_snapshot(
+    auth_client: TestClient, customer_id: int
+):
+    data = _generate_plan(auth_client, customer_id).json()["data"]
+
+    assert data["generated_at"]
+    assert data["profile_computed_at"]
+    snapshot = data["candidate_pool_snapshot"]
+    assert snapshot["customer_risk_level"] == "C3"
+    assert {item["product_code"] for item in snapshot["products"]} >= {
+        "F000001",
+        "F000002",
+        "F000003",
+    }
+
+
+def test_content_classification_stays_advisory_even_with_an_empty_candidate_list(
+    auth_client: TestClient,
+):
+    # C1 客户的候选池只有 R1（F000001）；把它也持有掉，候选池内排序无产品
+    # 可排——分类由「调用了推荐类工具」决定，不看排序有没有产出结果。
+    created_id = _insert_customer(
+        username=f"advisoryempty_{id(object())}",
+        risk_level="C1",
+        held_product_codes=("F000001",),
+    )
+    try:
+        response = _generate_plan(auth_client, created_id)
+        data = response.json()["data"]
+        assert data["candidates"] == []
+        assert data["content_classification"] == "投顾内容"
+    finally:
+        _delete_customer(created_id)
+
+
+def test_advisory_content_carries_a_template_disclaimer(
+    auth_client: TestClient, customer_id: int
+):
+    data = _generate_plan(auth_client, customer_id).json()["data"]
+    assert data["disclaimer"]
+    assert "不构成任何直接投资建议" in data["disclaimer"]
+
+
+def test_customer_token_cannot_read_an_ai_draft(auth_client: TestClient, customer_id: int):
+    generated = _generate_plan(auth_client, customer_id).json()["data"]
+
+    response = auth_client.get(
+        f"/api/internal/advisory/drafts/{generated['id']}",
+        headers=_customer_headers(auth_client),
+    )
+    assert response.status_code in (401, 403)
+
+
+def test_account_manager_cannot_read_an_ai_draft(auth_client: TestClient, customer_id: int):
+    generated = _generate_plan(auth_client, customer_id).json()["data"]
+
+    response = auth_client.get(
+        f"/api/internal/advisory/drafts/{generated['id']}",
+        headers=_employee_headers(auth_client, ACCOUNT_MANAGER),
+    )
+    assert response.status_code == 403

@@ -1,7 +1,9 @@
 """投顾助手 Agent 的生成入口：候选池内排序、配置建议与画像警示。
 
-产出目前只是即时计算结果，尚未落库——AI 原稿的落库、内容分类与免责声明
-是 `AI 原稿落库与内容分类`（下一个 issue）的范围，这里不提前实现。
+产出以 AI 原稿的形式落库（`app.advisory.draft`），落库后不可修改。内容
+分类固定为投顾内容——这份 Agent 配置里的工具全是推荐类工具（候选池排序、
+配置建议），调用了它们即产出投顾内容，不由模型自己声明。免责声明由
+模板附加（`app.agent.classification`），不依赖模型记得写。
 """
 
 from datetime import datetime
@@ -9,6 +11,7 @@ from datetime import datetime
 import redis
 from sqlalchemy.orm import Session
 
+from app.advisory.draft import DraftContent, record_draft, serialize_draft
 from app.advisory.graph import AdvisoryState, build_graph
 from app.advisory.scoring import ALLOWED_TILTS, TILT_BALANCED
 from app.agent.config import ADVISORY_CONFIG
@@ -26,6 +29,7 @@ def generate_advisory_plan(
     cache: redis.Redis,
     *,
     customer_id: int,
+    advisor_id: int,
     tilt: str | None,
     now: datetime,
 ) -> dict:
@@ -38,12 +42,21 @@ def generate_advisory_plan(
         {"customer_id": customer_id, "tilt": resolved_tilt, "now": now}
     )
 
-    return {
-        "customer_id": customer_id,
-        "tilt": resolved_tilt,
-        "generated_at": now.isoformat(),
-        "content_classification": ADVISORY_CONFIG.content_classification_default,
-        "candidates": [_serialize_candidate(candidate) for candidate in final_state["candidates"]],
-        "allocation_suggestion": final_state["allocation_suggestion"],
-        "warnings": final_state["warnings"],
-    }
+    draft = record_draft(
+        db,
+        DraftContent(
+            customer_id=customer_id,
+            advisor_id=advisor_id,
+            tilt=resolved_tilt,
+            content_classification=ADVISORY_CONFIG.content_classification_default,
+            candidates=[
+                _serialize_candidate(candidate) for candidate in final_state["candidates"]
+            ],
+            allocation_suggestion=final_state["allocation_suggestion"],
+            warnings=final_state["warnings"],
+            profile_computed_at=datetime.fromisoformat(final_state["profile"]["computed_at"]),
+            candidate_pool_snapshot=final_state["candidate_pool"],
+            generated_at=now,
+        ),
+    )
+    return serialize_draft(draft)

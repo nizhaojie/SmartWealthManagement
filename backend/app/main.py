@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from app.api.advisory import router as advisory_router
 from app.api.advisory_request import internal_router as advisory_request_internal_router
 from app.api.advisory_request import router as advisory_request_router
 from app.api.analytics import router as analytics_router
@@ -113,3 +114,4 @@ app.include_router(customer_assets_router)
 app.include_router(advisory_request_router)
 app.include_router(advisory_request_internal_router)
 app.include_router(analytics_router)
+app.include_router(advisory_router)

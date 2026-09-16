@@ -22,3 +22,11 @@ DATA_ANALYSIS_CONFIG = AgentConfig(
     content_classification_default="事实性内容",
     # 数据分析不使用知识库检索，retrieval_top_k 保持缺省。
 )
+
+ADVISORY_CONFIG = AgentConfig(
+    name="advisory",
+    tools=("candidate_pool_ranking", "allocation_suggestion"),
+    # 调用了推荐类工具即产出投顾内容，因此默认分类是投顾内容，必须经理财顾问审核。
+    content_classification_default="投顾内容",
+    # 投顾助手不做知识库检索，retrieval_top_k 保持缺省。
+)

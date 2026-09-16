@@ -58,6 +58,16 @@ def _risk_level_conclusion(db: Session, *, customer_id: int) -> tuple[str | None
     return result["risk_level"], result["valid_until"]
 
 
+def list_held_product_codes(db: Session, *, customer_id: int) -> set[str]:
+    return set(
+        db.scalars(
+            select(Product.product_code)
+            .join(Holding, Holding.product_id == Product.id)
+            .where(Holding.customer_id == customer_id, Holding.status == HELD_STATUS)
+        ).all()
+    )
+
+
 def get_assets(db: Session, *, customer_id: int) -> dict:
     rows = db.execute(
         select(Holding, Product)

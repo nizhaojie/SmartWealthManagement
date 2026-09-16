@@ -136,11 +136,21 @@ def _customer_has_prior_alert(db: Session, *, customer_id: int, now: datetime) -
     「历史预警记录」说的是本系统已经记下了什么，与交易发生在什么时候是两件事。
     回放一笔旧交易时，晚于它、但已经被记录下来的预警仍然算这家客户的既有记录——
     否则同一位客户的历史会在回放里凭空消失。
+
+    边界放宽到下一秒，因为 `create_time` 是秒精度的列：MySQL 存小数秒时四舍五入，
+    `.6` 秒会被存成下一秒，于是刚写下的那条可能比 `now` 还大零点几秒。用
+    `create_time < now` 去比会把它排除在外——同一秒里接连发生的两笔交易于是被算成
+    「没有历史」，多规则交叉的重度直接降成中度，而它恰恰是最该先看的那一条。
+    本条预警此时还没有落库（`db.add` 在下面），所以放宽一秒不会把正在产生的这条
+    算成自己的历史。
     """
     count = db.scalar(
         select(func.count())
         .select_from(RiskAlert)
-        .where(RiskAlert.customer_id == customer_id, RiskAlert.create_time < now)
+        .where(
+            RiskAlert.customer_id == customer_id,
+            RiskAlert.create_time <= now + timedelta(seconds=1),
+        )
     )
     return bool(count)
 

@@ -266,6 +266,57 @@ def test_crossing_rules_with_a_history_is_severe(auth_client: TestClient):
     assert {"R001", "R019"} <= set(severe["rule_codes"])
 
 
+def test_an_alert_recorded_in_the_same_second_still_counts_as_history(
+    auth_client: TestClient, monkeypatch: pytest.MonkeyPatch
+):
+    """秒精度的 create_time 会把小数秒四舍五入，刚记下的预警可能比请求时刻还晚。
+
+    它仍然是这位客户的历史记录。用「create_time < 请求时刻」去比会把它排除在外，
+    同一秒里接连发生的两笔交易于是被算成没有历史——多规则交叉的重度降成中度，
+    最该先看的那一条反而排在后面。
+
+    时刻是写死的，不靠跑得够快：`.6` 秒那一行落库一定变成下一秒，请求时刻固定在
+    它之前 0.05 秒，于是这条断言要么一直是绿的，要么一直指得出问题。
+    """
+    engine = _engine()
+    headers = _headers(auth_client)
+    customer_id = _customer_id(engine, CUSTOMER_SEVERE)
+    product_id = _product_id(engine, PRODUCT_R5)
+
+    written_at = datetime(2026, 9, 10, 11, 0, 0, 600_000)
+    with OrmSession(engine) as session:
+        session.add(
+            RiskAlert(
+                customer_id=customer_id,
+                alert_type="大额交易",
+                alert_level="轻度",
+                confidence=Decimal("0.10"),
+                rule_codes=["R001"],
+                trigger_detail="交易金额 1000 ≥ 阈值 50000",
+                transaction_ids=[],
+                status="未处理",
+                handler_id=None,
+                handle_result=None,
+                create_time=written_at,
+                update_time=written_at,
+            )
+        )
+        session.commit()
+
+    monkeypatch.setattr(
+        "app.api.transaction_events._now", lambda: datetime(2026, 9, 10, 11, 0, 0, 650_000)
+    )
+    response = _submit(
+        auth_client,
+        headers,
+        customer_id=customer_id,
+        product_id=product_id,
+        amount="600000.00",
+    )
+
+    assert response.json()["data"]["alerts"][0]["alert_level"] == "重度"
+
+
 def test_a_broken_bus_does_not_stop_the_transaction_or_the_alert(auth_client: TestClient):
     """广播通道不可用时：交易照常落库，预警照常产生。"""
     engine = _engine()

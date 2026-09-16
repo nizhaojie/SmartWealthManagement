@@ -17,6 +17,8 @@ EXPECTED_TABLES = {
     "fin_holdings",
     "fin_risk_assessment",
     "fin_risk_alert",
+    "fin_risk_rule",
+    "fin_risk_rule_change",
     "biz_work_order",
     "conversation_archive",
     "fin_knowledge_meta",
@@ -88,6 +90,25 @@ def test_seed_loads_customers_catalog_holdings_and_transactions():
     assert transactions >= 5
     assert assessments == 5
     assert plaintext == 0
+
+
+def test_seed_loads_twenty_risk_rules():
+    apply_schema(_test_url())
+    seed(_test_url())
+
+    with _test_engine().connect() as connection:
+        rules = connection.execute(text("SELECT COUNT(*) FROM fin_risk_rule")).scalar()
+        enabled = connection.execute(
+            text("SELECT COUNT(*) FROM fin_risk_rule WHERE enabled = 1")
+        ).scalar()
+        operators = {
+            row[0]
+            for row in connection.execute(text("SELECT DISTINCT operator FROM fin_risk_rule"))
+        }
+
+    assert rules == 20
+    assert enabled == 20
+    assert operators
 
 
 def test_risk_grades_are_stored_as_codes_not_chinese_names():

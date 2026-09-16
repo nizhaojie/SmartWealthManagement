@@ -4,6 +4,7 @@ from decimal import Decimal
 from sqlalchemy import (
     JSON,
     BigInteger,
+    Boolean,
     CheckConstraint,
     Date,
     DateTime,
@@ -318,6 +319,104 @@ class SuitabilityDecision(Base):
     customer_risk_level: Mapped[str] = mapped_column(String(8), comment="判定时的风险承受等级")
     allowed_product_risk_levels: Mapped[list] = mapped_column(JSON, comment="允许的产品风险等级")
     decided_at: Mapped[datetime] = mapped_column(DateTime, comment="判定时间")
+    create_time: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class RiskRule(Base):
+    """风控规则：存储在库中的声明式条件，由代码中封闭的算子求值。
+
+    可配的只有五个部分：取哪个 `field`、用哪个 `operator` 比、阈值多少、时间窗
+    多长、命中算什么等级。没有「并且」「或者」，也拼不出表达式——能表达的只有
+    `app.risk_monitoring.operators` 里那几种形状。新增一种判定方式必须改代码并出
+    迁移，下面三条 CHECK 守的是同一份清单。
+
+    `alert_level` 是规则自身的预警等级，不是「命中这条规则就一定产生该等级预警」
+    ——预警的等级由命中条数与该客户的历史预警记录推导。
+    """
+
+    __tablename__ = "fin_risk_rule"
+    __table_args__ = (
+        CheckConstraint(
+            "alert_level IN ('轻度','中度','重度')",
+            name="ck_risk_rule_alert_level",
+        ),
+        CheckConstraint(
+            "operator IN ("
+            "'gt','gte','lt','lte','eq','ne','between','outside',"
+            "'window_count_gte','window_sum_gte','window_max_gte',"
+            "'window_distinct_count_gte','daily_count_gte','daily_sum_gte')",
+            name="ck_risk_rule_operator",
+        ),
+        CheckConstraint(
+            "window_hours IS NOT NULL OR operator NOT IN "
+            "('window_count_gte','window_sum_gte','window_max_gte',"
+            "'window_distinct_count_gte')",
+            name="ck_risk_rule_window_hours",
+        ),
+        CheckConstraint(
+            "field IN ("
+            "'amount','purchase_amount','redeem_amount','hour_of_day',"
+            "'amount_to_assets_ratio','risk_level_gap','reverse_interval_hours',"
+            "'threshold_avoidance_amount','small_amount','large_round_amount',"
+            "'product_id')",
+            name="ck_risk_rule_field",
+        ),
+        {"comment": "风控规则"},
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    rule_code: Mapped[str] = mapped_column(String(16), unique=True, comment="规则编号")
+    rule_name: Mapped[str] = mapped_column(String(128), comment="规则名称")
+    category: Mapped[str] = mapped_column(String(32), comment="规则分类")
+    description: Mapped[str] = mapped_column(Text, comment="触发条件描述")
+    field: Mapped[str] = mapped_column(String(32), comment="被判定的字段")
+    operator: Mapped[str] = mapped_column(String(32), comment="运算符")
+    threshold: Mapped[dict] = mapped_column(JSON, comment="阈值")
+    window_hours: Mapped[int | None] = mapped_column(
+        comment="时间窗长度（小时），仅时间窗算子使用"
+    )
+    alert_level: Mapped[str] = mapped_column(String(8), comment="预警等级")
+    weight: Mapped[Decimal] = mapped_column(Numeric(5, 2), comment="规则权重")
+    enabled: Mapped[bool] = mapped_column(
+        Boolean, default=True, comment="是否启用；停用后不参与匹配"
+    )
+    create_time: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    update_time: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class RiskRuleChange(Base):
+    """风控规则的调整记录：谁在什么时候把什么改成了什么，理由是什么。
+
+    阈值是监管口径的落点，口径一变就得跟着变，所以「变了」本身必须可追溯——只看
+    到现在的阈值，看不出它是初始口径还是上周被谁调过。启停同样记一笔。
+    """
+
+    __tablename__ = "fin_risk_rule_change"
+    __table_args__ = (
+        Index("ix_risk_rule_change_rule_id", "rule_id"),
+        CheckConstraint(
+            "change_type IN ('阈值调整','启停变更')",
+            name="ck_risk_rule_change_type",
+        ),
+        {"comment": "风控规则调整记录"},
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    rule_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("fin_risk_rule.id"), comment="规则标识"
+    )
+    change_type: Mapped[str] = mapped_column(String(16), comment="调整类型")
+    old_value: Mapped[dict] = mapped_column(JSON, comment="调整前的配置项")
+    new_value: Mapped[dict] = mapped_column(JSON, comment="调整后的配置项")
+    # 这里叫 changed_by 而不是 operator_id：规则表上已经有一个「运算符」叫 operator，
+    # 同词异义比多一个字母难读得多。
+    changed_by: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("sys_employee.id"), comment="调整人"
+    )
+    reason: Mapped[str] = mapped_column(Text, comment="调整理由")
+    changed_at: Mapped[datetime] = mapped_column(DateTime, comment="调整时间")
     create_time: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 

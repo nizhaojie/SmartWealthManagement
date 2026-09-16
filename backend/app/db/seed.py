@@ -16,9 +16,11 @@ from app.db.models import (
     ProductUnderlying,
     ProfileTag,
     RiskAssessment,
+    RiskRule,
     Transaction,
     UnderlyingAsset,
 )
+from app.risk_monitoring.rules import RISK_RULE_SEEDS
 from app.settings import get_settings
 
 DEFAULT_PASSWORD = "Test@1234"
@@ -402,6 +404,7 @@ def seed(database_url: str | None = None) -> None:
             products = _seed_products(session)
             _seed_underlyings(session)
             _seed_customers(session, password_hash, products, employees)
+            _seed_risk_rules(session)
             session.commit()
     finally:
         engine.dispose()
@@ -603,6 +606,34 @@ def _seed_customers(
                     create_time=item["trade_at"],
                 )
             )
+
+
+def _seed_risk_rules(session: Session) -> None:
+    """写入 20 条风控规则；只补缺失的，不回改已经存在的。
+
+    规则一旦入库就归风控专员管：改阈值、改启停都在界面上做并留痕。seed 若去对齐
+    既有记录，就会在谁都没留痕的情况下把专员调过的口径改回代码里的默认值——比不改
+    更糟。代码里的定义只对首次建库生效。
+    """
+    existing = {rule.rule_code for rule in session.scalars(select(RiskRule)).all()}
+    for spec in RISK_RULE_SEEDS:
+        if spec.rule_code in existing:
+            continue
+        session.add(
+            RiskRule(
+                rule_code=spec.rule_code,
+                rule_name=spec.rule_name,
+                category=spec.category,
+                description=spec.description,
+                field=spec.field,
+                operator=spec.operator,
+                threshold=dict(spec.threshold),
+                window_hours=spec.window_hours,
+                alert_level=spec.alert_level,
+                weight=spec.weight,
+                enabled=spec.enabled,
+            )
+        )
 
 
 def _seed_profile_tags(session: Session, customer_id: int, item: CustomerSeed) -> None:

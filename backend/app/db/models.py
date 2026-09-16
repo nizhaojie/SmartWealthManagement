@@ -429,6 +429,95 @@ class AdvisoryDraft(Base):
     create_time: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 
+class AdvisoryReview(Base):
+    """AI 原稿的审核状态与并发锁；同一份原稿最多一条审核记录。
+
+    `thread_id` 是生成流程在 LangGraph 运行时上的线程标识——放行或驳回时
+    靠它找到那次运行、把它从中断处恢复（ADR-0007），不是自己维护的状态机。
+    """
+
+    __tablename__ = "biz_advisory_review"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('待审','处理中','已放行','已驳回')",
+            name="ck_advisory_review_status",
+        ),
+        {"comment": "投顾内容审核状态"},
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    draft_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("biz_advisory_draft.id"), unique=True, comment="对应的 AI 原稿"
+    )
+    thread_id: Mapped[str] = mapped_column(
+        String(64), unique=True, comment="生成流程在运行时上的线程标识"
+    )
+    status: Mapped[str] = mapped_column(String(16), comment="审核状态")
+    create_time: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    update_time: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class AdvisoryReviewAudit(Base):
+    __tablename__ = "biz_advisory_review_audit"
+    __table_args__ = (
+        Index("ix_advisory_review_audit_review_id", "review_id"),
+        CheckConstraint(
+            "action IN ('放行','驳回')",
+            name="ck_advisory_review_audit_action",
+        ),
+        {"comment": "审核操作留痕"},
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    review_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("biz_advisory_review.id"), comment="对应的审核记录"
+    )
+    advisor_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("sys_employee.id"), comment="审核人"
+    )
+    action: Mapped[str] = mapped_column(String(8), comment="操作")
+    reason: Mapped[str | None] = mapped_column(Text, comment="驳回理由")
+    decided_at: Mapped[datetime] = mapped_column(DateTime, comment="操作时间")
+    create_time: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class AdvisoryFinal(Base):
+    """顾问定稿；唯一允许送达客户的版本，落库后不可修改。
+
+    与 AI 原稿并存，两者的差异是举证「审核是实质性的」的依据，见
+    app.advisory.draft。
+    """
+
+    __tablename__ = "biz_advisory_final"
+    __table_args__ = (
+        Index("ix_advisory_final_customer_id", "customer_id"),
+        CheckConstraint(
+            "content_classification IN ('投顾内容','事实性内容')",
+            name="ck_advisory_final_content_classification",
+        ),
+        {"comment": "顾问定稿"},
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    draft_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("biz_advisory_draft.id"), unique=True, comment="对应的 AI 原稿"
+    )
+    customer_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("sys_customer.id"), comment="客户标识"
+    )
+    advisor_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("sys_employee.id"), comment="放行的理财顾问"
+    )
+    content_classification: Mapped[str] = mapped_column(String(32), comment="内容分类")
+    candidates: Mapped[list] = mapped_column(JSON, comment="顾问确认后的推荐产品与理由")
+    allocation_suggestion: Mapped[dict] = mapped_column(JSON, comment="顾问确认后的配置建议")
+    warnings: Mapped[list] = mapped_column(JSON, comment="顾问确认后的画像警示")
+    released_at: Mapped[datetime] = mapped_column(DateTime, comment="放行时间")
+    create_time: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
 class ConversationArchive(Base):
     __tablename__ = "conversation_archive"
     __table_args__ = (

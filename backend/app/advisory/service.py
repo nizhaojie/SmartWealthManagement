@@ -1,27 +1,23 @@
-"""投顾助手 Agent 的生成入口：候选池内排序、配置建议与画像警示。
+"""投顾助手 Agent 的生成入口：把一次生成运行推进到审核中断点。
 
-产出以 AI 原稿的形式落库（`app.advisory.draft`），落库后不可修改。内容
-分类固定为投顾内容——这份 Agent 配置里的工具全是推荐类工具（候选池排序、
-配置建议），调用了它们即产出投顾内容，不由模型自己声明。免责声明由
-模板附加（`app.agent.classification`），不依赖模型记得写。
+产出以 AI 原稿的形式落库（`app.advisory.draft`），随后图用运行时的
+`interrupt()` 暂停等待人工审核（`app.advisory.graph`）——本函数只发起
+运行、拿到暂停前落库的原稿并返回，不关心恢复；恢复是
+`app.advisory.review` 的职责。
 """
 
 from datetime import datetime
+from uuid import uuid4
 
 import redis
 from sqlalchemy.orm import Session
 
-from app.advisory.draft import DraftContent, record_draft, serialize_draft
+from app.advisory.draft import get_draft, serialize_draft
 from app.advisory.graph import AdvisoryState, build_graph
 from app.advisory.scoring import ALLOWED_TILTS, TILT_BALANCED
-from app.agent.config import ADVISORY_CONFIG
 from app.exceptions import AppError
 
 UNKNOWN_TILT_MESSAGE = "未知的生成侧重"
-
-
-def _serialize_candidate(candidate: dict) -> dict:
-    return {**candidate, "expected_return": format(candidate["expected_return"], "f")}
 
 
 def generate_advisory_plan(
@@ -38,25 +34,17 @@ def generate_advisory_plan(
         raise AppError(400, UNKNOWN_TILT_MESSAGE)
 
     graph = build_graph(db, cache)
+    thread_id = uuid4().hex
     final_state: AdvisoryState = graph.invoke(
-        {"customer_id": customer_id, "tilt": resolved_tilt, "now": now}
+        {
+            "customer_id": customer_id,
+            "advisor_id": advisor_id,
+            "tilt": resolved_tilt,
+            "now": now,
+            "thread_id": thread_id,
+        },
+        {"configurable": {"thread_id": thread_id}},
     )
 
-    draft = record_draft(
-        db,
-        DraftContent(
-            customer_id=customer_id,
-            advisor_id=advisor_id,
-            tilt=resolved_tilt,
-            content_classification=ADVISORY_CONFIG.content_classification_default,
-            candidates=[
-                _serialize_candidate(candidate) for candidate in final_state["candidates"]
-            ],
-            allocation_suggestion=final_state["allocation_suggestion"],
-            warnings=final_state["warnings"],
-            profile_computed_at=datetime.fromisoformat(final_state["profile"]["computed_at"]),
-            candidate_pool_snapshot=final_state["candidate_pool"],
-            generated_at=now,
-        ),
-    )
+    draft = get_draft(db, final_state["draft_id"])
     return serialize_draft(draft)

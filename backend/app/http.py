@@ -27,6 +27,6 @@ def fail(code: int, message: str, data: Any = None, status_code: int | None = No
 
 
 def _http_status_for(code: int) -> int:
-    if code in {400, 401, 403, 404, 500}:
+    if code in {400, 401, 403, 404, 409, 500}:
         return code
     return 200

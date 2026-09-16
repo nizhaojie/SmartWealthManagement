@@ -17,6 +17,9 @@ from sqlalchemy.orm import Session as OrmSession
 from app.customer_profile.confidence import SOURCE_QUESTIONNAIRE
 from app.db.models import (
     AdvisoryDraft,
+    AdvisoryFinal,
+    AdvisoryReview,
+    AdvisoryReviewAudit,
     Customer,
     CustomerProfile,
     Holding,
@@ -169,6 +172,21 @@ def _delete_customer(customer_id: int) -> None:
     engine = _engine()
     try:
         with OrmSession(engine) as session:
+            draft_ids = session.scalars(
+                select(AdvisoryDraft.id).where(AdvisoryDraft.customer_id == customer_id)
+            ).all()
+            if draft_ids:
+                review_ids = session.scalars(
+                    select(AdvisoryReview.id).where(AdvisoryReview.draft_id.in_(draft_ids))
+                ).all()
+                if review_ids:
+                    session.execute(
+                        delete(AdvisoryReviewAudit).where(
+                            AdvisoryReviewAudit.review_id.in_(review_ids)
+                        )
+                    )
+                session.execute(delete(AdvisoryFinal).where(AdvisoryFinal.draft_id.in_(draft_ids)))
+                session.execute(delete(AdvisoryReview).where(AdvisoryReview.draft_id.in_(draft_ids)))
             session.execute(delete(AdvisoryDraft).where(AdvisoryDraft.customer_id == customer_id))
             session.execute(delete(Holding).where(Holding.customer_id == customer_id))
             session.execute(delete(ProfileTag).where(ProfileTag.customer_id == customer_id))

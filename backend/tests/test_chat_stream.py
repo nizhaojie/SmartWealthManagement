@@ -20,6 +20,9 @@ def chat_client(auth_client: TestClient) -> Iterator[TestClient]:
             "milvus_collection": base_settings.test_milvus_collection,
             "embedding_api_key": "",
             "llm_api_key": "",
+            # 见 test_customer_service_agent.py 的 chat_client：保证 GraphRAG
+            # 融合在这些流式测试里稳定走空图谱降级，不与图谱测试的命名空间耦合。
+            "neo4j_graph_namespace": "wealth_test_customer_service_agent_unused",
         }
     )
     app.dependency_overrides[get_settings] = lambda: test_settings

@@ -75,6 +75,13 @@ class Settings(BaseSettings):
     chat_memory_token_budget: int = 2000
     human_service_channel: str = "95588"
 
+    # GraphRAG 融合排序权重：综合分 = vector_weight * 向量分 + graph_weight * 图谱分。
+    # 两者默认相加为 1，与既有 retrieval_score_threshold 同一量纲，改权重不改代码。
+    graphrag_vector_weight: float = 0.6
+    graphrag_graph_weight: float = 0.4
+    # 图谱查询墙钟超时（秒）；超时静默降级为纯向量检索。
+    graphrag_query_timeout_seconds: float = 2.0
+
     @property
     def resolved_llm_provider(self) -> str:
         if not self.llm_api_key:

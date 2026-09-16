@@ -1,7 +1,7 @@
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import TypeVar
+from typing import Literal, TypeVar
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -55,6 +55,9 @@ class ChunkResult:
     score: float
     title: str
     source_file: str
+    # GraphRAG 融合（ticket 03）新增：向量检索产出的结果固定是 "vector"，
+    # 图谱查询产出的段落会用 "graph" 构造同类型对象以便和向量结果一起排序。
+    source: Literal["vector", "graph"] = "vector"
 
 
 def create_pending_document(

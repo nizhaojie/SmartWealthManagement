@@ -3,13 +3,16 @@ from typing import TypedDict
 
 import redis
 from langgraph.graph import END, StateGraph
+from neo4j import Driver
 from sqlalchemy.orm import Session
 
 from app.agent import archive, memory
 from app.agent.citations import Citation, build_citations
 from app.agent.config import CUSTOMER_SERVICE_CONFIG
+from app.agent.fusion import fuse_and_rank
 from app.agent.intent import RETRIEVAL_INTENTS, Intent, classify_intent
 from app.knowledge.service import ChunkResult, search_chunks
+from app.knowledge_graph.graphrag import augment_with_graph
 from app.llm.provider import generate_chitchat_reply, generate_grounded_answer
 from app.settings import Settings
 
@@ -43,7 +46,7 @@ class ChatTurnResult:
     content_classification: str
 
 
-def _build_graph(db: Session, settings: Settings):
+def _build_graph(db: Session, settings: Settings, driver: Driver, graph_namespace: str):
     graph = StateGraph(AgentState)
 
     def classify_node(state: AgentState) -> dict:
@@ -63,6 +66,32 @@ def _build_graph(db: Session, settings: Settings):
         }
         return {"chunks": chunks, "tool_calls": [*state.get("tool_calls", []), tool_call]}
 
+    def graph_augment_node(state: AgentState) -> dict:
+        augmentation = augment_with_graph(
+            driver,
+            db,
+            namespace=graph_namespace,
+            question=state["question"],
+            timeout_seconds=settings.graphrag_query_timeout_seconds,
+        )
+        fused = fuse_and_rank(
+            state["chunks"],
+            augmentation.passages,
+            vector_weight=settings.graphrag_vector_weight,
+            graph_weight=settings.graphrag_graph_weight,
+        )
+        tool_call = {
+            "tool": "graphrag_fusion",
+            "input": {"question": state["question"]},
+            "output": {
+                "matched_entities": augmentation.matched_entities,
+                "graph_hit_count": len(augmentation.passages),
+                "degraded": augmentation.degraded,
+                "degradation_reason": augmentation.degradation_reason,
+            },
+        }
+        return {"chunks": fused, "tool_calls": [*state.get("tool_calls", []), tool_call]}
+
     def generate_node(state: AgentState) -> dict:
         chunks = state["chunks"]
         result = generate_grounded_answer(state["question"], state["history"], chunks, settings)
@@ -80,6 +109,7 @@ def _build_graph(db: Session, settings: Settings):
 
     graph.add_node("classify", classify_node)
     graph.add_node("retrieve", retrieve_node)
+    graph.add_node("graph_augment", graph_augment_node)
     graph.add_node("generate", generate_node)
     graph.add_node("fallback", fallback_node)
     graph.add_node("chitchat", chitchat_node)
@@ -98,14 +128,17 @@ def _build_graph(db: Session, settings: Settings):
 
     graph.add_conditional_edges("classify", route_after_classify)
 
+    graph.add_edge("retrieve", "graph_augment")
+
     def route_after_retrieve(state: AgentState) -> str:
         chunks = state["chunks"]
-        # search_chunks 依赖 Milvus 按相似度降序返回命中，chunks[0] 即最高分。
+        # 融合已经把向量结果与图谱结果按综合分排好序（graph_augment_node），
+        # chunks[0] 即最高分，不论它来自哪条路径。
         if not chunks or chunks[0].score < settings.retrieval_score_threshold:
             return "fallback"
         return "generate"
 
-    graph.add_conditional_edges("retrieve", route_after_retrieve)
+    graph.add_conditional_edges("graph_augment", route_after_retrieve)
 
     graph.add_edge("generate", END)
     graph.add_edge("fallback", END)
@@ -120,12 +153,13 @@ def run_customer_service_turn(
     cache: redis.Redis,
     settings: Settings,
     *,
+    driver: Driver,
     session_id: str,
     user_id: int,
     question: str,
 ) -> ChatTurnResult:
     history = memory.get_history(cache, session_id)
-    graph = _build_graph(db, settings)
+    graph = _build_graph(db, settings, driver, settings.neo4j_graph_namespace)
     final_state: AgentState = graph.invoke(
         {"question": question, "history": history, "tool_calls": []}
     )

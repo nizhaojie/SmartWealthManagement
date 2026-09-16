@@ -5,6 +5,7 @@ from collections.abc import Generator
 import redis
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
+from neo4j import Driver
 from sqlalchemy.orm import Session
 
 from app.agent.graph import run_customer_service_turn
@@ -12,6 +13,7 @@ from app.agent.schemas import ChatRequest, ChatResponse, CitationResponse
 from app.auth.dependencies import AuthContext, require_customer
 from app.db.session import get_session
 from app.http import ok
+from app.neo4j_client import get_neo4j
 from app.redis_client import get_redis
 from app.settings import Settings, get_settings
 
@@ -28,11 +30,13 @@ def _run_turn(
     cache: redis.Redis,
     settings: Settings,
     auth: AuthContext,
+    driver: Driver,
 ) -> ChatResponse:
     result = run_customer_service_turn(
         db,
         cache,
         settings,
+        driver=driver,
         session_id=auth.session_id,
         user_id=auth.subject_id,
         question=body.message,
@@ -55,8 +59,9 @@ def send_message(
     cache: redis.Redis = Depends(get_redis),
     settings: Settings = Depends(get_settings),
     auth: AuthContext = Depends(require_customer),
+    driver: Driver = Depends(get_neo4j),
 ):
-    return ok(_run_turn(body, db, cache, settings, auth).model_dump())
+    return ok(_run_turn(body, db, cache, settings, auth, driver).model_dump())
 
 
 def _sse_frame(data: dict, *, event: str | None = None) -> str:
@@ -83,6 +88,7 @@ def stream_message(
     cache: redis.Redis = Depends(get_redis),
     settings: Settings = Depends(get_settings),
     auth: AuthContext = Depends(require_customer),
+    driver: Driver = Depends(get_neo4j),
 ):
-    response = _run_turn(body, db, cache, settings, auth)
+    response = _run_turn(body, db, cache, settings, auth, driver)
     return StreamingResponse(_stream_chat_response(response), media_type=SSE_MEDIA_TYPE)

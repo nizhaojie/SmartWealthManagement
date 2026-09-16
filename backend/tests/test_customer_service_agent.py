@@ -33,6 +33,11 @@ def chat_client(auth_client: TestClient) -> Iterator[TestClient]:
             "milvus_collection": base_settings.test_milvus_collection,
             "embedding_api_key": "",
             "llm_api_key": "",
+            # 独立、从不重建的命名空间：这些测试断言的是向量检索路径本身，
+            # 不需要图谱数据参与——用一个保证为空的命名空间，让 GraphRAG 融合
+            # 稳定走「实体未命中」静默降级，不会因为别的测试模块重建过
+            # test_neo4j_graph_namespace 而产生跨文件的结果耦合。
+            "neo4j_graph_namespace": "wealth_test_customer_service_agent_unused",
         }
     )
     app.dependency_overrides[get_settings] = lambda: test_settings

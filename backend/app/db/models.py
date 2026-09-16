@@ -421,6 +421,17 @@ class RiskRuleChange(Base):
 
 
 class RiskAlert(Base):
+    """预警：规则命中后产生的、带等级与置信度的事实记录（CONTEXT「预警」）。
+
+    它承载的全部内容是「什么规则在什么交易上命中了」：命中的规则编号、关联交易、
+    关联客户、等级、置信度、可展示到字段与值粒度的触发详情。
+
+    `status` / `handler_id` / `handle_result` 是预警**自身**的处置留痕（未处理 →
+    已排除 / 已升级），由处置链路写入，不从预警派生工单那一刻起就替工单干活。
+    工单有自己的受理人、节点与流转理由，两套生命周期不合并——把工单的状态字段
+    搬进预警表会让「预警是什么」变得含糊。
+    """
+
     __tablename__ = "fin_risk_alert"
     __table_args__ = {"comment": "预警"}
 
@@ -430,6 +441,10 @@ class RiskAlert(Base):
     )
     alert_type: Mapped[str] = mapped_column(String(32), comment="预警类型")
     alert_level: Mapped[str] = mapped_column(String(8), comment="预警级别")
+    confidence: Mapped[Decimal] = mapped_column(
+        Numeric(5, 2), comment="置信度；仅用于排序与分级展示"
+    )
+    rule_codes: Mapped[list] = mapped_column(JSON, comment="命中的规则编号")
     trigger_detail: Mapped[str] = mapped_column(Text, comment="触发详情")
     transaction_ids: Mapped[list | None] = mapped_column(JSON, comment="关联交易标识")
     status: Mapped[str] = mapped_column(String(16), comment="预警状态")

@@ -26,6 +26,7 @@ from app.api.products import router as products_router
 from app.api.risk_rules import router as risk_rules_router
 from app.api.suitability import internal_router as suitability_internal_router
 from app.api.suitability import router as suitability_router
+from app.api.transaction_events import router as transaction_events_router
 from app.exceptions import AppError
 from app.http import fail
 from app.logging_setup import setup_logging
@@ -123,3 +124,4 @@ app.include_router(advisory_router)
 app.include_router(advisory_customer_router)
 app.include_router(graph_router)
 app.include_router(risk_rules_router)
+app.include_router(transaction_events_router)

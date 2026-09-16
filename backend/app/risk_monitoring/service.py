@@ -76,14 +76,24 @@ def list_rule_changes(db: Session, rule_id: int) -> list[RiskRuleChange]:
     )
 
 
-def match_enabled_rules(db: Session, context: MonitoringContext) -> list[RuleHit]:
-    """拿库里所有启用的规则对一笔交易事件求值。停用的规则不参与匹配。"""
+def enabled_rule_specs(db: Session) -> list[RuleSpec]:
+    """库里启用的规则，按编号排序。停用的规则不参与匹配。
+
+    单独拿出来是因为匹配之外还有人要看这批规则：计算历史该回溯多久要读它们的
+    时间窗（见 `alerting.history_lookback_hours`）。两处读同一批规则，就不会
+    出现「匹配用了 30 天窗、历史只取了 7 天」这种静默漏报。
+    """
     rules = db.scalars(
         select(RiskRule)
         .where(RiskRule.enabled.is_(True))
         .order_by(RiskRule.rule_code.asc())
     ).all()
-    return match_rules((spec_from_model(rule) for rule in rules), context)
+    return [spec_from_model(rule) for rule in rules]
+
+
+def match_enabled_rules(db: Session, context: MonitoringContext) -> list[RuleHit]:
+    """拿库里所有启用的规则对一笔交易事件求值。"""
+    return match_rules(enabled_rule_specs(db), context)
 
 
 def _require_reason(reason: str) -> str:

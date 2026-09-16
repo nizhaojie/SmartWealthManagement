@@ -3,6 +3,7 @@ from pydantic import BaseModel
 
 class AdvisoryPlanRequest(BaseModel):
     tilt: str | None = None
+    advisory_request_id: int | None = None
 
 
 class AdvisoryReleaseRequest(BaseModel):
@@ -13,3 +14,7 @@ class AdvisoryReleaseRequest(BaseModel):
 
 class AdvisoryRejectRequest(BaseModel):
     reason: str | None = None
+
+
+class AdvisoryCommentRequest(BaseModel):
+    body: str | None = None

@@ -31,6 +31,7 @@ class DraftContent(TypedDict):
     profile_computed_at: datetime
     candidate_pool_snapshot: dict
     generated_at: datetime
+    advisory_request_id: int | None
 
 
 def record_draft(db: Session, content: DraftContent) -> AdvisoryDraft:
@@ -61,5 +62,6 @@ def serialize_draft(draft: AdvisoryDraft) -> dict:
         "profile_computed_at": draft.profile_computed_at.isoformat(),
         "candidate_pool_snapshot": draft.candidate_pool_snapshot,
         "generated_at": draft.generated_at.isoformat(),
+        "advisory_request_id": draft.advisory_request_id,
         "disclaimer": disclaimer_for(draft.content_classification),
     }

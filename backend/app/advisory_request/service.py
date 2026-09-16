@@ -1,12 +1,14 @@
 import hashlib
 import json
 from datetime import datetime
+from typing import cast
 from uuid import uuid4
 
-from sqlalchemy import select
+from sqlalchemy import CursorResult, select, update
 from sqlalchemy.orm import Session
 
 from app.db.models import AdvisoryRequest
+from app.exceptions import AppError
 
 STATUS_PENDING = "待处理"
 STATUS_IN_PROGRESS = "处理中"
@@ -14,6 +16,9 @@ STATUS_COMPLETED = "已完成"
 STATUS_CLOSED = "已关闭"
 
 OPEN_STATUSES = (STATUS_PENDING, STATUS_IN_PROGRESS)
+
+REQUEST_NOT_FOUND_MESSAGE = "方案请求不存在"
+REQUEST_ALREADY_CLAIMED_MESSAGE = "该方案请求已在处理中或已处理完毕"
 
 FILTER_KEYS = (
     "product_type",
@@ -108,3 +113,47 @@ def list_requests_for_queue(db: Session, *, status: str | None = None) -> list[d
         stmt.order_by(AdvisoryRequest.submitted_at.asc(), AdvisoryRequest.id.asc())
     ).all()
     return [_serialize(row) for row in rows]
+
+
+def get_request(db: Session, request_id: int) -> AdvisoryRequest:
+    request = db.get(AdvisoryRequest, request_id)
+    if request is None:
+        raise AppError(404, REQUEST_NOT_FOUND_MESSAGE)
+    return request
+
+
+def claim_request(db: Session, request_id: int) -> AdvisoryRequest:
+    """把一条方案请求从「待处理」原子地切到「处理中」，语义同
+    `app.advisory.review._claim`：真正兜底并发的是下面这条
+    `UPDATE ... WHERE status = 待处理`，而不是先读后写。
+    """
+    request = get_request(db, request_id)
+    if request.status != STATUS_PENDING:
+        raise AppError(409, REQUEST_ALREADY_CLAIMED_MESSAGE)
+
+    result = cast(
+        CursorResult,
+        db.execute(
+            update(AdvisoryRequest)
+            .where(AdvisoryRequest.id == request_id, AdvisoryRequest.status == STATUS_PENDING)
+            .values(status=STATUS_IN_PROGRESS)
+        ),
+    )
+    db.commit()
+    if result.rowcount == 0:
+        raise AppError(409, REQUEST_ALREADY_CLAIMED_MESSAGE)
+    db.refresh(request)
+    return request
+
+
+def complete_request(db: Session, request_id: int) -> None:
+    request = get_request(db, request_id)
+    request.status = STATUS_COMPLETED
+    db.commit()
+
+
+def reopen_request(db: Session, request_id: int) -> None:
+    """把一条方案请求退回「待处理」——放行失败或驳回时用，让它能被重新生成。"""
+    request = get_request(db, request_id)
+    request.status = STATUS_PENDING
+    db.commit()

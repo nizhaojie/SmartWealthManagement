@@ -24,6 +24,7 @@ from app.advisory.review_status import (
     STATUS_PENDING,
     STATUS_REJECTED,
 )
+from app.advisory_request.service import complete_request, reopen_request
 from app.db.models import AdvisoryReview
 from app.exceptions import AppError
 from app.suitability.service import get_candidate_pool
@@ -133,6 +134,9 @@ def release_review(
         },
     )
 
+    if draft.advisory_request_id is not None:
+        complete_request(db, draft.advisory_request_id)
+
     return serialize_final(db, get_final_by_draft_id(db, draft_id))
 
 
@@ -150,6 +154,7 @@ def reject_review(
     stripped_reason = reason.strip()
 
     review = _claim(db, draft_id)
+    draft = get_draft(db, draft_id)
     _resume(
         db,
         cache,
@@ -161,6 +166,11 @@ def reject_review(
             "now": now,
         },
     )
+
+    if draft.advisory_request_id is not None:
+        # 驳回意味着这份原稿不合格，方案还没出具——退回待处理，让它能被
+        # 重新生成，而不是悬在处理中或被当成已完成。
+        reopen_request(db, draft.advisory_request_id)
 
     db.refresh(review)
     return {"draft_id": draft_id, "status": STATUS_REJECTED, "reason": stripped_reason}

@@ -1,4 +1,5 @@
 import { createRouter, createWebHistory, type RouteRecordRaw } from "vue-router";
+import AdvisoryReviewPage from "../advisory/AdvisoryReviewPage.vue";
 import LoginPage from "../auth/LoginPage.vue";
 import { currentEmployee, isAuthenticated, restoreSession } from "../auth/store";
 import ModuleView from "../shell/ModuleView.vue";
@@ -12,12 +13,22 @@ const moduleRoutes: RouteRecordRaw[] = MODULES.map((module) => ({
   meta: { moduleId: module.id },
 }));
 
+// 独立于 advisory 模块的角色门槛之外：审核页要能被客户经理直接用链接
+// 打开（见 issue 04），查看范围收紧在组件与后端各自校验，不经过
+// ModuleView 的按模块角色过滤，否则客户经理会被 ModuleForbidden 拦下。
+const advisoryReviewRoute: RouteRecordRaw = {
+  path: "advisory/reviews/:draftId",
+  name: "advisory-review",
+  component: AdvisoryReviewPage,
+  meta: { moduleId: "advisory" },
+};
+
 const routes: RouteRecordRaw[] = [
   { path: "/login", name: "login", component: LoginPage, meta: { public: true } },
   {
     path: "/",
     component: WorkbenchShell,
-    children: moduleRoutes,
+    children: [...moduleRoutes, advisoryReviewRoute],
   },
 ];
 

@@ -426,6 +426,11 @@ class AdvisoryDraft(Base):
     )
     candidate_pool_snapshot: Mapped[dict] = mapped_column(JSON, comment="生成时的候选池快照")
     generated_at: Mapped[datetime] = mapped_column(DateTime, comment="生成时间")
+    advisory_request_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey("biz_advisory_request.id"),
+        comment="触发本次生成的客户方案请求（顾问自行发起时为空）",
+    )
     create_time: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 
@@ -480,6 +485,28 @@ class AdvisoryReviewAudit(Base):
     action: Mapped[str] = mapped_column(String(8), comment="操作")
     reason: Mapped[str | None] = mapped_column(Text, comment="驳回理由")
     decided_at: Mapped[datetime] = mapped_column(DateTime, comment="操作时间")
+    create_time: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class AdvisoryReviewComment(Base):
+    """审核页上的留言；不是审核决定，仅供客户经理与理财顾问沟通用，见 app.advisory.comments。"""
+
+    __tablename__ = "biz_advisory_review_comment"
+    __table_args__ = (
+        Index("ix_advisory_review_comment_review_id", "review_id"),
+        {"comment": "审核留言"},
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    review_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("biz_advisory_review.id"), comment="对应的审核记录"
+    )
+    author_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("sys_employee.id"), comment="留言人"
+    )
+    author_role: Mapped[str] = mapped_column(String(32), comment="留言人角色")
+    body: Mapped[str] = mapped_column(Text, comment="留言内容")
+    created_at: Mapped[datetime] = mapped_column(DateTime, comment="留言时间")
     create_time: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 

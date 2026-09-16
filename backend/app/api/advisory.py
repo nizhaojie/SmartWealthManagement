@@ -4,22 +4,30 @@ import redis
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
+from app.advisory.access import ensure_can_view
+from app.advisory.comments import add_comment, list_comments
 from app.advisory.draft import get_draft, serialize_draft
 from app.advisory.final import (
     get_final_by_draft_id,
     get_latest_final_for_customer,
     serialize_final,
 )
+from app.advisory.queue import list_my_history, list_queue
 from app.advisory.review import (
     get_review_by_draft_id,
     reject_review,
     release_review,
     serialize_review,
 )
-from app.advisory.schemas import AdvisoryPlanRequest, AdvisoryRejectRequest, AdvisoryReleaseRequest
+from app.advisory.schemas import (
+    AdvisoryCommentRequest,
+    AdvisoryPlanRequest,
+    AdvisoryRejectRequest,
+    AdvisoryReleaseRequest,
+)
 from app.advisory.service import generate_advisory_plan
 from app.auth.dependencies import AuthContext, require_customer, require_employee_role
-from app.auth.roles import ADVISOR
+from app.auth.roles import ACCOUNT_MANAGER, ADVISOR
 from app.db.models import Employee
 from app.db.session import get_session
 from app.http import ok
@@ -43,37 +51,92 @@ def generate_plan(
     cache: redis.Redis = Depends(get_redis),
 ):
     draft = generate_advisory_plan(
-        db, cache, customer_id=customer_id, advisor_id=employee.id, tilt=body.tilt, now=_now()
+        db,
+        cache,
+        customer_id=customer_id,
+        advisor_id=employee.id,
+        tilt=body.tilt,
+        now=_now(),
+        advisory_request_id=body.advisory_request_id,
     )
     return ok(draft)
+
+
+@router.get("/queue")
+def get_advisory_queue(
+    _employee: Employee = Depends(require_employee_role(ADVISOR)),
+    db: Session = Depends(get_session),
+):
+    return ok(list_queue(db, _now()))
+
+
+@router.get("/history")
+def get_advisory_history(
+    employee: Employee = Depends(require_employee_role(ADVISOR)),
+    db: Session = Depends(get_session),
+):
+    return ok({"history": list_my_history(db, employee.id)})
 
 
 @router.get("/drafts/{draft_id}")
 def get_advisory_draft(
     draft_id: int,
-    # AI 原稿是投顾内容审核前的举证材料，读取权限与生成权限一致收紧到理财顾问。
-    _employee: Employee = Depends(require_employee_role(ADVISOR)),
+    # AI 原稿是投顾内容审核前的举证材料；理财顾问不受限，客户经理只能看
+    # 自己名下客户的（见 app.advisory.access）。
+    employee: Employee = Depends(require_employee_role(ADVISOR, ACCOUNT_MANAGER)),
     db: Session = Depends(get_session),
 ):
-    return ok(serialize_draft(get_draft(db, draft_id)))
+    draft = get_draft(db, draft_id)
+    ensure_can_view(db, employee, draft.customer_id)
+    return ok(serialize_draft(draft))
 
 
 @router.get("/drafts/{draft_id}/review")
 def get_draft_review(
     draft_id: int,
-    _employee: Employee = Depends(require_employee_role(ADVISOR)),
+    employee: Employee = Depends(require_employee_role(ADVISOR, ACCOUNT_MANAGER)),
     db: Session = Depends(get_session),
 ):
+    draft = get_draft(db, draft_id)
+    ensure_can_view(db, employee, draft.customer_id)
     return ok(serialize_review(get_review_by_draft_id(db, draft_id)))
 
 
 @router.get("/drafts/{draft_id}/final")
 def get_draft_final(
     draft_id: int,
-    _employee: Employee = Depends(require_employee_role(ADVISOR)),
+    employee: Employee = Depends(require_employee_role(ADVISOR, ACCOUNT_MANAGER)),
     db: Session = Depends(get_session),
 ):
+    draft = get_draft(db, draft_id)
+    ensure_can_view(db, employee, draft.customer_id)
     return ok(serialize_final(db, get_final_by_draft_id(db, draft_id)))
+
+
+@router.get("/drafts/{draft_id}/comments")
+def get_draft_comments(
+    draft_id: int,
+    employee: Employee = Depends(require_employee_role(ADVISOR, ACCOUNT_MANAGER)),
+    db: Session = Depends(get_session),
+):
+    draft = get_draft(db, draft_id)
+    ensure_can_view(db, employee, draft.customer_id)
+    review = get_review_by_draft_id(db, draft_id)
+    return ok({"comments": list_comments(db, review.id)})
+
+
+@router.post("/drafts/{draft_id}/comments")
+def post_draft_comment(
+    draft_id: int,
+    body: AdvisoryCommentRequest,
+    employee: Employee = Depends(require_employee_role(ADVISOR, ACCOUNT_MANAGER)),
+    db: Session = Depends(get_session),
+):
+    draft = get_draft(db, draft_id)
+    ensure_can_view(db, employee, draft.customer_id)
+    review = get_review_by_draft_id(db, draft_id)
+    comment = add_comment(db, review.id, author=employee, body=body.body, now=_now())
+    return ok(comment)
 
 
 @router.post("/drafts/{draft_id}/release")

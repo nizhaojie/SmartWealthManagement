@@ -45,6 +45,7 @@ class AdvisoryState(TypedDict, total=False):
     tilt: str
     now: datetime
     thread_id: str
+    advisory_request_id: int | None
     profile: dict
     candidate_pool: dict
     held_product_codes: set[str]
@@ -150,6 +151,7 @@ def build_graph(db: Session, cache: redis.Redis):
                 profile_computed_at=datetime.fromisoformat(state["profile"]["computed_at"]),
                 candidate_pool_snapshot=state["candidate_pool"],
                 generated_at=state["now"],
+                advisory_request_id=state.get("advisory_request_id"),
             ),
         )
         db.add(

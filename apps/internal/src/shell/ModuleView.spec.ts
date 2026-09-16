@@ -26,6 +26,13 @@ vi.mock("../analytics/api", () => ({
   listAnalyticsExamples: vi.fn().mockResolvedValue([]),
 }));
 
+vi.mock("../advisory/api", () => ({
+  getQueue: vi.fn().mockResolvedValue({ pending_requests: [], pending_reviews: [] }),
+  getMyHistory: vi.fn().mockResolvedValue([]),
+  listCustomersForPlan: vi.fn().mockResolvedValue([]),
+  generatePlan: vi.fn(),
+}));
+
 async function mountModuleViewAt(path: string) {
   const router = createRouter({
     history: createMemoryHistory(),
@@ -83,14 +90,13 @@ describe("ModuleView", () => {
     expect(wrapper.text()).not.toContain("该模块尚未实现");
   });
 
-  it("leaves the advisory module as a placeholder until that slice lands", async () => {
+  it("opens the advisory workspace on its own route", async () => {
     currentEmployee.value = { real_name: "陈顾问", employee_role: ADVISOR };
 
     const wrapper = await mountModuleViewAt("/advisory");
 
-    expect(wrapper.text()).toContain("该模块尚未实现");
-    expect(wrapper.text()).toContain("投顾助手");
-    expect(wrapper.text()).not.toContain("选择一位客户查看画像");
+    expect(wrapper.text()).not.toContain("该模块尚未实现");
+    expect(wrapper.text()).toContain("待生成的方案请求");
   });
 
   it("explicitly rejects a role visiting a route it has no access to, instead of hiding it", async () => {

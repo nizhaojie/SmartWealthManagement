@@ -25,6 +25,14 @@ vi.mock("../analytics/DataAnalysisWorkspace.vue", () => ({
   default: { name: "DataAnalysisWorkspace", template: "<div />" },
 }));
 
+vi.mock("../advisory/AdvisoryWorkspace.vue", () => ({
+  default: { name: "AdvisoryWorkspace", template: "<div />" },
+}));
+
+vi.mock("../advisory/AdvisoryReviewPage.vue", () => ({
+  default: { name: "AdvisoryReviewPage", template: "<div />" },
+}));
+
 function createShellRouter() {
   return createRouter({
     history: createMemoryHistory(),
@@ -32,12 +40,20 @@ function createShellRouter() {
       {
         path: "/",
         component: WorkbenchShell,
-        children: MODULES.map((module) => ({
-          path: module.path.slice(1),
-          name: module.id,
-          component: ModuleView,
-          meta: { moduleId: module.id },
-        })),
+        children: [
+          ...MODULES.map((module) => ({
+            path: module.path.slice(1),
+            name: module.id,
+            component: ModuleView,
+            meta: { moduleId: module.id },
+          })),
+          {
+            path: "advisory/reviews/:draftId",
+            name: "advisory-review",
+            component: { template: "<div />" },
+            meta: { moduleId: "advisory" },
+          },
+        ],
       },
     ],
   });
@@ -93,7 +109,7 @@ describe("WorkbenchShell", () => {
   });
 
   it("renders the placeholder explanation with navigation and logout still present for an unimplemented module", async () => {
-    const wrapper = await mountShellAt("/advisory", ADVISOR);
+    const wrapper = await mountShellAt("/customer-relations", ACCOUNT_MANAGER);
 
     expect(wrapper.text()).toContain("该模块尚未实现");
     expect(wrapper.find(".workbench-shell__aside").exists()).toBe(true);
@@ -131,5 +147,23 @@ describe("WorkbenchShell", () => {
     await flushPromises();
 
     expect(router.currentRoute.value.path).toBe("/knowledge");
+  });
+
+  it("returns to the advisory queue when the browser back button is used from a review page", async () => {
+    currentEmployee.value = { real_name: "陈顾问", employee_role: ADVISOR as never };
+    const router = createShellRouter();
+    await router.push("/advisory");
+    await router.isReady();
+    mount(WorkbenchShell, { global: { plugins: [ElementPlus, router] } });
+    await flushPromises();
+
+    await router.push({ name: "advisory-review", params: { draftId: "1" } });
+    await flushPromises();
+    expect(router.currentRoute.value.path).toBe("/advisory/reviews/1");
+
+    router.back();
+    await flushPromises();
+
+    expect(router.currentRoute.value.path).toBe("/advisory");
   });
 });

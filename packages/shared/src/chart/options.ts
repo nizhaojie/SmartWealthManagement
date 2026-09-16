@@ -67,6 +67,89 @@ export function toDonutOption(data: readonly CategoryValue[]): ChartOption | nul
   };
 }
 
+export type NamedSeries = { name: string; data: readonly CategoryValue[] };
+
+type ComparisonDatum = { name: string; value: number; diff: number; itemStyle: { color: string } };
+
+/**
+ * 成对横向条形：两组系列沿同一类别轴、同一基线并排，用于直读两组数值的差值。
+ * 两组饼图之间人眼无法比较扇区大小，这张图存在正是为了解决这个问题——
+ * 因此第二组会在条形末端显式标出与第一组的差值，不指望读者自己去比两根条的长度。
+ *
+ * 两组的类别顺序由调用方保证一致，这里按第一组的顺序取类别轴，不做校验、不重排。
+ */
+export function toComparisonBarOption(series: readonly [NamedSeries, NamedSeries]): ChartOption | null {
+  const [first, second] = series;
+  if (!hasDrawableValues(first.data) && !hasDrawableValues(second.data)) return null;
+
+  const categories = first.data.map((item) => item.name);
+  const baselineValues = first.data.map((item) => item.value);
+
+  const toDatum = (item: CategoryValue, index: number, color: string): ComparisonDatum => ({
+    name: item.name,
+    value: item.value,
+    diff: item.value - (baselineValues[index] ?? 0),
+    itemStyle: { color },
+  });
+
+  return {
+    grid: { left: 4, right: 56, top: 8, bottom: 28, containLabel: true },
+    tooltip: { trigger: "axis", axisPointer: { type: "shadow" } },
+    legend: {
+      bottom: 0,
+      icon: "circle",
+      itemWidth: 10,
+      itemHeight: 10,
+      itemGap: 16,
+      textStyle: { color: CHART_LABEL_COLOR, fontSize: 12 },
+    },
+    xAxis: {
+      type: "value",
+      axisLabel: { color: CHART_MUTED_LABEL_COLOR, fontSize: 12 },
+      axisLine: { show: false },
+      axisTick: { show: false },
+      splitLine: { lineStyle: { color: CHART_SPLIT_LINE_COLOR } },
+    },
+    yAxis: {
+      type: "category",
+      // 类别轴默认自下而上排布，取反后传入的第一个类别落在顶部。
+      inverse: true,
+      data: categories,
+      axisTick: { show: false },
+      axisLine: { show: false },
+      axisLabel: { color: CHART_LABEL_COLOR, fontSize: 12 },
+    },
+    series: [
+      {
+        name: first.name,
+        type: "bar",
+        barMaxWidth: 18,
+        itemStyle: { borderRadius: [0, 4, 4, 0] },
+        data: first.data.map((item, index) => toDatum(item, index, categoricalColorAt(0))),
+      },
+      {
+        name: second.name,
+        type: "bar",
+        barMaxWidth: 18,
+        itemStyle: { borderRadius: [0, 4, 4, 0] },
+        label: {
+          show: true,
+          position: "right",
+          color: CHART_MUTED_LABEL_COLOR,
+          fontSize: 12,
+          formatter: (params) => {
+            const datum = params.data as ComparisonDatum;
+            if (datum.diff === 0) return `${datum.value}`;
+            const sign = datum.diff > 0 ? "+" : "";
+            return `${datum.value}（${sign}${datum.diff}）`;
+          },
+        },
+        data: second.data.map((item, index) => toDatum(item, index, categoricalColorAt(1))),
+      },
+    ],
+  };
+}
+
 /**
  * 横向条形图：有序类别沿同一基线比较长度用它。
  * 类别顺序由传入顺序决定，不按数值重排。

@@ -10,10 +10,11 @@ CTE 带深度上限，并在展开时记录走过的产品以识别成环——�
 
 from decimal import Decimal
 
-from sqlalchemy import text
+from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
 from app.customer_assets.service import CENTS, HELD_STATUS, ZERO
+from app.db.models import Holding
 from app.exceptions import AppError
 
 MAX_DEPTH = 6
@@ -238,6 +239,120 @@ def _merge_underlying_assets(asset_rows: list[dict], holding_value: Decimal) -> 
             "path_count": entry["path_count"],
         }
         for entry in by_size
+    ]
+
+
+# 行业集中度锚定的是客户名下*全部*持仓，不是单笔——五只基金各买各的，
+# 但底层可能全砸在同一个行业。锚点因此换成客户的全部持仓，而不是一个
+# product_code；递归步与成环/深度上限的判定与上面完全一致。
+_PORTFOLIO_RECURSIVE_CTE = """
+WITH RECURSIVE look_through AS (
+    SELECT
+        h.id                                       AS holding_id,
+        p.id                                       AS product_id,
+        h.current_value                            AS holding_value,
+        1                                          AS depth,
+        CAST(1 AS DECIMAL(24, 12))                 AS weight,
+        CAST(CONCAT(',', p.id, ',') AS CHAR(1024)) AS visited,
+        0                                          AS repeats,
+        CAST(p.product_code AS CHAR(1024))         AS trail
+    FROM fin_holdings h
+    JOIN fin_product p ON p.id = h.product_id
+    WHERE h.customer_id = :customer_id
+      AND h.status = :status
+  UNION ALL
+    SELECT
+        lt.holding_id,
+        child.id,
+        lt.holding_value,
+        lt.depth + 1,
+        CAST(lt.weight * rel.weight AS DECIMAL(24, 12)),
+        CAST(CONCAT(lt.visited, child.id, ',') AS CHAR(1024)),
+        FIND_IN_SET(CAST(child.id AS CHAR), TRIM(BOTH ',' FROM lt.visited)) > 0,
+        CAST(CONCAT(lt.trail, ' > ', child.product_code) AS CHAR(1024))
+    FROM look_through lt
+    JOIN fin_product_underlying rel ON rel.product_id = lt.product_id
+    JOIN fin_product child ON child.id = rel.child_product_id
+    WHERE lt.depth < :max_depth
+      AND lt.repeats = 0
+)
+"""
+
+_PORTFOLIO_PRODUCT_STATEMENT = _PORTFOLIO_RECURSIVE_CTE + """
+SELECT
+    lt.trail                 AS trail,
+    lt.depth                 AS depth,
+    lt.repeats                AS repeats,
+    EXISTS (
+        SELECT 1 FROM fin_product_underlying nested
+        WHERE nested.product_id = lt.product_id AND nested.child_product_id IS NOT NULL
+    )                        AS has_nested_product
+FROM look_through lt
+"""
+
+_PORTFOLIO_ASSET_STATEMENT = _PORTFOLIO_RECURSIVE_CTE + """
+SELECT
+    asset.industry        AS industry,
+    lt.holding_value      AS holding_value,
+    lt.weight             AS product_share,
+    relation.weight       AS asset_share
+FROM look_through lt
+JOIN fin_product_underlying relation
+  ON relation.product_id = lt.product_id AND relation.underlying_asset_id IS NOT NULL
+JOIN fin_underlying_asset asset ON asset.id = relation.underlying_asset_id
+WHERE lt.repeats = 0
+"""
+
+
+def portfolio_industry_exposure(
+    db: Session,
+    *,
+    customer_id: int,
+    max_depth: int = MAX_DEPTH,
+) -> list[dict]:
+    """客户全部持仓穿透到底层资产后，按行业聚合的市值与占比。
+
+    占比的分母是客户持仓总市值，不是穿透到的底层资产总值——两者本该相等
+    （产品的底层权重之和为 1），但没有底层资产映射的产品仍应计入分母，
+    否则集中度会算在一个偏小的基数上，虚高。
+    """
+    total_value = (
+        db.scalar(
+            select(func.sum(Holding.current_value)).where(
+                Holding.customer_id == customer_id, Holding.status == HELD_STATUS
+            )
+        )
+        or ZERO
+    )
+    if not total_value:
+        return []
+
+    params = {"customer_id": customer_id, "status": HELD_STATUS, "max_depth": max_depth}
+
+    product_rows = [
+        dict(row) for row in db.execute(text(_PORTFOLIO_PRODUCT_STATEMENT), params).mappings()
+    ]
+    if not product_rows:
+        return []
+    _reject_unbounded_expansion(product_rows, max_depth=max_depth)
+
+    asset_rows = [
+        dict(row) for row in db.execute(text(_PORTFOLIO_ASSET_STATEMENT), params).mappings()
+    ]
+
+    totals: dict[str, Decimal] = {}
+    for row in asset_rows:
+        value = row["holding_value"] * row["product_share"] * row["asset_share"]
+        totals[row["industry"]] = totals.get(row["industry"], ZERO) + value
+
+    by_size = sorted(totals.items(), key=lambda entry: (-entry[1], entry[0]))
+    return [
+        {
+            "industry": industry,
+            "market_value": _money(value),
+            "share": _share(value / total_value),
+        }
+        for industry, value in by_size
     ]
 
 

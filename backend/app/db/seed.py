@@ -48,6 +48,7 @@ class UnderlyingAssetSeed(TypedDict):
     asset_code: str
     asset_name: str
     asset_category: str
+    industry: str
 
 
 class ProductUnderlyingSeed(TypedDict):
@@ -203,16 +204,16 @@ _PRODUCTS: tuple[ProductSeed, ...] = (
 )
 
 _UNDERLYING_ASSETS: tuple[UnderlyingAssetSeed, ...] = (
-    {"asset_code": "CASH-0001", "asset_name": "同业存单", "asset_category": "现金"},
-    {"asset_code": "CASH-0002", "asset_name": "7 天通知存款", "asset_category": "现金"},
-    {"asset_code": "BOND-0001", "asset_name": "22 国债 05", "asset_category": "债券"},
-    {"asset_code": "BOND-0002", "asset_name": "23 国开债 10", "asset_category": "债券"},
-    {"asset_code": "BOND-0003", "asset_name": "中铁建公司债", "asset_category": "债券"},
-    {"asset_code": "EQTY-0001", "asset_name": "沪深 300 成份股组合", "asset_category": "股票"},
-    {"asset_code": "EQTY-0002", "asset_name": "中证 500 成份股组合", "asset_category": "股票"},
-    {"asset_code": "EQTY-0003", "asset_name": "港股通科技股组合", "asset_category": "股票"},
-    {"asset_code": "ALTV-0001", "asset_name": "黄金 ETF", "asset_category": "另类"},
-    {"asset_code": "ALTV-0002", "asset_name": "原油 ETF", "asset_category": "另类"},
+    {"asset_code": "CASH-0001", "asset_name": "同业存单", "asset_category": "现金", "industry": "货币市场"},
+    {"asset_code": "CASH-0002", "asset_name": "7 天通知存款", "asset_category": "现金", "industry": "银行存款"},
+    {"asset_code": "BOND-0001", "asset_name": "22 国债 05", "asset_category": "债券", "industry": "利率债"},
+    {"asset_code": "BOND-0002", "asset_name": "23 国开债 10", "asset_category": "债券", "industry": "利率债"},
+    {"asset_code": "BOND-0003", "asset_name": "中铁建公司债", "asset_category": "债券", "industry": "产业债"},
+    {"asset_code": "EQTY-0001", "asset_name": "沪深 300 成份股组合", "asset_category": "股票", "industry": "大盘蓝筹"},
+    {"asset_code": "EQTY-0002", "asset_name": "中证 500 成份股组合", "asset_category": "股票", "industry": "中盘成长"},
+    {"asset_code": "EQTY-0003", "asset_name": "港股通科技股组合", "asset_category": "股票", "industry": "科技"},
+    {"asset_code": "ALTV-0001", "asset_name": "黄金 ETF", "asset_category": "另类", "industry": "贵金属"},
+    {"asset_code": "ALTV-0002", "asset_name": "原油 ETF", "asset_category": "另类", "industry": "能源"},
 )
 
 # F000003 通过 F000002 / F000001 持有一层嵌套的产品，穿透后有两层；
@@ -449,6 +450,7 @@ def _seed_underlyings(session: Session) -> None:
         else:
             asset.asset_name = item["asset_name"]
             asset.asset_category = item["asset_category"]
+            asset.industry = item["industry"]
         assets[item["asset_code"]] = asset
 
     for link in _PRODUCT_UNDERLYINGS:

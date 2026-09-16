@@ -1,13 +1,20 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
-import { getCustomerProfile, listCustomers, listRiskAssessments, writeProfileTag } from "./api";
+import {
+  getCustomerAssets,
+  getCustomerProfile,
+  listCustomers,
+  listRiskAssessments,
+  writeProfileTag,
+} from "./api";
 import ProfilePanel from "./ProfilePanel.vue";
-import type { CustomerListItem, CustomerProfileView, RiskAssessmentRecord } from "./types";
+import type { CustomerListItem, CustomerProfileView, Holding, RiskAssessmentRecord } from "./types";
 
 const customers = ref<CustomerListItem[]>([]);
 const selectedId = ref<number | null>(null);
 const profile = ref<CustomerProfileView | null>(null);
 const assessments = ref<RiskAssessmentRecord[]>([]);
+const holdings = ref<Holding[]>([]);
 const loadError = ref("");
 
 async function loadCustomers() {
@@ -26,15 +33,18 @@ async function selectCustomer(customerId: number) {
   selectedId.value = customerId;
   loadError.value = "";
   try {
-    const [nextProfile, nextAssessments] = await Promise.all([
+    const [nextProfile, nextAssessments, nextAssets] = await Promise.all([
       getCustomerProfile(customerId),
       listRiskAssessments(customerId),
+      getCustomerAssets(customerId),
     ]);
     profile.value = nextProfile;
     assessments.value = nextAssessments;
+    holdings.value = nextAssets.holdings;
   } catch (error) {
     profile.value = null;
     assessments.value = [];
+    holdings.value = [];
     loadError.value = error instanceof Error ? error.message : "加载客户画像失败";
   }
 }
@@ -78,6 +88,7 @@ onMounted(loadCustomers);
       v-if="profile"
       :profile="profile"
       :assessments="assessments"
+      :holdings="holdings"
       @correct="correctTag"
     />
     <p v-else-if="!loadError" class="profile-workspace__empty">选择一位客户查看画像</p>

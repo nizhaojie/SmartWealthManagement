@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import type { CustomerProfileView, ProfileTag, RiskAssessmentRecord } from "./types";
+import AllocationComparisonChart from "./AllocationComparisonChart.vue";
+import type { CustomerProfileView, Holding, ProfileTag, RiskAssessmentRecord } from "./types";
 
 const LOW_CONFIDENCE = 0.5;
 
@@ -27,8 +28,9 @@ const props = withDefaults(
   defineProps<{
     profile: CustomerProfileView;
     assessments?: RiskAssessmentRecord[];
+    holdings?: Holding[];
   }>(),
-  { assessments: () => [] },
+  { assessments: () => [], holdings: () => [] },
 );
 
 const emit = defineEmits<{
@@ -50,6 +52,11 @@ const judgementGrade = computed(() => {
     level,
     label: GRADE_LABELS[level] ?? "",
   };
+});
+
+const targetAllocation = computed<Record<string, number>>(() => {
+  const tag = props.profile.tags.find((item) => item.key === "target_allocation");
+  return (tag?.value as Record<string, number> | undefined) ?? {};
 });
 
 const lowConfidenceTags = computed(() =>
@@ -188,6 +195,12 @@ function submitCorrection() {
         <strong>{{ judgementGrade.level }} {{ judgementGrade.label }}</strong>
       </div>
     </section>
+
+    <AllocationComparisonChart
+      class="customer-file__allocation"
+      :target-allocation="targetAllocation"
+      :holdings="holdings"
+    />
 
     <section class="customer-file__tags">
       <article
@@ -388,6 +401,10 @@ function submitCorrection() {
   margin-top: 4px;
   font-size: 26px;
   color: var(--blotter);
+}
+
+.customer-file__allocation {
+  margin-bottom: 20px;
 }
 
 .customer-file__tags {

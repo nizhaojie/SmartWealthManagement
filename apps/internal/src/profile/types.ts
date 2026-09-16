@@ -61,3 +61,23 @@ export type CustomerListItem = {
   customer_level: string;
   risk_level: string | null;
 };
+
+export type Holding = {
+  product_code: string;
+  product_name: string;
+  product_type: string;
+  product_risk_level: string;
+  shares: string;
+  cost_amount: string;
+  market_value: string;
+  profit_loss: string;
+  profit_ratio: string;
+};
+
+export type CustomerAssets = {
+  risk_level: string | null;
+  risk_level_valid_until: string | null;
+  total_market_value: string;
+  holding_count: number;
+  holdings: Holding[];
+};

@@ -278,6 +278,36 @@ def test_low_confidence_tag_surfaces_as_a_warning(auth_client: TestClient):
         _delete_customer(created_id)
 
 
+def test_a_concentrated_industry_from_holdings_look_through_surfaces_as_a_warning(
+    auth_client: TestClient,
+):
+    # F000002 的底层资产里 BOND-0001（45%）与 BOND-0002（30%）同属「利率债」，
+    # 穿透合并后这一个行业就占了 75%，远超集中度阈值。
+    created_id = _insert_customer(
+        username=f"advisoryconcentrated_{id(object())}",
+        held_product_codes=("F000002",),
+    )
+    try:
+        response = _generate_plan(auth_client, created_id)
+        assert response.status_code == 200
+        codes = {item["code"] for item in response.json()["data"]["warnings"]}
+        assert "INDUSTRY_CONCENTRATION" in codes
+    finally:
+        _delete_customer(created_id)
+
+
+def test_a_customer_without_holdings_gets_no_industry_concentration_warning(
+    auth_client: TestClient,
+):
+    created_id = _insert_customer(username=f"advisorynoholdings_{id(object())}")
+    try:
+        response = _generate_plan(auth_client, created_id)
+        codes = {item["code"] for item in response.json()["data"]["warnings"]}
+        assert "INDUSTRY_CONCENTRATION" not in codes
+    finally:
+        _delete_customer(created_id)
+
+
 def test_stale_profile_surfaces_as_a_warning_without_blocking_generation(auth_client: TestClient):
     stale_computed_at = _real_now() - timedelta(days=200)
     created_id = _insert_customer(

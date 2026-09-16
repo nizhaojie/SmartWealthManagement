@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, delete, select
 from sqlalchemy.orm import Session as OrmSession
 
-from app.customer_assets.look_through import look_through
+from app.customer_assets.look_through import look_through, portfolio_industry_exposure
 from app.db.models import Customer, Holding, Product
 from app.db.seed import seed
 from app.exceptions import AppError
@@ -226,3 +226,68 @@ def test_looking_through_a_product_the_customer_does_not_hold_is_rejected(
     response = _get(auth_client, CUSTOMER_A, "F000004")
 
     assert response.status_code == 404
+
+
+# --- 行业集中度：全部持仓穿透后按行业聚合（issue 05） ---
+
+
+def test_a_customers_full_portfolio_is_aggregated_by_industry(auth_client: TestClient):
+    # wangc1 只持有 F000001：60% 同业存单（货币市场）+ 40% 通知存款（银行存款）。
+    engine = _engine()
+    with OrmSession(engine) as session:
+        customer = session.scalar(select(Customer).where(Customer.username == CUSTOMER_A))
+        assert customer is not None
+        exposure = portfolio_industry_exposure(session, customer_id=customer.id)
+    engine.dispose()
+
+    assert exposure == [
+        {"industry": "货币市场", "market_value": "12252.00", "share": "0.600000"},
+        {"industry": "银行存款", "market_value": "8168.00", "share": "0.400000"},
+    ]
+
+
+def test_industry_exposure_merges_the_same_industry_across_nested_holdings(
+    auth_client: TestClient,
+):
+    # zhangc3 持有 F000003：嵌套展开后 BOND-0001 与 BOND-0002 都属于「利率债」，
+    # 两条路径应当合并成一个行业条目，不是两条。
+    engine = _engine()
+    with OrmSession(engine) as session:
+        customer = session.scalar(select(Customer).where(Customer.username == CUSTOMER_C))
+        assert customer is not None
+        exposure = portfolio_industry_exposure(session, customer_id=customer.id)
+    engine.dispose()
+
+    assert exposure == [
+        {"industry": "利率债", "market_value": "45900.00", "share": "0.425000"},
+        {"industry": "大盘蓝筹", "market_value": "43200.00", "share": "0.400000"},
+        {"industry": "货币市场", "market_value": "9720.00", "share": "0.090000"},
+        {"industry": "产业债", "market_value": "4860.00", "share": "0.045000"},
+        {"industry": "银行存款", "market_value": "4320.00", "share": "0.040000"},
+    ]
+
+    total_share = sum(Decimal(item["share"]) for item in exposure)
+    assert total_share == Decimal("1.000000")
+
+
+def test_a_customer_without_holdings_has_no_industry_exposure():
+    engine = _engine()
+    with OrmSession(engine) as session:
+        exposure = portfolio_industry_exposure(session, customer_id=0)
+    engine.dispose()
+
+    assert exposure == []
+
+
+def test_industry_exposure_also_reports_a_cyclic_holding_instead_of_hanging():
+    _add_cyclic_holding()
+
+    engine = _engine()
+    with OrmSession(engine) as session:
+        customer = session.scalar(select(Customer).where(Customer.username == CUSTOMER_A))
+        assert customer is not None
+        with pytest.raises(AppError) as caught:
+            portfolio_industry_exposure(session, customer_id=customer.id)
+    engine.dispose()
+
+    assert "成环" in caught.value.message

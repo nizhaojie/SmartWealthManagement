@@ -1,6 +1,6 @@
 export { default as ChartFrame } from "./ChartFrame.vue";
-export { toBarOption, toDonutOption } from "./options";
-export type { CategoryValue, ChartOption } from "./options";
+export { toBarOption, toComparisonBarOption, toDonutOption } from "./options";
+export type { CategoryValue, ChartOption, NamedSeries } from "./options";
 export {
   CATEGORICAL_PALETTE,
   CHART_LABEL_COLOR,

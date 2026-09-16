@@ -6,8 +6,8 @@
 
 import { describe, expect, it } from "vitest";
 import { CATEGORICAL_PALETTE, categoricalColorAt } from "./palette";
-import { toBarOption, toDonutOption } from "./options";
-import type { CategoryValue } from "./options";
+import { toBarOption, toComparisonBarOption, toDonutOption } from "./options";
+import type { CategoryValue, NamedSeries } from "./options";
 
 const FIVE_CATEGORIES: CategoryValue[] = [
   { name: "A", value: 10000 },
@@ -92,5 +92,63 @@ describe("横向条形图配置", () => {
         { name: "B", value: 0 },
       ]),
     ).toBeNull();
+  });
+});
+
+describe("成对横向条形图配置", () => {
+  const FIRST: NamedSeries = {
+    name: "第一组",
+    data: [
+      { name: "A", value: 30 },
+      { name: "B", value: 55 },
+      { name: "C", value: 0 },
+    ],
+  };
+  const SECOND: NamedSeries = {
+    name: "第二组",
+    data: [
+      { name: "A", value: 30 },
+      { name: "B", value: 80 },
+      { name: "C", value: 10 },
+    ],
+  };
+
+  it("类别轴按第一组的顺序排列", () => {
+    const option = toComparisonBarOption([FIRST, SECOND]);
+    const yAxis = option?.yAxis as { data: string[] };
+    expect(yAxis.data).toEqual(["A", "B", "C"]);
+  });
+
+  it("两组各是一条系列，系列名沿用调用方传入的名字", () => {
+    const option = toComparisonBarOption([FIRST, SECOND]);
+    const series = option?.series as { name: string; data: unknown[] }[];
+    expect(series).toHaveLength(2);
+    expect(series.map((item) => item.name)).toEqual(["第一组", "第二组"]);
+  });
+
+  it("第二组的每个数据点带上与第一组按类别对齐算出的差值", () => {
+    const option = toComparisonBarOption([FIRST, SECOND]);
+    const series = option?.series as { data: { name: string; diff: number }[] }[];
+    expect(series[1].data.map((item) => item.diff)).toEqual([0, 25, 10]);
+  });
+
+  it("两组系列取不同的颜色，用来分辨系列而不是类别", () => {
+    const option = toComparisonBarOption([FIRST, SECOND]);
+    const series = option?.series as { data: { itemStyle: { color: string } }[] }[];
+    const firstColor = series[0].data[0].itemStyle.color;
+    const secondColor = series[1].data[0].itemStyle.color;
+    expect(firstColor).not.toBe(secondColor);
+    expect(firstColor).toBe(categoricalColorAt(0));
+    expect(secondColor).toBe(categoricalColorAt(1));
+  });
+
+  it("两组数值都是零时返回 null", () => {
+    const empty: NamedSeries = { name: "空", data: [{ name: "A", value: 0 }] };
+    expect(toComparisonBarOption([empty, empty])).toBeNull();
+  });
+
+  it("只要有一组存在非零数值就正常画图", () => {
+    const zero: NamedSeries = { name: "空", data: [{ name: "A", value: 0 }] };
+    expect(toComparisonBarOption([zero, FIRST])).not.toBeNull();
   });
 });

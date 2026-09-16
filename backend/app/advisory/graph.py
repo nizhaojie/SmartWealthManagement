@@ -17,6 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.advisory.allocation import suggest_allocation
+from app.advisory.concentration import concentration_warnings
 from app.advisory.draft import DraftContent, record_draft
 from app.advisory.final import FinalContent, record_final
 from app.advisory.reasons import build_reason
@@ -30,6 +31,7 @@ from app.advisory.runtime import ADVISORY_CHECKPOINTER
 from app.advisory.scoring import TERM_HORIZON_DAYS, CandidateInput, rank_candidates
 from app.advisory.warnings import profile_warnings
 from app.agent.config import ADVISORY_CONFIG
+from app.customer_assets.look_through import portfolio_industry_exposure
 from app.customer_assets.service import list_held_product_codes
 from app.customer_profile.service import get_internal_profile
 from app.db.models import AdvisoryReview, AdvisoryReviewAudit, Product
@@ -135,6 +137,8 @@ def build_graph(db: Session, cache: redis.Redis):
         profile = state["profile"]
         computed_at = datetime.fromisoformat(profile["computed_at"])
         found = profile_warnings(tags=profile["tags"], computed_at=computed_at, now=state["now"])
+        exposure = portfolio_industry_exposure(db, customer_id=state["customer_id"])
+        found = found + concentration_warnings(exposure)
         return {"warnings": found}
 
     def persist_draft_node(state: AdvisoryState) -> dict:

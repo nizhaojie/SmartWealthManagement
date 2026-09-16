@@ -179,6 +179,7 @@ class UnderlyingAsset(Base):
     asset_code: Mapped[str] = mapped_column(String(32), unique=True, comment="底层资产代码")
     asset_name: Mapped[str] = mapped_column(String(128), comment="底层资产名称")
     asset_category: Mapped[str] = mapped_column(String(32), comment="资产大类")
+    industry: Mapped[str] = mapped_column(String(32), comment="所属行业")
     create_time: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     update_time: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now(), onupdate=func.now()

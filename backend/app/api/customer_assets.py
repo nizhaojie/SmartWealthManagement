@@ -3,13 +3,23 @@ from datetime import date
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
-from app.auth.dependencies import AuthContext, require_customer
+from app.auth.dependencies import AuthContext, require_customer, require_internal
 from app.customer_assets.look_through import look_through
 from app.customer_assets.service import get_assets, list_transactions
 from app.db.session import get_session
 from app.http import ok
 
 router = APIRouter(prefix="/api/customer/assets")
+internal_router = APIRouter(prefix="/api/internal/customers")
+
+
+@internal_router.get("/{customer_id}/assets")
+def internal_customer_assets(
+    customer_id: int,
+    _auth: AuthContext = Depends(require_internal),
+    db: Session = Depends(get_session),
+):
+    return ok(get_assets(db, customer_id=customer_id))
 
 
 @router.get("")

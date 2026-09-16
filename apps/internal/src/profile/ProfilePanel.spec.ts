@@ -2,7 +2,26 @@ import ElementPlus from "element-plus";
 import { flushPromises, mount } from "@vue/test-utils";
 import { describe, expect, it } from "vitest";
 import ProfilePanel from "./ProfilePanel.vue";
-import type { CustomerProfileView, RiskAssessmentRecord } from "./types";
+import type { CustomerProfileView, Holding, RiskAssessmentRecord } from "./types";
+
+// jsdom 里元素尺寸恒为 0，ECharts 拿不到画布尺寸就没有可布局的文字。
+Object.defineProperty(HTMLElement.prototype, "clientWidth", { configurable: true, value: 480 });
+Object.defineProperty(HTMLElement.prototype, "clientHeight", { configurable: true, value: 220 });
+
+function makeHolding(overrides: Partial<Holding> = {}): Holding {
+  return {
+    product_code: "F000001",
+    product_name: "天枢货币基金",
+    product_type: "货币基金",
+    product_risk_level: "R1",
+    shares: "20000.0000",
+    cost_amount: "20000.00",
+    market_value: "20420.00",
+    profit_loss: "420.00",
+    profit_ratio: "2.1000",
+    ...overrides,
+  };
+}
 
 function makeProfile(overrides: Partial<CustomerProfileView> = {}): CustomerProfileView {
   return {
@@ -76,11 +95,23 @@ function makeAssessments(): RiskAssessmentRecord[] {
 function mountPanel(
   profile: CustomerProfileView,
   assessments: RiskAssessmentRecord[] = [],
+  holdings: Holding[] = [],
 ) {
   return mount(ProfilePanel, {
     global: { plugins: [ElementPlus] },
-    props: { profile, assessments },
+    props: { profile, assessments, holdings },
   });
+}
+
+function makeTargetAllocationTag() {
+  return {
+    key: "target_allocation",
+    label: "目标配置",
+    value: { 股票: 40, 债券: 35, 现金: 15, 另类: 10 },
+    source: "风评问卷",
+    confidence: 0.9,
+    observed_at: "2022-03-16T09:00:00",
+  };
 }
 
 describe("ProfilePanel", () => {
@@ -312,5 +343,47 @@ describe("ProfilePanel", () => {
     expect(wrapper.emitted("correct")).toEqual([
       [{ tagKey: "investment_experience", value: "3-5年", reason: "访谈确认已有三年实盘经验" }],
     ]);
+  });
+
+  it("draws the target-vs-actual allocation chart when a target and holdings exist", async () => {
+    const wrapper = mountPanel(
+      makeProfile({ tags: [makeTargetAllocationTag()] }),
+      [],
+      [makeHolding()],
+    );
+    await flushPromises();
+
+    const frame = wrapper.find('[data-testid="chart-frame"]');
+    expect(frame.exists()).toBe(true);
+    expect(frame.find("figcaption").text()).toBe("目标配置 vs 实际配置");
+    expect(frame.find('[data-testid="chart-canvas"]').exists()).toBe(true);
+  });
+
+  it("keeps the same category order on both sides of the allocation chart", async () => {
+    const wrapper = mountPanel(
+      makeProfile({ tags: [makeTargetAllocationTag()] }),
+      [],
+      [makeHolding()],
+    );
+    await flushPromises();
+
+    const labels = wrapper
+      .find('[data-testid="chart-frame"]')
+      .findAll("svg text")
+      .map((node) => node.text())
+      .filter((text) => ["现金", "债券", "混合", "股票", "另类"].includes(text));
+
+    // 每个类别在图上出现两次（目标配置一次、实际配置一次），但类别本身
+    // 先后顺序必须一致，否则同一行读到的就不是同一个类别。
+    const order = [...new Set(labels)];
+    expect(order).toEqual(["现金", "债券", "混合", "股票", "另类"]);
+  });
+
+  it("renders an empty state instead of a blank chart when there is no target or holdings data", () => {
+    const wrapper = mountPanel(makeProfile(), [], []);
+
+    const frame = wrapper.find('[data-testid="chart-frame"]');
+    expect(frame.find('[data-testid="chart-empty"]').exists()).toBe(true);
+    expect(frame.find('[data-testid="chart-canvas"]').exists()).toBe(false);
   });
 });

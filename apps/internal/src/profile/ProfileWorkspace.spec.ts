@@ -3,20 +3,26 @@ import { flushPromises, mount } from "@vue/test-utils";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { CustomerProfileView, RiskAssessmentRecord } from "./types";
 
-const { listCustomers, getCustomerProfile, listRiskAssessments, writeProfileTag } = vi.hoisted(
-  () => ({
-    listCustomers: vi.fn(),
-    getCustomerProfile: vi.fn(),
-    listRiskAssessments: vi.fn(),
-    writeProfileTag: vi.fn(),
-  }),
-);
+const {
+  listCustomers,
+  getCustomerProfile,
+  listRiskAssessments,
+  writeProfileTag,
+  getCustomerAssets,
+} = vi.hoisted(() => ({
+  listCustomers: vi.fn(),
+  getCustomerProfile: vi.fn(),
+  listRiskAssessments: vi.fn(),
+  writeProfileTag: vi.fn(),
+  getCustomerAssets: vi.fn(),
+}));
 
 vi.mock("./api", () => ({
   listCustomers,
   getCustomerProfile,
   listRiskAssessments,
   writeProfileTag,
+  getCustomerAssets,
 }));
 
 import ProfileWorkspace from "./ProfileWorkspace.vue";
@@ -65,6 +71,7 @@ describe("ProfileWorkspace", () => {
     getCustomerProfile.mockReset();
     listRiskAssessments.mockReset();
     writeProfileTag.mockReset();
+    getCustomerAssets.mockReset();
     listCustomers.mockResolvedValue([
       {
         id: 1,
@@ -76,6 +83,13 @@ describe("ProfileWorkspace", () => {
     ]);
     getCustomerProfile.mockResolvedValue(makeProfile());
     listRiskAssessments.mockResolvedValue([]);
+    getCustomerAssets.mockResolvedValue({
+      risk_level: "C1",
+      risk_level_valid_until: null,
+      total_market_value: "0.00",
+      holding_count: 0,
+      holdings: [],
+    });
   });
 
   it("shows the selected customer's assessment history with grade changes", async () => {

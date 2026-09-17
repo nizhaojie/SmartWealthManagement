@@ -4,6 +4,8 @@ from fastapi import APIRouter, Depends
 from neo4j import Driver
 from sqlalchemy.orm import Session
 
+from app import degradation
+from app.agent.config import ADVISORY_CONFIG
 from app.auth.dependencies import AuthContext, require_internal
 from app.db.session import get_session
 from app.http import ok
@@ -11,6 +13,7 @@ from app.knowledge_graph import graph_view, service
 from app.knowledge_graph.schemas import CustomerGraphView, GraphSyncStatusResponse
 from app.neo4j_client import get_neo4j
 from app.settings import Settings, get_settings
+from app.tracing import get_trace_id
 
 router = APIRouter(prefix="/api/internal/graph")
 
@@ -46,14 +49,28 @@ def get_customer_graph(
     _auth: AuthContext = Depends(require_internal),
 ):
     expand_fund_managers = "fund_manager" in (expand or "").split(",")
-    nodes, edges = graph_view.customer_graph(
+    nodes, edges, degradation_reason = graph_view.customer_graph_degraded(
         driver,
         namespace=settings.neo4j_graph_namespace,
         customer_id=customer_id,
         expand_fund_managers=expand_fund_managers,
+        timeout_seconds=settings.graph_view_timeout_seconds,
     )
+    if degradation_reason is not None:
+        # 界面拿到一张空图 + 降级标记，而这次降级进统计。
+        degradation.record(
+            db,
+            dependency=degradation.DEPENDENCY_GRAPH,
+            reason=degradation_reason,
+            agent_type=ADVISORY_CONFIG.name,
+            trace_id=get_trace_id(),
+        )
     status = service.get_status(db)
     view = CustomerGraphView(
-        customer_id=customer_id, nodes=nodes, edges=edges, synced_at=status["synced_at"]
+        customer_id=customer_id,
+        nodes=nodes,
+        edges=edges,
+        synced_at=status["synced_at"],
+        degraded=degradation_reason is not None,
     )
     return ok(view.model_dump(mode="json"))

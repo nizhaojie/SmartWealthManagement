@@ -7,6 +7,7 @@ import redis
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app import degradation
 from app.customer_profile.confidence import (
     CONFLICT_PENALTY_STEP,
     SOURCE_ADVISOR,
@@ -26,6 +27,7 @@ from app.db.models import (
     Transaction,
 )
 from app.exceptions import AppError
+from app.tracing import get_trace_id
 
 CACHE_KEY_PREFIX = "customer_profile:"
 CACHE_TTL_SECONDS = 300
@@ -57,21 +59,23 @@ def _cache_key(customer_id: int) -> str:
     return f"{CACHE_KEY_PREFIX}{customer_id}"
 
 
-def _cache_get(cache: redis.Redis, customer_id: int) -> dict | None:
+def _cache_get(cache: redis.Redis, customer_id: int) -> tuple[dict | None, bool]:
+    """读缓存，返回 (快照, 是否降级)。缓存不可用时按未命中处理。"""
     try:
         raw = cache.get(_cache_key(customer_id))
     except redis.RedisError:
-        return None
+        return None, True
     if not raw:
-        return None
+        return None, False
     try:
         payload = json.loads(raw)
     except json.JSONDecodeError:
-        return None
-    return payload if isinstance(payload, dict) else None
+        return None, False
+    return (payload if isinstance(payload, dict) else None), False
 
 
-def _cache_set(cache: redis.Redis, customer_id: int, payload: dict) -> None:
+def _cache_set(cache: redis.Redis, customer_id: int, payload: dict) -> bool:
+    """写缓存，返回是否成功。缓存是优化不是依赖，写不进去不影响这次读取。"""
     try:
         cache.set(
             _cache_key(customer_id),
@@ -79,14 +83,17 @@ def _cache_set(cache: redis.Redis, customer_id: int, payload: dict) -> None:
             ex=CACHE_TTL_SECONDS,
         )
     except redis.RedisError:
-        return
+        return False
+    return True
 
 
-def invalidate_profile_cache(cache: redis.Redis, customer_id: int) -> None:
+def invalidate_profile_cache(cache: redis.Redis, customer_id: int) -> bool:
+    """失效画像缓存，返回是否成功。失败时缓存里可能留着旧快照（等 TTL 自然过期）。"""
     try:
         cache.delete(_cache_key(customer_id))
     except redis.RedisError:
-        return
+        return False
+    return True
 
 
 def _sync_profile_field(profile: CustomerProfile, tag_key: str, value: Any) -> None:
@@ -116,7 +123,14 @@ def _require_profile(db: Session, customer_id: int) -> tuple[Customer, CustomerP
 def _finish_write(db: Session, cache: redis.Redis, profile: CustomerProfile, customer_id: int, now: datetime) -> None:
     profile.computed_at = now
     db.commit()
-    invalidate_profile_cache(cache, customer_id)
+    if not invalidate_profile_cache(cache, customer_id):
+        # 失效失败意味着读方可能继续拿到旧快照，属于缓存降级；留痕以便统计。
+        degradation.record(
+            db,
+            dependency=degradation.DEPENDENCY_CACHE,
+            reason=degradation.REASON_UNAVAILABLE,
+            trace_id=get_trace_id(),
+        )
 
 
 def write_tag(
@@ -299,10 +313,20 @@ def get_internal_profile(
     重排——同一批标签在「产品推荐」与「风险研判」下先后不同。重排只改变顺序，不删标签：
     低分的排在后面，取舍由调用方决定（见 `rerank.rerank`）。
     """
-    snapshot = _cache_get(cache, customer_id)
+    snapshot, cache_degraded = _cache_get(cache, customer_id)
     if snapshot is None:
+        # 缓存不可用（或未命中）都直连数据库；读到之后尝试回填，缓存恢复后下一次
+        # 命中即可——Cache-Aside 的「恢复后自动回填」不需要额外的补偿任务。
         snapshot = _load_snapshot(db, customer_id)
-        _cache_set(cache, customer_id, snapshot)
+        if not _cache_set(cache, customer_id, snapshot):
+            cache_degraded = True
+    if cache_degraded:
+        degradation.record(
+            db,
+            dependency=degradation.DEPENDENCY_CACHE,
+            reason=degradation.REASON_UNAVAILABLE,
+            trace_id=get_trace_id(),
+        )
 
     conflict_counts: dict[str, int] = {}
     for record in snapshot["conflict_records"]:

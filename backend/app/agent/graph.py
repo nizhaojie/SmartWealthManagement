@@ -8,6 +8,7 @@ from langgraph.graph import END, StateGraph
 from neo4j import Driver
 from sqlalchemy.orm import Session
 
+from app import degradation
 from app.agent import archive, debug_trace, memory
 from app.agent.citations import Citation, build_citations
 from app.agent.config import CUSTOMER_SERVICE_CONFIG
@@ -21,13 +22,19 @@ from app.event_bus import (
     EventPublisher,
     publish_safely,
 )
+from app.exceptions import AppError
 from app.knowledge.service import ChunkResult, search_chunks
-from app.knowledge_graph.graphrag import augment_with_graph
+from app.knowledge_graph.graphrag import (
+    DEGRADED_TIMEOUT,
+    DEPENDENCY_DEGRADATION_REASONS,
+    augment_with_graph,
+)
 from app.llm.provider import (
     build_chitchat_messages,
     build_grounded_messages,
     generate_chitchat_reply,
     generate_grounded_answer,
+    model_failure_answer,
 )
 from app.settings import Settings
 from app.tracing import get_token_usage, get_trace_id, start_token_usage
@@ -42,6 +49,18 @@ def fallback_message(settings: Settings) -> str:
 
 def handoff_message(settings: Settings) -> str:
     return f"已为您转接人工客服，请拨打 {settings.human_service_channel}，会有专属客服为您处理。"
+
+
+def report_model_failure(db: Session, exc: AppError) -> None:
+    """模型调用彻底失败时留一条降级痕迹，然后由调用方给出预设兜底回答。"""
+    degradation.record(
+        db,
+        dependency=degradation.DEPENDENCY_MODEL,
+        reason=degradation.REASON_RETRY_EXHAUSTED,
+        agent_type=CUSTOMER_SERVICE_CONFIG.name,
+        trace_id=get_trace_id(),
+        detail=exc.message,
+    )
 
 
 class AgentState(TypedDict, total=False):
@@ -63,6 +82,10 @@ class ChatTurnResult:
     citations: list[Citation]
     intent: str
     content_classification: str
+    trace_id: str = ""
+    # 本轮是否走过任一降级路径（模型兜底、向量超时转关键词、缓存不可用……）。
+    # 由降级留痕反查得出，而不是在各处手工累加——那样迟早会漏掉一处。
+    degraded: bool = False
 
 
 def _build_graph(db: Session, settings: Settings, driver: Driver, graph_namespace: str):
@@ -73,7 +96,11 @@ def _build_graph(db: Session, settings: Settings, driver: Driver, graph_namespac
 
     def retrieve_node(state: AgentState) -> dict:
         chunks = search_chunks(
-            db, settings, query=state["question"], top_k=CUSTOMER_SERVICE_CONFIG.retrieval_top_k
+            db,
+            settings,
+            query=state["question"],
+            top_k=CUSTOMER_SERVICE_CONFIG.retrieval_top_k,
+            agent_type=CUSTOMER_SERVICE_CONFIG.name,
         )
         tool_call = {
             "tool": "knowledge_search",
@@ -93,6 +120,21 @@ def _build_graph(db: Session, settings: Settings, driver: Driver, graph_namespac
             question=state["question"],
             timeout_seconds=settings.graphrag_query_timeout_seconds,
         )
+        if augmentation.degradation_reason in DEPENDENCY_DEGRADATION_REASONS:
+            # 图谱是增强，超时/不可用不该中断回答；但这是一次降级，要能统计到。
+            # 统计口径统一成「超时 / 不可达」两类，图谱自己的细分原因进 detail。
+            degradation.record(
+                db,
+                dependency=degradation.DEPENDENCY_GRAPH,
+                reason=(
+                    degradation.REASON_TIMEOUT
+                    if augmentation.degradation_reason == DEGRADED_TIMEOUT
+                    else degradation.REASON_UNAVAILABLE
+                ),
+                agent_type=CUSTOMER_SERVICE_CONFIG.name,
+                trace_id=get_trace_id(),
+                detail=augmentation.degradation_reason,
+            )
         fused = fuse_and_rank(
             state["chunks"],
             augmentation.passages,
@@ -113,7 +155,15 @@ def _build_graph(db: Session, settings: Settings, driver: Driver, graph_namespac
 
     def generate_node(state: AgentState) -> dict:
         chunks = state["chunks"]
-        result = generate_grounded_answer(state["question"], state["history"], chunks, settings)
+        try:
+            result = generate_grounded_answer(
+                state["question"], state["history"], chunks, settings
+            )
+        except AppError as exc:
+            # 退避重试与备用配置都在 provider 里走完了，到这里说明模型整体不可用。
+            # 返回预设兜底回答而不是把错误抛给使用者，并留一条降级痕迹。
+            report_model_failure(db, exc)
+            return {"answer": model_failure_answer(settings), "citations": []}
         citations = build_citations(chunks, result.cited_chunk_numbers)
         # 提示词在这里按同一纯函数再拼一次，而不是从模型结果里取：留痕不该依赖
         # provider 有没有回传提示词，换掉 provider（或测试里打了桩）也不该丢这条。
@@ -124,8 +174,13 @@ def _build_graph(db: Session, settings: Settings, driver: Driver, graph_namespac
         return {"answer": fallback_message(settings), "citations": []}
 
     def chitchat_node(state: AgentState) -> dict:
+        try:
+            answer = generate_chitchat_reply(state["question"], settings)
+        except AppError as exc:
+            report_model_failure(db, exc)
+            return {"answer": model_failure_answer(settings), "citations": []}
         return {
-            "answer": generate_chitchat_reply(state["question"], settings),
+            "answer": answer,
             "citations": [],
             "prompt": build_chitchat_messages(state["question"]),
         }
@@ -191,6 +246,7 @@ def _serialize_snippets(chunks: list[ChunkResult]) -> list[dict]:
 
 
 def _publish_risk_intent(
+    db: Session,
     publisher: EventPublisher,
     *,
     customer_id: int,
@@ -210,7 +266,7 @@ def _publish_risk_intent(
     signal = detect_risk_intent(question, history=history)
     if signal is None:
         return
-    publish_safely(
+    delivered = publish_safely(
         publisher,
         Event(
             event_type=EVENT_RISK_INTENT_DETECTED,
@@ -225,6 +281,15 @@ def _publish_risk_intent(
             trace_id=get_trace_id(),
         ),
     )
+    if not delivered:
+        # 广播失败不影响这次回答，但要让「有多少次协作其实没发出去」可统计。
+        degradation.record(
+            db,
+            dependency=degradation.DEPENDENCY_EVENT_BUS,
+            reason=degradation.REASON_UNAVAILABLE,
+            agent_type=CUSTOMER_SERVICE_CONFIG.name,
+            trace_id=get_trace_id(),
+        )
 
 
 def run_customer_service_turn(
@@ -239,7 +304,18 @@ def run_customer_service_turn(
     question: str,
     now: datetime,
 ) -> ChatTurnResult:
-    history = memory.get_history(cache, session_id)
+    history_read = memory.read_history(cache, session_id)
+    if history_read.degraded:
+        # 缓存不可用不代表这一轮不能答：无上下文的单轮回答仍是可用结果。
+        degradation.record(
+            db,
+            dependency=degradation.DEPENDENCY_CACHE,
+            reason=degradation.REASON_UNAVAILABLE,
+            agent_type=CUSTOMER_SERVICE_CONFIG.name,
+            trace_id=get_trace_id(),
+        )
+    history = history_read.history
+
     graph = _build_graph(db, settings, driver, settings.neo4j_graph_namespace)
     start_token_usage()
     started = time.monotonic()
@@ -254,8 +330,22 @@ def run_customer_service_turn(
     tool_calls = final_state.get("tool_calls", [])
     content_classification = CUSTOMER_SERVICE_CONFIG.content_classification_default
 
-    memory.append_turn(cache, session_id, role="user", content=question, settings=settings)
-    memory.append_turn(cache, session_id, role="assistant", content=answer, settings=settings)
+    wrote_user = memory.append_turn(
+        cache, session_id, role="user", content=question, settings=settings
+    )
+    wrote_assistant = memory.append_turn(
+        cache, session_id, role="assistant", content=answer, settings=settings
+    )
+    if not (wrote_user and wrote_assistant):
+        # 只在尚未因读取失败记过时补记；两条都失败也只留一条，避免一轮刷两行。
+        if not history_read.degraded:
+            degradation.record(
+                db,
+                dependency=degradation.DEPENDENCY_CACHE,
+                reason=degradation.REASON_UNAVAILABLE,
+                agent_type=CUSTOMER_SERVICE_CONFIG.name,
+                trace_id=get_trace_id(),
+            )
 
     archive.record_turn(
         db,
@@ -285,6 +375,7 @@ def run_customer_service_turn(
 
     # 留痕之后再广播：本次对话对使用者的价值已经确定，订阅方收不收到都不改变它。
     _publish_risk_intent(
+        db,
         publisher,
         customer_id=user_id,
         session_id=session_id,
@@ -293,9 +384,12 @@ def run_customer_service_turn(
         now=now,
     )
 
+    trace_id = get_trace_id()
     return ChatTurnResult(
         answer=answer,
         citations=citations,
         intent=final_state["intent"].value,
         content_classification=content_classification,
+        trace_id=trace_id,
+        degraded=degradation.happened(db, trace_id=trace_id),
     )

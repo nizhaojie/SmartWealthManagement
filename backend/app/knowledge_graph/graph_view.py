@@ -11,13 +11,25 @@
 
 from __future__ import annotations
 
+import logging
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeoutError
 from decimal import Decimal
 
 from neo4j import Driver, ManagedTransaction
+from neo4j.exceptions import DriverError, Neo4jError
 
+from app import degradation
 from app.advisory.concentration import CONCENTRATION_THRESHOLD
+from app.exceptions import AppError
 from app.knowledge_graph import tools
 from app.knowledge_graph.schemas import GraphEdge, GraphNode
+
+logger = logging.getLogger("app.knowledge_graph")
+
+# 关系图入口的降级原因：与其余依赖共用同一套统计口径，不另造词。
+DEGRADED_TIMEOUT = degradation.REASON_TIMEOUT
+DEGRADED_UNAVAILABLE = degradation.REASON_UNAVAILABLE
 
 NODE_TYPE_CUSTOMER = "customer"
 NODE_TYPE_PRODUCT = "product"
@@ -156,3 +168,45 @@ def customer_graph(
                 )
 
     return list(nodes.values()), edges
+
+
+def customer_graph_degraded(
+    driver: Driver,
+    *,
+    namespace: str,
+    customer_id: int,
+    expand_fund_managers: bool = False,
+    timeout_seconds: float,
+) -> tuple[list[GraphNode], list[GraphEdge], str | None]:
+    """带降级的关系图查询：返回 (节点, 连线, 降级原因)。
+
+    这是「图谱查询超时跳过增强」在可视化入口上的对应物：图谱是增强，不是依赖，
+    查不出来时给一张空图（外加降级标记），而不是让界面收到 500。超时同样用线程池
+    做软超时——Neo4j 驱动的阻塞调用没有可靠的协作式取消点。
+    """
+    executor = ThreadPoolExecutor(max_workers=1)
+    try:
+        future = executor.submit(
+            customer_graph,
+            driver,
+            namespace=namespace,
+            customer_id=customer_id,
+            expand_fund_managers=expand_fund_managers,
+        )
+        nodes, edges = future.result(timeout=timeout_seconds)
+    except AppError:
+        # 输入本身不合法（如非正数 customer_id）不是依赖抖动：照常拒绝，
+        # 不能因为「图谱查不出来就不抛错」把 400 变成一张空图。
+        raise
+    except FutureTimeoutError:
+        logger.warning("关系图降级：图谱查询超时 customer_id=%s", customer_id)
+        return [], [], DEGRADED_TIMEOUT
+    except (DriverError, Neo4jError):
+        logger.warning("关系图降级：Neo4j 不可用 customer_id=%s", customer_id, exc_info=True)
+        return [], [], DEGRADED_UNAVAILABLE
+    except Exception:  # noqa: BLE001 - 图谱边界：任何失败都退到空图
+        logger.exception("关系图降级：图谱查询出现未预期异常 customer_id=%s", customer_id)
+        return [], [], DEGRADED_UNAVAILABLE
+    finally:
+        executor.shutdown(wait=False)
+    return nodes, edges, None

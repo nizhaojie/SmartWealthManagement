@@ -1,4 +1,6 @@
 import json
+import logging
+import time
 import urllib.request
 from dataclasses import dataclass, field
 
@@ -7,8 +9,17 @@ from app.knowledge.service import ChunkResult
 from app.settings import Settings
 from app.tracing import record_token_usage
 
+logger = logging.getLogger("app.llm")
+
 LLM_SERVICE_FAILED_CODE = 1007
 LLM_SERVICE_FAILED_MESSAGE = "对话模型调用失败"
+
+# 预设兜底回答：退避重试与备用配置都失败之后返回它，而不是把错误抛给使用者。
+# 它是脚本，不经过模型——走到这一步的前提正是模型不可用。
+MODEL_FAILURE_TEMPLATE = (
+    "抱歉，智能回答服务暂时不可用，请稍后重试。"
+    "如需帮助可拨打人工客服热线 {channel}，由人工为您核实。"
+)
 
 CHITCHAT_SYSTEM_PROMPT = (
     "你是智能财富管家系统的智能客服，只回答产品要素、政策条款与常见问题，"
@@ -87,33 +98,108 @@ def _fake_chitchat_reply() -> str:
     )
 
 
-def chat_completion(messages: list[dict], settings: Settings) -> str:
-    """调用 OpenAI 兼容的 chat 接口；失败统一折算成业务错误码。"""
+@dataclass(frozen=True)
+class LlmEndpoint:
+    """模型调用的一份配置。主配置与备用配置结构相同，只是取值来源不同。"""
+
+    label: str
+    api_base: str
+    api_key: str
+    model_name: str
+
+    @property
+    def usable(self) -> bool:
+        return bool(self.api_base and self.api_key)
+
+
+def model_failure_answer(settings: Settings) -> str:
+    """模型不可用时的预设兜底回答（需求文档 F5.3 的最后一步）。"""
+    return MODEL_FAILURE_TEMPLATE.format(channel=settings.human_service_channel)
+
+
+def _endpoints(settings: Settings) -> list[LlmEndpoint]:
+    """按顺序尝试的模型配置：主配置在前，备用配置在后。
+
+    备用配置未填 ``llm_backup_api_key`` 时整条跳过——否则会拿着空 key 去请求一次，
+    白白多等一个超时。主配置的可用性由 ``resolved_llm_provider`` 在外面保证：
+    fake provider 根本不会走到这里。
+    """
+    endpoints = [
+        LlmEndpoint(
+            label="primary",
+            api_base=settings.llm_api_base,
+            api_key=settings.llm_api_key,
+            model_name=settings.llm_model_name,
+        )
+    ]
+    backup = LlmEndpoint(
+        label="backup",
+        api_base=settings.llm_backup_api_base,
+        api_key=settings.llm_backup_api_key,
+        model_name=settings.llm_backup_model_name,
+    )
+    if backup.usable:
+        endpoints.append(backup)
+    return [endpoint for endpoint in endpoints if endpoint.usable]
+
+
+def _request_chat(endpoint: LlmEndpoint, messages: list[dict], *, timeout: float) -> str:
+    """一次模型调用。抛原始异常，退避与换配置由 `chat_completion` 决定。"""
     body = json.dumps(
-        {"model": settings.llm_model_name, "messages": messages, "temperature": 0.2}
+        {"model": endpoint.model_name, "messages": messages, "temperature": 0.2}
     ).encode("utf-8")
     request = urllib.request.Request(
-        f"{settings.llm_api_base.rstrip('/')}/chat/completions",
+        f"{endpoint.api_base.rstrip('/')}/chat/completions",
         data=body,
         method="POST",
         headers={
             "Content-Type": "application/json",
-            "Authorization": f"Bearer {settings.llm_api_key}",
+            "Authorization": f"Bearer {endpoint.api_key}",
         },
     )
-    try:
-        with urllib.request.urlopen(request, timeout=30) as response:
-            payload = json.loads(response.read())
-        usage = payload.get("usage")
-        if isinstance(usage, dict):
-            # token 明细进调试级留痕（不落日志）；没开累计时这个调用是空操作。
-            record_token_usage(
-                prompt_tokens=usage.get("prompt_tokens"),
-                completion_tokens=usage.get("completion_tokens"),
-            )
-        return payload["choices"][0]["message"]["content"]
-    except Exception as exc:
-        raise AppError(LLM_SERVICE_FAILED_CODE, LLM_SERVICE_FAILED_MESSAGE) from exc
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        payload = json.loads(response.read())
+    usage = payload.get("usage")
+    if isinstance(usage, dict):
+        # token 明细进调试级留痕（不落日志）；没开累计时这个调用是空操作。
+        record_token_usage(
+            prompt_tokens=usage.get("prompt_tokens"),
+            completion_tokens=usage.get("completion_tokens"),
+        )
+    return payload["choices"][0]["message"]["content"]
+
+
+def chat_completion(messages: list[dict], settings: Settings) -> str:
+    """调用 OpenAI 兼容的 chat 接口，带退避重试与备用配置。
+
+    失败链路（需求文档 F5.3）：同一配置内按指数退避重试 ``llm_max_retries`` 次
+    （间隔 1s / 2s / 4s …，可配），仍失败则换备用配置再走一遍同样的重试，全部失败
+    才折算成业务错误码。退避等待可配，测试里置 0 即可不必真的等待。
+    """
+    endpoints = _endpoints(settings)
+    retries = max(settings.llm_max_retries, 0)
+    last_error: Exception | None = None
+
+    for endpoint in endpoints:
+        for attempt in range(retries + 1):
+            try:
+                return _request_chat(
+                    endpoint, messages, timeout=settings.llm_timeout_seconds
+                )
+            except Exception as exc:  # noqa: BLE001 - 换配置/退避前的统一收口
+                last_error = exc
+                logger.warning(
+                    "模型调用失败 endpoint=%s attempt=%s/%s",
+                    endpoint.label,
+                    attempt + 1,
+                    retries + 1,
+                    exc_info=True,
+                )
+                if attempt < retries:
+                    # 第 n 次重试前等 backoff * 2^(n-1)：1s / 2s / 4s …
+                    time.sleep(settings.llm_retry_backoff_seconds * (2**attempt))
+
+    raise AppError(LLM_SERVICE_FAILED_CODE, LLM_SERVICE_FAILED_MESSAGE) from last_error
 
 
 def _openai_compatible_grounded_answer(

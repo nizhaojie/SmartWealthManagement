@@ -1,23 +1,38 @@
+import logging
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeoutError
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Literal, TypeVar
 
-from sqlalchemy import select
+from sqlalchemy import delete, or_, select
 from sqlalchemy.orm import Session
 
-from app.db.models import KnowledgeMeta
+from app import degradation
+from app.db.models import KnowledgeChunk, KnowledgeMeta
 from app.exceptions import AppError
 from app.knowledge import object_store, vector_store
 from app.knowledge.embeddings import embed_texts
 from app.knowledge.parsers import Section, is_supported, parse_document
 from app.knowledge.tokenizer import chunk_text
 from app.settings import Settings
+from app.tracing import get_trace_id
+
+logger = logging.getLogger("app.knowledge")
 
 UNSUPPORTED_FORMAT_CODE = 1006
 UNSUPPORTED_FORMAT_MESSAGE = "不支持的文档格式，仅支持 txt / md / docx"
 DOCUMENT_NOT_FOUND_MESSAGE = "知识文档不存在"
 INGESTION_FAILED_CODE = 1008
+
+# 检索降级原因（进 `biz_degradation_trace` 的 reason 列）。
+DEGRADED_VECTOR_TIMEOUT = degradation.REASON_TIMEOUT
+DEGRADED_VECTOR_UNAVAILABLE = degradation.REASON_UNAVAILABLE
+
+# 关键词兜底最多扫多少行候选：LIKE 命中面可能很宽，先截断再在 Python 里精排，
+# 避免一次抖动把整张分块表拉进内存。
+KEYWORD_SCAN_LIMIT = 500
 
 CHUNK_SIZE = 512
 CHUNK_OVERLAP = 64
@@ -159,9 +174,11 @@ def _run_ingestion_pipeline(
                 for index, (piece, vector) in enumerate(zip(pieces, vectors))
             ],
         )
+        _replace_chunk_mirror(db, meta, pieces, knowledge_type)
     except Exception as exc:
         object_store.delete_if_exists(minio_client, settings.minio_bucket, key)
         vector_store.delete_by_knowledge_id(milvus_client, settings.milvus_collection, meta.id)
+        _replace_chunk_mirror(db, meta, [], knowledge_type)
         _mark_failed(db, meta, STAGE_STORE, str(exc))
         return
 
@@ -247,23 +264,54 @@ def delete_document(db: Session, settings: Settings, knowledge_id: int) -> Knowl
     return meta
 
 
-def search_chunks(
+def _replace_chunk_mirror(
     db: Session,
-    settings: Settings,
-    *,
-    query: str,
-    knowledge_type: str | None = None,
-    top_k: int = 5,
-) -> list[ChunkResult]:
+    meta: KnowledgeMeta,
+    pieces: list[ChunkPiece],
+    knowledge_type: str,
+) -> None:
+    """把分块正文同步到 MySQL 镜像表（覆盖式）。
+
+    镜像的唯一用途是「向量库不可用时还有一条检索路径」，因此它跟着 Milvus 的写入
+    一起成功或一起失败：入库事务里 `pieces` 为空表示回滚，把已经写进去的镜像行删掉。
+    """
+    db.execute(delete(KnowledgeChunk).where(KnowledgeChunk.knowledge_id == meta.id))
+    db.add_all(
+        [
+            KnowledgeChunk(
+                knowledge_id=meta.id,
+                knowledge_type=knowledge_type,
+                chunk_index=index,
+                heading_path=piece.heading_path,
+                content=piece.text,
+            )
+            for index, piece in enumerate(pieces)
+        ]
+    )
+    db.commit()
+
+
+def _vector_search_hits(
+    settings: Settings, *, query: str, knowledge_type: str | None, top_k: int
+) -> list[vector_store.ChunkHit]:
+    """向量检索的发起侧：查询向量化 + 相似度检索。
+
+    刻意不碰数据库会话：它跑在超时控制的线程池里，而 SQLAlchemy 的 Session 不是
+    线程安全的。数据库的一部分（按状态过滤、取标题）留在主线程的
+    `_build_vector_results` 里做。
+    """
     milvus_client = vector_store.get_client(settings)
     query_vector = embed_texts([query], settings)[0]
-    hits = vector_store.search(
+    return vector_store.search(
         milvus_client,
         settings.milvus_collection,
         query_vector=query_vector,
         top_k=top_k,
         knowledge_type=knowledge_type,
     )
+
+
+def _build_vector_results(db: Session, hits: list[vector_store.ChunkHit]) -> list[ChunkResult]:
     if not hits:
         return []
 
@@ -290,6 +338,166 @@ def search_chunks(
                 source_file=meta.source_file,
             )
         )
+    return results
+
+
+def _query_terms(query: str) -> list[str]:
+    """把问题切成关键词检索用的字词。
+
+    中文没有空格分词，按相邻两字切（与画像标签的相似度计算同一套办法）；英文与数字
+    按空白切。这样「管理费率是多少」能命中写着「管理费率为百分之一点二」的片段，
+    而不是要求问题原文作为子串出现。
+    """
+    characters = [char.lower() for char in query if char.isalnum()]
+    bigrams = {
+        f"{characters[index]}{characters[index + 1]}" for index in range(len(characters) - 1)
+    }
+    # 只有真的分过词（问题里带空白）才把整段查询也算一个词；否则中文问题会被
+    # `split()` 原样吐回一整个字符串，混进分母把命中率压到阈值以下。
+    tokens = query.split()
+    words = {token.lower() for token in tokens} if len(tokens) > 1 else set()
+    terms = bigrams | words
+    if not terms and query.strip():
+        terms = {query.strip().lower()}
+    return sorted(terms)
+
+
+def _escape_like(term: str) -> str:
+    return term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def _keyword_score(terms: list[str], content: str, title: str) -> float:
+    if not terms:
+        return 0.0
+    haystack = f"{content} {title}".lower()
+    matched = sum(1 for term in terms if term in haystack)
+    return round(matched / len(terms), 4)
+
+
+def keyword_search_chunks(
+    db: Session,
+    *,
+    query: str,
+    knowledge_type: str | None = None,
+    top_k: int = 5,
+) -> list[ChunkResult]:
+    """面向分块镜像的关键词检索：向量检索不可用时的兜底路径。
+
+    它只按「分块里出现了几个查询字词」打分，语义上远不如向量检索，因此只在降级时
+    使用——正常路径不经过它，它也不参与正常路径的排序。
+    """
+    terms = _query_terms(query)
+    if not terms:
+        return []
+
+    conditions = [
+        KnowledgeChunk.content.like(f"%{_escape_like(term)}%", escape="\\") for term in terms
+    ]
+    stmt = (
+        select(KnowledgeChunk, KnowledgeMeta)
+        .join(KnowledgeMeta, KnowledgeMeta.id == KnowledgeChunk.knowledge_id)
+        .where(KnowledgeMeta.status == STATUS_ACTIVE)
+        .where(or_(*conditions))
+    )
+    if knowledge_type:
+        stmt = stmt.where(KnowledgeChunk.knowledge_type == knowledge_type)
+
+    scored: list[tuple[float, KnowledgeChunk, KnowledgeMeta]] = []
+    for chunk, meta in db.execute(stmt.limit(KEYWORD_SCAN_LIMIT)).all():
+        score = _keyword_score(terms, chunk.content, meta.title)
+        if score > 0:
+            scored.append((score, chunk, meta))
+
+    scored.sort(key=lambda item: (-item[0], item[1].knowledge_id, item[1].chunk_index))
+    return [
+        ChunkResult(
+            knowledge_id=chunk.knowledge_id,
+            knowledge_type=chunk.knowledge_type,
+            chunk_index=chunk.chunk_index,
+            heading_path=chunk.heading_path,
+            content=chunk.content,
+            score=score,
+            title=meta.title,
+            source_file=meta.source_file,
+        )
+        for score, chunk, meta in scored[:top_k]
+    ]
+
+
+def search_chunks(
+    db: Session,
+    settings: Settings,
+    *,
+    query: str,
+    knowledge_type: str | None = None,
+    top_k: int = 5,
+    agent_type: str | None = None,
+) -> list[ChunkResult]:
+    """知识检索：优先向量检索，超时或不可用时降级为关键词检索。
+
+    向量检索是外部依赖，不是唯一路径。给它一个墙钟超时（`vector_search_timeout_seconds`），
+    超时或抛错时改用分块镜像上的 MySQL LIKE 关键词检索，并写一条降级留痕。超时用
+    线程池做软超时：Milvus 客户端是阻塞调用，拿不到结果就直接返回降级，不等那个线程
+    收尾（与 GraphRAG 的图谱查询同一取舍）。
+    """
+    executor = ThreadPoolExecutor(max_workers=1)
+    try:
+        future = executor.submit(
+            _vector_search_hits,
+            settings,
+            query=query,
+            knowledge_type=knowledge_type,
+            top_k=top_k,
+        )
+        hits = future.result(timeout=settings.vector_search_timeout_seconds)
+    except FutureTimeoutError:
+        logger.warning("向量检索降级：检索超时")
+        return _degraded_keyword_results(
+            db,
+            query=query,
+            knowledge_type=knowledge_type,
+            top_k=top_k,
+            reason=DEGRADED_VECTOR_TIMEOUT,
+            agent_type=agent_type,
+        )
+    except Exception as exc:  # noqa: BLE001 - 向量库边界：任何失败都退到关键词路径
+        logger.warning("向量检索降级：向量库或向量化不可用", exc_info=True)
+        return _degraded_keyword_results(
+            db,
+            query=query,
+            knowledge_type=knowledge_type,
+            top_k=top_k,
+            reason=DEGRADED_VECTOR_UNAVAILABLE,
+            agent_type=agent_type,
+            detail=str(exc),
+        )
+    finally:
+        executor.shutdown(wait=False)
+
+    return _build_vector_results(db, hits)
+
+
+def _degraded_keyword_results(
+    db: Session,
+    *,
+    query: str,
+    knowledge_type: str | None,
+    top_k: int,
+    reason: str,
+    agent_type: str | None,
+    detail: str | None = None,
+) -> list[ChunkResult]:
+    results = keyword_search_chunks(
+        db, query=query, knowledge_type=knowledge_type, top_k=top_k
+    )
+    degradation.record(
+        db,
+        dependency=degradation.DEPENDENCY_VECTOR,
+        reason=reason,
+        agent_type=agent_type,
+        trace_id=get_trace_id(),
+        detail=detail,
+    )
     return results
 
 

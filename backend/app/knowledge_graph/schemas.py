@@ -81,9 +81,14 @@ class GraphEdge(BaseModel):
 
 
 class CustomerGraphView(BaseModel):
-    """客户关系图接口的响应体：默认两跳（客户→产品→行业），基金经理按需展开。"""
+    """客户关系图接口的响应体：默认两跳（客户→产品→行业），基金经理按需展开。
+
+    `degraded` 为真时 nodes/edges 是空的：图谱查询超时或不可用，界面此时应当显示
+    「图谱暂时不可用」而不是把异常抛给使用者，也不能把空图误读成「这位客户没有持仓」。
+    """
 
     customer_id: int
     nodes: list[GraphNode]
     edges: list[GraphEdge]
     synced_at: datetime | None
+    degraded: bool = False

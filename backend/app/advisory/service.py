@@ -6,12 +6,15 @@
 `app.advisory.review` 的职责。
 """
 
+import time
 from datetime import datetime
 from uuid import uuid4
 
 import redis
 from sqlalchemy.orm import Session
 
+from app.agent import debug_trace
+from app.agent.config import ADVISORY_CONFIG
 from app.advisory.draft import get_draft, serialize_draft
 from app.advisory.graph import AdvisoryState, build_graph
 from app.advisory.scoring import ALLOWED_TILTS, TILT_BALANCED
@@ -46,6 +49,7 @@ def generate_advisory_plan(
 
     graph = build_graph(db, cache)
     thread_id = uuid4().hex
+    started = time.monotonic()
     try:
         final_state: AdvisoryState = graph.invoke(
             {
@@ -62,6 +66,14 @@ def generate_advisory_plan(
         if advisory_request_id is not None:
             reopen_request(db, advisory_request_id)
         raise
+
+    # 生成耗时进响应时间统计（与客服、数据分析、风控监测同一张表）。
+    debug_trace.record_response_time(
+        db,
+        agent_type=ADVISORY_CONFIG.name,
+        duration_ms=int((time.monotonic() - started) * 1000),
+        user_id=advisor_id,
+    )
 
     draft = get_draft(db, final_state["draft_id"])
     return serialize_draft(draft)

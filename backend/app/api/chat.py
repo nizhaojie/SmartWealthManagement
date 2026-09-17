@@ -60,6 +60,8 @@ def _run_turn(
         ],
         intent=result.intent,
         content_classification=result.content_classification,
+        trace_id=result.trace_id,
+        degraded=result.degraded,
     )
 
 

@@ -165,6 +165,30 @@ describe("ChatPage", () => {
     expect(wrapper.find("button.citation-badge").exists()).toBe(false);
   });
 
+  it("renders a degraded answer without citations and without breaking", async () => {
+    // 降级回答：模型不可用时的预设兜底文案，没有引用可挂。它必须像普通回答一样
+    // 渲染成文本，不因为 citations 为空而报错或留下未解析的角标。
+    mockStreamOnce((handlers) => {
+      handlers.onDone({
+        answer:
+          "抱歉，智能回答服务暂时不可用，请稍后重试。如需帮助可拨打人工客服热线 95588，由人工为您核实。",
+        citations: [],
+        intent: "产品咨询",
+        content_classification: "事实性内容",
+        trace_id: "trace-degraded-1",
+        degraded: true,
+      });
+    });
+
+    const wrapper = mount(ChatPage, { global: { plugins: [ElementPlus] } });
+    await ask(wrapper, "最短持有期是多久");
+
+    expect(wrapper.text()).toContain("智能回答服务暂时不可用");
+    expect(wrapper.text()).toContain("95588");
+    expect(wrapper.find("button.citation-badge").exists()).toBe(false);
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(false);
+  });
+
   it("renders multiple turns of the conversation", async () => {
     mockStreamOnce((handlers) => {
       handlers.onDone({

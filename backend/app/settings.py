@@ -29,6 +29,10 @@ class Settings(BaseSettings):
 
     redis_url: str = "redis://127.0.0.1:6380/0"
     test_redis_url: str = "redis://127.0.0.1:6380/1"
+    # 缓存读写的连接与读写超时。不设时一次连接挂起会把请求线程一直吊着，
+    # 「缓存不可用就直连数据库」就无从触发。
+    redis_connect_timeout_seconds: float = 2.0
+    redis_socket_timeout_seconds: float = 2.0
 
     milvus_uri: str = "http://127.0.0.1:19531"
     milvus_collection: str = "knowledge_chunks"
@@ -39,6 +43,9 @@ class Settings(BaseSettings):
     neo4j_uri: str = "bolt://127.0.0.1:7688"
     neo4j_user: str = "neo4j"
     neo4j_password: str = "wealth_neo4j_pw"
+    # 建立连接的超时。查询本身的墙钟超时由 graphrag_query_timeout_seconds 控制，
+    # 两者管的阶段不同：这个管「连不上要等多久」，那个管「连上了但算得慢」。
+    neo4j_connection_timeout_seconds: float = 2.0
     # Neo4j Community 版只有一个数据库，测试库与开发库靠这个属性分开（同一实例内隔离），
     # 而不是像 MySQL 那样连不同的库。
     neo4j_graph_namespace: str = "wealth"
@@ -61,6 +68,18 @@ class Settings(BaseSettings):
     llm_model_name: str = ""
     llm_api_base: str = ""
     llm_api_key: str = ""
+
+    # 模型调用的降级链路（需求文档 F5.3）：单次调用超时 → 同一配置内指数退避重试
+    # （间隔 = backoff * 1, 2, 4 …，即需求文档的 1s / 2s / 4s），最多重试
+    # `llm_max_retries` 次（总调用次数 = 1 + 重试次数）→ 仍失败切备用配置走同样的
+    # 重试 → 再失败返回预设兜底回答。三个阈值都可配置，改策略不改代码。
+    llm_timeout_seconds: float = 30.0
+    llm_max_retries: int = 3
+    llm_retry_backoff_seconds: float = 1.0
+    # 备用配置（OpenAI → 本地 Qwen）。未配置 api_key 时这条链路整体跳过。
+    llm_backup_model_name: str = ""
+    llm_backup_api_base: str = ""
+    llm_backup_api_key: str = ""
 
     embedding_provider: str = "fake"
     embedding_model_name: str = "text-embedding-v3"
@@ -92,8 +111,14 @@ class Settings(BaseSettings):
     # 两者默认相加为 1，与既有 retrieval_score_threshold 同一量纲，改权重不改代码。
     graphrag_vector_weight: float = 0.6
     graphrag_graph_weight: float = 0.4
-    # 图谱查询墙钟超时（秒）；超时静默降级为纯向量检索。
-    graphrag_query_timeout_seconds: float = 2.0
+    # 图谱查询墙钟超时（秒）；超时静默降级为纯向量检索。需求文档 F5.3 的口径是 3s。
+    graphrag_query_timeout_seconds: float = 3.0
+    # 关系图可视化入口的墙钟超时（秒）；超时返回空图而不是把异常抛给界面。
+    graph_view_timeout_seconds: float = 3.0
+
+    # 向量检索的墙钟超时（秒）；超时降级为针对分块镜像的 MySQL 关键词检索。
+    # 需求文档 F5.3 的阈值口径就是 2s。
+    vector_search_timeout_seconds: float = 2.0
 
     @property
     def resolved_llm_provider(self) -> str:

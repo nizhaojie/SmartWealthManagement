@@ -26,6 +26,7 @@ from uuid import uuid4
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app import degradation
 from app.db.models import Customer, CustomerProfile, Product, RiskAlert, Transaction
 from app.event_bus import (
     EVENT_RISK_ALERT_RAISED,
@@ -51,6 +52,28 @@ from app.risk_monitoring.grading import (
 from app.tracing import get_trace_id
 
 logger = logging.getLogger("app.risk_monitoring")
+
+# 与 `app.agent.config.RISK_MONITORING_CONFIG.name` 同一个取值，这里写字面量而不是
+# 导入它：风控判定链路不许碰模型层（见 tests/test_risk_rule_evaluation 的守卫用例），
+# 而 app.agent 是模型层的入口。两处取值的一致性由 tests/test_degradation_paths 固定。
+AGENT_TYPE_RISK_MONITORING = "risk_monitoring"
+
+
+def _publish_or_record(db: Session, publisher: EventPublisher, event: Event) -> None:
+    """广播一个事件；失败只留降级痕迹并继续——核心链路的结果已经落库。
+
+    `publish_safely` 负责「不抛异常」，这里负责「失败可统计」：广播是增强，但它
+    有没有真的发出去，是事后要能回答的问题。
+    """
+    if publish_safely(publisher, event):
+        return
+    degradation.record(
+        db,
+        dependency=degradation.DEPENDENCY_EVENT_BUS,
+        reason=degradation.REASON_UNAVAILABLE,
+        agent_type=AGENT_TYPE_RISK_MONITORING,
+        trace_id=get_trace_id(),
+    )
 
 # 申购与赎回取自字段层的反向配对表，它不是抄一遍类型清单：规则引擎认得的类型就是
 # 这两个（`purchase_amount` / `redeem_amount` 按类型取值，快进快出按这两个方向配对），
@@ -240,7 +263,7 @@ def create_alerts_for_transaction(
     db.commit()
     db.refresh(alert)
 
-    publish_safely(publisher, _alert_event(alert))
+    _publish_or_record(db, publisher, _alert_event(alert))
     return [alert]
 
 
@@ -326,8 +349,8 @@ def submit_transaction_event(
     db.commit()
     db.refresh(transaction)
 
-    # 第二步：广播。失败只记日志，不回滚。
-    publish_safely(publisher, _transaction_event(transaction))
+    # 第二步：广播。失败只记日志与降级留痕，不回滚。
+    _publish_or_record(db, publisher, _transaction_event(transaction))
 
     # 第三步：过规则引擎。
     alerts = create_alerts_for_transaction(

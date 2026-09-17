@@ -866,6 +866,64 @@ class GraphSyncRun(Base):
     create_time: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 
+class DegradationTrace(Base):
+    """降级留痕：任何一次「外部依赖不可用、系统改用了降级路径」都写一条。
+
+    它回答的是 spec 里那个事后才问得出口的问题——「系统实际上有多少时间工作在降级
+    状态下」。因此它不是错误日志：降级意味着服务仍然可用，只是走了次优路径（模型
+    退避后走兜底、向量超时走关键词、缓存不可用直连数据库），使用者看到的是一次正常
+    响应。只靠日志文件无法统计，必须有结构化的一行一次记录。
+
+    `dependency` 是被降级的依赖，`reason` 是具体原因（超时 / 不可达 / 处理失败），
+    `trace_id` 与审计级、调试级留痕同源，于是可以顺着一次请求看到它一共触发了哪些
+    降级。
+    """
+
+    __tablename__ = "biz_degradation_trace"
+    __table_args__ = (
+        Index("ix_degradation_trace_trace_id", "trace_id"),
+        Index("ix_degradation_trace_dependency", "dependency"),
+        Index("ix_degradation_trace_create_time", "create_time"),
+        {"comment": "降级留痕"},
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    dependency: Mapped[str] = mapped_column(String(32), comment="被降级的外部依赖")
+    reason: Mapped[str] = mapped_column(String(64), comment="降级原因")
+    agent_type: Mapped[str | None] = mapped_column(String(32), comment="触发降级的 Agent")
+    trace_id: Mapped[str | None] = mapped_column(String(64), comment="贯穿全链路的追踪标识")
+    detail: Mapped[str | None] = mapped_column(Text, comment="补充说明")
+    create_time: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class KnowledgeChunk(Base):
+    """知识分块的 MySQL 镜像：向量检索超时时用它做关键词检索。
+
+    分块的权威副本在 Milvus（检索面），这里是同一批分块的文本副本，唯一的用途是
+    在 Milvus 不可用或超时时提供一条不依赖向量库的检索路径。它不参与向量检索，
+    也不替代 Milvus——检索正常时的排序、过滤仍然全部由向量库决定。
+
+    删除文档只把 `fin_knowledge_meta.status` 置为 expired，分块行不删：关键词检索
+    与向量检索一样按 `status = 'active'` 过滤，两边的可见性口径保持一致。
+    """
+
+    __tablename__ = "fin_knowledge_chunk"
+    __table_args__ = (
+        Index("ix_knowledge_chunk_knowledge_id", "knowledge_id"),
+        {"comment": "知识分块（关键词检索兜底）"},
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    knowledge_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("fin_knowledge_meta.id"), comment="所属知识文档"
+    )
+    knowledge_type: Mapped[str] = mapped_column(String(32), comment="知识类型")
+    chunk_index: Mapped[int] = mapped_column(comment="分块序号")
+    heading_path: Mapped[list] = mapped_column(JSON, comment="标题路径")
+    content: Mapped[str] = mapped_column(MEDIUMTEXT, comment="分块正文")
+    create_time: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
 class KnowledgeMeta(Base):
     __tablename__ = "fin_knowledge_meta"
     __table_args__ = {"comment": "知识元数据"}

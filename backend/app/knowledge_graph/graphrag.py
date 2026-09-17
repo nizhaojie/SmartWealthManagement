@@ -37,6 +37,12 @@ DEGRADED_UNAVAILABLE = "neo4j_unavailable"
 DEGRADED_NO_ENTITY = "entity_not_matched"
 DEGRADED_REBUILDING = "graph_rebuilding_no_old_graph"
 
+# 属于「外部依赖抖动」的降级原因，应当计入降级留痕。实体未命中不在其中：问题里
+# 本来就没有图谱实体是正常结果，把它记成降级会让「系统有多少时间在降级」虚高。
+DEPENDENCY_DEGRADATION_REASONS = frozenset(
+    {DEGRADED_TIMEOUT, DEGRADED_UNAVAILABLE, DEGRADED_REBUILDING}
+)
+
 # 除了 entities.py 里六个真实的实体类型，common_holdings 的段落描述的是
 # 一对客户之间的关系，不是单个实体，因此多一个 "customer_pair" 取值。
 PassageEntityType = Literal[EntityType, "customer_pair"]

@@ -14,6 +14,11 @@ export type ChatStreamDone = {
   citations: Citation[];
   intent: string;
   content_classification: string;
+  // 贯穿全链路的追踪标识；排障时用它把一次用户可见的失败对到后端日志。
+  trace_id?: string;
+  // 这一轮是否走了降级路径（模型兜底、向量超时转关键词……）。降级后的回答照常渲染，
+  // 缺引用也不报错；这个标记只用于说明这次回答的成色。
+  degraded?: boolean;
 };
 
 export type ChatStreamHandlers = {

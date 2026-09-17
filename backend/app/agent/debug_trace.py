@@ -12,11 +12,12 @@
 from datetime import datetime, timedelta
 from typing import cast
 
-from sqlalchemy import delete
+from sqlalchemy import delete, func, select
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session
 
 from app.db.models import AgentDebugTrace
+from app.tracing import get_trace_id
 
 
 def record(
@@ -47,6 +48,59 @@ def record(
         )
     )
     db.commit()
+
+
+def record_response_time(
+    db: Session,
+    *,
+    agent_type: str,
+    duration_ms: int,
+    session_id: str | None = None,
+    user_id: int | None = None,
+) -> None:
+    """只记耗时的一次留痕，供「各 Agent 的响应时间」统计使用。
+
+    不借道 `record` 之外的表：`duration_ms` 本来就在这张表上，多开一张指标表会把
+    「谁在什么时候答了一次、花了多久」拆成两处。提示词与检索片段留空——那不是
+    这条记录要回答的问题。
+    """
+    record(
+        db,
+        trace_id=get_trace_id(),
+        agent_type=agent_type,
+        session_id=session_id,
+        user_id=user_id,
+        duration_ms=duration_ms,
+    )
+
+
+def response_time_summary(db: Session) -> list[dict]:
+    """按 Agent 汇总响应时间：次数、平均、最快、最慢（毫秒）。
+
+    只统计记了耗时的行；没有数据时返回空列表，而不是用 0 假装有一个数据点。
+    """
+    rows = db.execute(
+        select(
+            AgentDebugTrace.agent_type,
+            func.count(AgentDebugTrace.id),
+            func.avg(AgentDebugTrace.duration_ms),
+            func.min(AgentDebugTrace.duration_ms),
+            func.max(AgentDebugTrace.duration_ms),
+        )
+        .where(AgentDebugTrace.duration_ms.is_not(None))
+        .group_by(AgentDebugTrace.agent_type)
+        .order_by(AgentDebugTrace.agent_type)
+    ).all()
+    return [
+        {
+            "agent_type": agent_type,
+            "count": int(count),
+            "avg_duration_ms": round(float(avg), 1),
+            "min_duration_ms": int(minimum),
+            "max_duration_ms": int(maximum),
+        }
+        for agent_type, count, avg, minimum, maximum in rows
+    ]
 
 
 def purge(db: Session, *, now: datetime, retention_days: int) -> int:

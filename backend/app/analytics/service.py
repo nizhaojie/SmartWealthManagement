@@ -10,13 +10,14 @@
 被理解。只有成功作答的轮次进入记忆——答不上来的轮次不构成上下文。
 """
 
+import time
 from collections.abc import Collection
 
 import redis
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.agent import memory
+from app.agent import debug_trace, memory
 from app.agent.config import DATA_ANALYSIS_CONFIG, AgentConfig
 from app.analytics import audit, classification
 from app.analytics import examples as query_examples
@@ -57,8 +58,17 @@ def run_query(
         )
 
     graph = build_graph(db, settings, employee=employee, view_names=config.view_names)
+    started = time.monotonic()
     final_state: AnalyticsState = graph.invoke(
         {"question": question, "history": history}
+    )
+    # 响应时间按 Agent 记一笔（数据分析与风控监测共用这条链路，agent_type 来自配置）。
+    debug_trace.record_response_time(
+        db,
+        agent_type=config.name,
+        duration_ms=int((time.monotonic() - started) * 1000),
+        session_id=session_id,
+        user_id=employee.id,
     )
 
     sql = final_state.get("sql")

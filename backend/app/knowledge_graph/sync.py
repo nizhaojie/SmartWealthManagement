@@ -72,6 +72,28 @@ def _tier_of(risk_code: str) -> int:
     return int(risk_code[1:])
 
 
+def product_industry_weights(db: Session) -> dict[str, dict[str, Decimal]]:
+    """产品直接持有的底层资产按 (产品, 行业) 聚合的权重（不递归穿透）。
+
+    「一个产品落在哪些行业、各占多少」在图谱里只有这一个口径：同步投影写入
+    Neo4j 的 BELONGS_TO_INDUSTRY 权重与回放模式的 MySQL 投影（ADR-0008 的
+    ``customer_graph_from_db``）共用这条查询——改口径只改这里，两处不会走岔。
+    递归穿透是 app.customer_assets.look_through 的职责（ADR-0002），两边都
+    不在这里重复实现。
+    """
+    rows = db.execute(
+        select(Product.product_code, UnderlyingAsset.industry, ProductUnderlying.weight)
+        .join(ProductUnderlying, ProductUnderlying.product_id == Product.id)
+        .join(UnderlyingAsset, UnderlyingAsset.id == ProductUnderlying.underlying_asset_id)
+        .where(ProductUnderlying.underlying_asset_id.is_not(None))
+    ).all()
+    weights: dict[str, dict[str, Decimal]] = {}
+    for product_code, industry, weight in rows:
+        by_industry = weights.setdefault(product_code, {})
+        by_industry[industry] = by_industry.get(industry, Decimal("0")) + weight
+    return weights
+
+
 def _load_projection(db: Session) -> _Projection:
     customers = [
         {"customer_id": row.id, "real_name": row.real_name, "customer_level": row.customer_level}
@@ -135,24 +157,15 @@ def _load_projection(db: Session) -> _Projection:
         ).all()
     ]
 
-    # 行业只看产品直接持有的底层资产，不递归穿透嵌套产品——递归穿透是
-    # app.customer_assets.look_through 的职责（MySQL 递归 CTE，ADR-0002），
-    # 图谱这条路径负责的是行业关联与多跳查询，两者不重复实现同一段逻辑。
-    underlying_rows = db.execute(
-        select(Product.product_code, UnderlyingAsset.industry, ProductUnderlying.weight)
-        .join(ProductUnderlying, ProductUnderlying.product_id == Product.id)
-        .join(UnderlyingAsset, UnderlyingAsset.id == ProductUnderlying.underlying_asset_id)
-        .where(ProductUnderlying.underlying_asset_id.is_not(None))
-    ).all()
-    industry_totals: dict[tuple[str, str], Decimal] = {}
-    for row in underlying_rows:
-        key = (row.product_code, row.industry)
-        industry_totals[key] = industry_totals.get(key, Decimal("0")) + row.weight
+    # 行业只看产品直接持有的底层资产，聚合口径由 product_industry_weights 给出
+    # （同步投影与回放模式的 MySQL 投影共用）。
+    industry_weights = product_industry_weights(db)
     product_industries = [
         {"product_code": code, "industry": industry, "weight": float(weight)}
-        for (code, industry), weight in industry_totals.items()
+        for code, by_industry in industry_weights.items()
+        for industry, weight in by_industry.items()
     ]
-    industries = sorted({industry for _, industry in industry_totals})
+    industries = sorted({industry for by_industry in industry_weights.values() for industry in by_industry})
 
     return _Projection(
         customers=customers,

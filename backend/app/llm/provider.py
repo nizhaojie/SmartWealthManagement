@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 
 from app.exceptions import AppError
 from app.knowledge.service import ChunkResult
+from app.replay import library as replay_library
 from app.settings import Settings
 from app.tracing import record_token_usage
 
@@ -72,6 +73,13 @@ def generate_grounded_answer(
     chunks: list[ChunkResult],
     settings: Settings,
 ) -> GroundedAnswer:
+    # 回放模式（ADR-0008）不发起任何模型调用：预置问题返回预写回答，其余问题
+    # 用与 fake provider 相同的确定性拼装——引用序号来自真实检索结果，角标合法。
+    if settings.demo_replay:
+        preset = replay_library.chat_preset(question)
+        if preset is not None:
+            return GroundedAnswer(text=preset.answer, cited_chunk_numbers=list(preset.cited))
+        return _fake_grounded_answer(chunks)
     if settings.resolved_llm_provider == "fake":
         return _fake_grounded_answer(chunks)
     messages = build_grounded_messages(question, history, chunks)
@@ -79,6 +87,10 @@ def generate_grounded_answer(
 
 
 def generate_chitchat_reply(question: str, settings: Settings) -> str:
+    if settings.demo_replay:
+        return replay_library.CHITCHAT_PRESETS.get(
+            question.strip(), _fake_chitchat_reply()
+        )
     if settings.resolved_llm_provider == "fake":
         return _fake_chitchat_reply()
     return _openai_compatible_chitchat_reply(build_chitchat_messages(question), settings)

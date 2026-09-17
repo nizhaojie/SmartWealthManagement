@@ -29,6 +29,7 @@ from sqlalchemy.orm import Session
 
 from app.db.session import get_session
 from app.redis_client import get_redis
+from app.settings import Settings, get_settings
 from app.tracing import get_trace_id
 
 logger = logging.getLogger("app.event_bus")
@@ -147,6 +148,17 @@ class RedisEventPublisher:
         self._client.publish(event.channel, event.as_message())
 
 
+class NullMirrorPublisher:
+    """回放模式的出站镜像（ADR-0008）：不连 Redis，出站就地丢弃。
+
+    Redis 只是出站镜像（ADR-0013），本进程的订阅方不经过它——回放模式里
+    丢弃镜像而不丢弃分发，跨 Agent 协作在演示里照常发生。
+    """
+
+    def publish(self, event: Event) -> None:
+        return
+
+
 class FanoutPublisher:
     """发布方：事件先出站，再交给本进程的订阅方。
 
@@ -181,6 +193,7 @@ def _sibling_session(source: Session) -> Session:
 def get_event_publisher(
     db: Session = Depends(get_session),
     client: redis.Redis = Depends(get_redis),
+    settings: Settings = Depends(get_settings),
 ) -> EventPublisher:
     """请求作用域的发布方。
 
@@ -190,8 +203,13 @@ def get_event_publisher(
     """
     from app.event_subscribers import build_subscriptions
 
+    transport = (
+        NullMirrorPublisher()
+        if settings.demo_replay
+        else RedisEventPublisher(client)
+    )
     return FanoutPublisher(
-        RedisEventPublisher(client),
+        transport,
         build_subscriptions(lambda: _sibling_session(db)),
     )
 

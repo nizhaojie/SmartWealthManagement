@@ -21,6 +21,7 @@ from app.analytics.errors import (
 from app.analytics.examples import QueryExample
 from app.exceptions import AppError
 from app.llm.provider import chat_completion
+from app.replay import library as replay_library
 from app.settings import Settings
 
 SYSTEM_PROMPT = (
@@ -56,6 +57,14 @@ def clear_fake_queries() -> None:
     fake_generation_calls.clear()
 
 
+def _example_match(question: str, examples: list[QueryExample]) -> str | None:
+    """问题与某条示例完全相同则返回该示例的查询（fake 与回放的共同回退）。"""
+    for example in examples:
+        if example.question == question:
+            return example.sql
+    return None
+
+
 def generate_query(
     question: str,
     view_names: list[str],
@@ -65,6 +74,16 @@ def generate_query(
     history: list[dict] | None = None,
 ) -> str:
     history = history or []
+    # 回放模式（ADR-0008）不发起模型调用：预置问题返回预写 SQL，其余问题与
+    # fake provider 同一确定性回退（示例精确命中，否则「无法生成查询」）。
+    if settings.demo_replay:
+        preset = replay_library.analytics_preset(question)
+        if preset is not None:
+            return preset.sql
+        matched = _example_match(question, examples)
+        if matched is not None:
+            return matched
+        raise AppError(GENERATION_FAILED_CODE, GENERATION_FAILED_MESSAGE)
     if settings.resolved_llm_provider == "fake":
         return _fake_generate(question, view_names, view_definitions, examples, history)
     return _openai_compatible_generate(
@@ -90,9 +109,9 @@ def _fake_generate(
     )
     if question in _fake_overrides:
         return _fake_overrides[question]
-    for example in examples:
-        if example.question == question:
-            return example.sql
+    matched = _example_match(question, examples)
+    if matched is not None:
+        return matched
     raise AppError(GENERATION_FAILED_CODE, GENERATION_FAILED_MESSAGE)
 
 

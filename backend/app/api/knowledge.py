@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.auth.dependencies import AuthContext, require_internal
 from app.db.models import KnowledgeMeta
 from app.db.session import get_session
+from app.exceptions import AppError
 from app.http import ok
 from app.knowledge.schemas import (
     ChunkHitResponse,
@@ -55,6 +56,10 @@ def upload_document(
     settings: Settings = Depends(get_settings),
     _auth: AuthContext = Depends(require_internal),
 ):
+    if settings.demo_replay:
+        # 入库会调用向量化、Milvus 与对象存储（ADR-0008：回放不发起外部调用），
+        # 演示现场误触要得到明确的业务拒绝而不是一次悬着的外呼。
+        raise AppError(400, "回放模式下知识库管理不可用")
     content = file.file.read()
     filename = file.filename or ""
     now = datetime.now(timezone.utc).replace(tzinfo=None)
@@ -94,6 +99,9 @@ def delete_knowledge_document(
     settings: Settings = Depends(get_settings),
     _auth: AuthContext = Depends(require_internal),
 ):
+    if settings.demo_replay:
+        # 下架要触碰对象存储与 Milvus（同上传，ADR-0008）。
+        raise AppError(400, "回放模式下知识库管理不可用")
     meta = delete_document(db, settings, knowledge_id)
     return ok(_document_response(meta))
 

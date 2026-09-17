@@ -16,6 +16,7 @@ from app.knowledge import object_store, vector_store
 from app.knowledge.embeddings import embed_texts
 from app.knowledge.parsers import Section, is_supported, parse_document
 from app.knowledge.tokenizer import chunk_text
+from app.replay import library as replay_library
 from app.settings import Settings
 from app.tracing import get_trace_id
 
@@ -439,7 +440,42 @@ def search_chunks(
     超时或抛错时改用分块镜像上的 MySQL LIKE 关键词检索，并写一条降级留痕。超时用
     线程池做软超时：Milvus 客户端是阻塞调用，拿不到结果就直接返回降级，不等那个线程
     收尾（与 GraphRAG 的图谱查询同一取舍）。
+
+    回放模式（ADR-0008）不触碰 Milvus 与向量化：预置问题返回钉住的分块（内容
+    与真实知识一致、分数固定，因此融合排序与引用序号确定性可复现），其余问题
+    直接走 MySQL 关键词路径，连「先试一下向量库」的调用都不发起。
     """
+    if settings.demo_replay:
+        preset = replay_library.chat_preset(query)
+        if (
+            preset is not None
+            and preset.chunks
+            and (
+                knowledge_type is None
+                or all(
+                    chunk.knowledge_type == knowledge_type for chunk in preset.chunks
+                )
+            )
+        ):
+            return [
+                ChunkResult(
+                    knowledge_id=chunk.knowledge_id,
+                    knowledge_type=chunk.knowledge_type,
+                    chunk_index=chunk.chunk_index,
+                    heading_path=list(chunk.heading_path),
+                    content=chunk.content,
+                    score=chunk.score,
+                    title=chunk.title,
+                    source_file=chunk.source_file,
+                )
+                # 不按调用方的 top_k 截断：预置回答的引用序号指向这组分块的
+                # 完整位置，截掉靠后的分块会让角标悬空。预置至多三条。
+                for chunk in preset.chunks
+            ]
+        return keyword_search_chunks(
+            db, query=query, knowledge_type=knowledge_type, top_k=top_k
+        )
+
     executor = ThreadPoolExecutor(max_workers=1)
     try:
         future = executor.submit(

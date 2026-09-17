@@ -41,7 +41,7 @@ UNKNOWN_RISK_LEVEL_MESSAGE = "未知的风险等级代码"
 SAME_CUSTOMER_MESSAGE = "customer_id_a 与 customer_id_b 不能相同"
 
 
-def _require_positive_customer_id(customer_id: int) -> int:
+def require_positive_customer_id(customer_id: int) -> int:
     if isinstance(customer_id, bool) or not isinstance(customer_id, int) or customer_id <= 0:
         raise AppError(400, INVALID_CUSTOMER_ID_MESSAGE)
     return customer_id
@@ -64,7 +64,7 @@ def customer_holdings(
     driver: Driver, *, namespace: str, customer_id: int
 ) -> list[HoldingProduct]:
     """客户持仓产品：这位客户当前持有哪些产品。"""
-    customer_id = _require_positive_customer_id(customer_id)
+    customer_id = require_positive_customer_id(customer_id)
     with driver.session() as session:
         rows = session.execute_read(_customer_holdings_tx, namespace, customer_id)
     return [HoldingProduct(**row) for row in rows]
@@ -134,7 +134,7 @@ def customer_industry_exposure(
     driver: Driver, *, namespace: str, customer_id: int
 ) -> list[IndustryExposure]:
     """客户持仓的行业分布：按持仓市值 × 行业权重聚合，按市值降序返回。"""
-    customer_id = _require_positive_customer_id(customer_id)
+    customer_id = require_positive_customer_id(customer_id)
     with driver.session() as session:
         rows = session.execute_read(_customer_industry_exposure_tx, namespace, customer_id)
     total = sum(row["exposure"] for row in rows)
@@ -167,8 +167,8 @@ def common_holdings(
     driver: Driver, *, namespace: str, customer_id_a: int, customer_id_b: int
 ) -> list[CommonHoldingProduct]:
     """客户间共同持仓：两位客户同时持有的产品。"""
-    customer_id_a = _require_positive_customer_id(customer_id_a)
-    customer_id_b = _require_positive_customer_id(customer_id_b)
+    customer_id_a = require_positive_customer_id(customer_id_a)
+    customer_id_b = require_positive_customer_id(customer_id_b)
     if customer_id_a == customer_id_b:
         raise AppError(400, SAME_CUSTOMER_MESSAGE)
     with driver.session() as session:

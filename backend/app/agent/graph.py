@@ -1,7 +1,7 @@
 import time
 from dataclasses import dataclass
 from datetime import datetime
-from typing import TypedDict
+from typing import TypedDict, cast
 
 import redis
 from langgraph.graph import END, StateGraph
@@ -25,10 +25,15 @@ from app.event_bus import (
 from app.exceptions import AppError
 from app.knowledge.service import ChunkResult, search_chunks
 from app.knowledge_graph.graphrag import (
+    DEGRADED_NO_ENTITY,
     DEGRADED_TIMEOUT,
     DEPENDENCY_DEGRADATION_REASONS,
+    GraphAugmentation,
+    GraphPassage,
+    PassageEntityType,
     augment_with_graph,
 )
+from app.replay import library as replay_library
 from app.llm.provider import (
     build_chitchat_messages,
     build_grounded_messages,
@@ -60,6 +65,28 @@ def report_model_failure(db: Session, exc: AppError) -> None:
         agent_type=CUSTOMER_SERVICE_CONFIG.name,
         trace_id=get_trace_id(),
         detail=exc.message,
+    )
+
+
+def replay_graph_augmentation(question: str) -> GraphAugmentation:
+    """回放模式的图谱增强：预置问题返回预写段落，其余按实体未命中处理。"""
+    preset = replay_library.chat_preset(question)
+    if preset is None or not preset.passages:
+        return GraphAugmentation(
+            degraded=True, degradation_reason=DEGRADED_NO_ENTITY
+        )
+    return GraphAugmentation(
+        passages=[
+            GraphPassage(
+                content=passage.content,
+                score=1.0,
+                entity_type=cast(PassageEntityType, passage.entity_type),
+                entity_value=passage.entity_value,
+                tool=passage.tool,
+            )
+            for passage in preset.passages
+        ],
+        matched_entities=[dict(entity) for entity in preset.matched_entities],
     )
 
 
@@ -113,13 +140,19 @@ def _build_graph(db: Session, settings: Settings, driver: Driver, graph_namespac
         return {"chunks": chunks, "tool_calls": [*state.get("tool_calls", []), tool_call]}
 
     def graph_augment_node(state: AgentState) -> dict:
-        augmentation = augment_with_graph(
-            driver,
-            db,
-            namespace=graph_namespace,
-            question=state["question"],
-            timeout_seconds=settings.graphrag_query_timeout_seconds,
-        )
+        if settings.demo_replay:
+            # 回放模式（ADR-0008）不连 Neo4j：预置问题返回预写的图谱段落，
+            # 其余问题按「实体未命中」处理——这与真实链路里问题不含实体时的
+            # 结果一致，融合照常按加法进行，向量分不打折。
+            augmentation = replay_graph_augmentation(state["question"])
+        else:
+            augmentation = augment_with_graph(
+                driver,
+                db,
+                namespace=graph_namespace,
+                question=state["question"],
+                timeout_seconds=settings.graphrag_query_timeout_seconds,
+            )
         if augmentation.degradation_reason in DEPENDENCY_DEGRADATION_REASONS:
             # 图谱是增强，超时/不可用不该中断回答；但这是一次降级，要能统计到。
             # 统计口径统一成「超时 / 不可达」两类，图谱自己的细分原因进 detail。

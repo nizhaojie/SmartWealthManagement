@@ -10,6 +10,7 @@ from app.analytics.catalog import ViewSpec
 from app.analytics.execution import QueryResult
 from app.exceptions import AppError
 from app.llm.provider import chat_completion
+from app.replay import library as replay_library
 from app.settings import Settings
 
 SYSTEM_PROMPT = (
@@ -26,6 +27,13 @@ def generate_interpretation(
     result: QueryResult,
     settings: Settings,
 ) -> str:
+    # 回放模式（ADR-0008）不发起模型调用：预置问题返回预写解读，其余问题
+    # 用与 fake provider 相同的带口径模板。
+    if settings.demo_replay:
+        preset = replay_library.analytics_preset(question)
+        if preset is not None:
+            return preset.interpretation
+        return _fake_interpret(question, views, result)
     if settings.resolved_llm_provider == "fake":
         return _fake_interpret(question, views, result)
     return _openai_compatible_interpret(question, views, result, settings)

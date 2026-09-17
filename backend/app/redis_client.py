@@ -1,8 +1,10 @@
 from collections.abc import Iterator
 from functools import lru_cache
+from typing import cast
 
 import redis
 
+from app.replay.local_cache import InMemoryCache
 from app.settings import get_settings
 
 
@@ -27,9 +29,24 @@ def get_redis() -> Iterator[redis.Redis]:
     yield redis_client()
 
 
+_replay_cache: InMemoryCache | None = None
+
+
 def redis_client() -> redis.Redis:
-    """请求上下文之外（周期任务）用的客户端。"""
+    """请求上下文之外（周期任务）用的客户端。
+
+    回放模式（ADR-0008）不连 Redis：登录会话、短期记忆、画像缓存改用进程内
+    替身，语义一致而不发起任何网络调用。替身是**进程级单例**——每个请求各发
+    一个新实例的话，登录时写进的会话在下一个请求就读不到了。替身实现了各
+    消费者用到的方法子集，从不抛 ``RedisError``，因此缓存降级路径不会被触发
+    ——回放模式下缓存永远可用。
+    """
+    global _replay_cache
     settings = get_settings()
+    if settings.demo_replay:
+        if _replay_cache is None:
+            _replay_cache = InMemoryCache()
+        return cast(redis.Redis, _replay_cache)
     return _client(
         settings.redis_url,
         settings.redis_connect_timeout_seconds,

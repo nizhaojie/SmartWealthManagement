@@ -6,6 +6,8 @@
     "dev:backend": "node scripts/dev-backend.mjs",
     "dev:customer": "pnpm --filter @wealth/customer dev",
     "dev:internal": "pnpm --filter @wealth/internal dev",
+    "demo": "concurrently -n backend,customer,internal -c blue,green,yellow \"pnpm demo:backend\" \"pnpm dev:customer\" \"pnpm dev:internal\"",
+    "demo:backend": "node scripts/dev-backend.mjs --demo",
     "build": "pnpm -r --filter \"./apps/**\" --filter \"./packages/**\" build",
     "test": "pnpm --filter @wealth/shared test && pnpm --filter @wealth/customer test && pnpm --filter @wealth/internal test",
     "typecheck": "pnpm -r --filter \"./apps/**\" --filter \"./packages/**\" typecheck"

@@ -95,12 +95,7 @@ const accentClass = computed(() => `stat-card--accent-${props.accent}`);
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  width: var(--wm-space-6);
-  height: var(--wm-space-6);
-  border-radius: var(--wm-radius-md);
   color: var(--stat-card-accent);
-  font-size: var(--wm-space-4);
-  background: color-mix(in srgb, var(--stat-card-accent) 10%, white);
 }
 
 /* accent 枚举的完整映射：六个语义名之外没有任何着色入口 */

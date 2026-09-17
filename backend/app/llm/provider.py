@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from app.exceptions import AppError
 from app.knowledge.service import ChunkResult
 from app.settings import Settings
+from app.tracing import record_token_usage
 
 LLM_SERVICE_FAILED_CODE = 1007
 LLM_SERVICE_FAILED_MESSAGE = "对话模型调用失败"
@@ -103,6 +104,13 @@ def chat_completion(messages: list[dict], settings: Settings) -> str:
     try:
         with urllib.request.urlopen(request, timeout=30) as response:
             payload = json.loads(response.read())
+        usage = payload.get("usage")
+        if isinstance(usage, dict):
+            # token 明细进调试级留痕（不落日志）；没开累计时这个调用是空操作。
+            record_token_usage(
+                prompt_tokens=usage.get("prompt_tokens"),
+                completion_tokens=usage.get("completion_tokens"),
+            )
         return payload["choices"][0]["message"]["content"]
     except Exception as exc:
         raise AppError(LLM_SERVICE_FAILED_CODE, LLM_SERVICE_FAILED_MESSAGE) from exc

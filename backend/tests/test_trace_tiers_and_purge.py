@@ -4,6 +4,7 @@
 某时刻时，恰好这几条被删、那几条还在」，不必等待真实时间流逝或改动系统时钟。
 """
 
+import json
 from collections.abc import Iterator
 from datetime import datetime, timedelta, timezone
 
@@ -13,6 +14,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import delete, func, select
 
 import app.agent.graph as agent_graph
+import app.llm.provider as provider
 from app.agent import debug_trace
 from app.db.models import AgentDebugTrace, ConversationArchive
 from app.db.session import get_session
@@ -20,6 +22,7 @@ from app.knowledge.service import ChunkResult
 from app.llm.provider import GroundedAnswer
 from app.main import app
 from app.settings import get_settings
+from app.tracing import get_token_usage, start_token_usage
 
 CUSTOMER_USERNAME = "wangc1"
 EMPLOYEE_USERNAME = "advisor1"
@@ -198,6 +201,46 @@ def test_purge_endpoint_requires_internal_identity(trace_client):
     assert trace_client.post("/api/internal/traces/purge").status_code == 401
 
 
+class _FakeHttpResponse:
+    def __init__(self, payload: dict):
+        self._body = json.dumps(payload).encode("utf-8")
+
+    def __enter__(self) -> "_FakeHttpResponse":
+        return self
+
+    def __exit__(self, *exc_info) -> bool:
+        return False
+
+    def read(self) -> bytes:
+        return self._body
+
+
+def test_chat_completion_accumulates_token_usage_for_the_trace(monkeypatch):
+    payload = {
+        "choices": [{"message": {"content": "好的"}}],
+        "usage": {"prompt_tokens": 120, "completion_tokens": 8},
+    }
+    monkeypatch.setattr(
+        provider.urllib.request, "urlopen", lambda *args, **kwargs: _FakeHttpResponse(payload)
+    )
+    settings = get_settings().model_copy(
+        update={"llm_api_base": "http://llm.invalid/v1", "llm_api_key": "test-key"}
+    )
+
+    start_token_usage()
+    assert provider.chat_completion([{"role": "user", "content": "你好"}], settings) == "好的"
+
+    usage = get_token_usage()
+    assert usage is not None
+    assert (usage.prompt_tokens, usage.completion_tokens) == (120, 8)
+
+    # 一次 Agent 回合内的多次模型调用是累加，不是互相覆盖。
+    provider.chat_completion([{"role": "user", "content": "再问一句"}], settings)
+    usage = get_token_usage()
+    assert usage is not None
+    assert (usage.prompt_tokens, usage.completion_tokens) == (240, 16)
+
+
 def test_purge_endpoint_removes_expired_debug_traces_and_reports_the_run(trace_client):
     now = _utcnow()
     _add_debug_trace(trace_id="debug-old", created_at=now - timedelta(days=RETENTION_DAYS + 5))
@@ -251,6 +294,10 @@ def test_chat_turn_records_debug_trace_alongside_audit_archive(trace_client, mon
         assert snippet.content in prompt_text
         assert (row.retrieval_snippets or [])[0]["content"] == snippet.content
         assert row.duration_ms is not None and row.duration_ms >= 0
+        # fake provider 不发起模型调用，所以用量停在 0；这两列是 0 而不是 NULL，
+        # 说明「本次回合的 token 明细」确实被读到并写进了留痕。
+        assert row.prompt_tokens == 0
+        assert row.completion_tokens == 0
 
         # 同一回合在审计级留痕里也留下了使用者、问题、答案与引用。
         archived = session.scalar(

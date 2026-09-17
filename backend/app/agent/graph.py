@@ -21,7 +21,7 @@ from app.llm.provider import (
     generate_grounded_answer,
 )
 from app.settings import Settings
-from app.tracing import get_trace_id
+from app.tracing import get_token_usage, get_trace_id, start_token_usage
 
 
 def fallback_message(settings: Settings) -> str:
@@ -193,11 +193,13 @@ def run_customer_service_turn(
 ) -> ChatTurnResult:
     history = memory.get_history(cache, session_id)
     graph = _build_graph(db, settings, driver, settings.neo4j_graph_namespace)
+    start_token_usage()
     started = time.monotonic()
     final_state: AgentState = graph.invoke(
         {"question": question, "history": history, "tool_calls": []}
     )
     duration_ms = int((time.monotonic() - started) * 1000)
+    token_usage = get_token_usage()
 
     answer = final_state["answer"]
     citations = final_state.get("citations", [])
@@ -228,6 +230,8 @@ def run_customer_service_turn(
         user_id=user_id,
         prompt=final_state.get("prompt"),
         retrieval_snippets=_serialize_snippets(final_state.get("chunks", [])),
+        prompt_tokens=token_usage.prompt_tokens if token_usage else None,
+        completion_tokens=token_usage.completion_tokens if token_usage else None,
         duration_ms=duration_ms,
     )
 

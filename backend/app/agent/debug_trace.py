@@ -18,10 +18,6 @@ from sqlalchemy.orm import Session
 
 from app.db.models import AgentDebugTrace
 
-# 保留期（天）：CONTEXT.md 的「调试级留痕」即按此口径保留 30 天后删除。
-# 默认值同时作为 settings.debug_trace_retention_days 的缺省，二者口径一致。
-DEFAULT_RETENTION_DAYS = 30
-
 
 def record(
     db: Session,

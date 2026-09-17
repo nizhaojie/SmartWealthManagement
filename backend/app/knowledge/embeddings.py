@@ -9,6 +9,10 @@ from app.settings import Settings
 EMBEDDING_SERVICE_FAILED_CODE = 1001
 EMBEDDING_SERVICE_FAILED_MESSAGE = "Embedding 服务调用失败"
 
+# 兼容服务单次请求允许的最大输入条数（DashScope text-embedding-v3 实测 10 条，
+# 第 11 条起返回 400）。
+EMBEDDING_MAX_BATCH_SIZE = 10
+
 
 def embed_texts(texts: list[str], settings: Settings) -> list[list[float]]:
     if settings.resolved_embedding_provider == "fake":
@@ -34,6 +38,16 @@ def _fake_embedding(text: str, dimension: int) -> list[float]:
 
 
 def _openai_compatible_embedding(texts: list[str], settings: Settings) -> list[list[float]]:
+    # 兼容服务对单次请求的输入条数有上限（DashScope 为 10 条），一次全发会被整体
+    # 拒绝；按上限分批，各批按原顺序拼接，对调用方保持一次调用的语义。
+    vectors: list[list[float]] = []
+    for start in range(0, len(texts), EMBEDDING_MAX_BATCH_SIZE):
+        batch = texts[start : start + EMBEDDING_MAX_BATCH_SIZE]
+        vectors.extend(_embedding_request(batch, settings))
+    return vectors
+
+
+def _embedding_request(texts: list[str], settings: Settings) -> list[list[float]]:
     body = json.dumps({"model": settings.embedding_model_name, "input": texts}).encode("utf-8")
     request = urllib.request.Request(
         f"{settings.embedding_api_base.rstrip('/')}/embeddings",

@@ -259,6 +259,18 @@ def test_conversation_archive_masks_pii_before_storage(chat_client):
     assert assistant_row.citations in (None, [])
 
 
+def test_tool_calls_are_archived_with_the_assistant_turn(chat_client):
+    token, session_id = _customer_login(chat_client)
+
+    response = _chat(chat_client, token, "阿尔法半人马座恒星系统的行星编号列表是什么")
+    assert response.status_code == 200
+
+    rows = _archive_rows(session_id)
+    assistant_row = next(row for row in rows if row.role == "assistant")
+    tools = {call["tool"] for call in (assistant_row.tool_calls or [])}
+    assert {"knowledge_search", "graphrag_fusion"} <= tools
+
+
 def test_memory_truncates_oldest_message_once_token_budget_exceeded():
     settings = get_settings().model_copy(update={"chat_memory_token_budget": 5})
     cache = redis_lib.Redis.from_url(get_settings().test_redis_url, decode_responses=True)

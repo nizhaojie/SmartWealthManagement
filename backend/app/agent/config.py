@@ -10,6 +10,10 @@ class AgentConfig:
     tools: tuple[str, ...]
     content_classification_default: str
     retrieval_top_k: int = 5
+    # 受限查询可用的语义视图（ADR-0010）；None 表示目录内的全部视图。它收在配置里
+    # 而不是由调用点逐次传入——「这个 Agent 看得到哪些视图」是 Agent 定义的一部分，
+    # 与工具集、内容分类默认值同类。
+    view_names: tuple[str, ...] | None = None
 
 
 CUSTOMER_SERVICE_CONFIG = AgentConfig(
@@ -33,6 +37,10 @@ ADVISORY_CONFIG = AgentConfig(
     # 投顾助手不做知识库检索，retrieval_top_k 保持缺省。
 )
 
+# 风控监测 Agent 可查的语义视图：预警统计。它与数据分析 Agent 看的是同一张视图
+# 定义（迁移 0008），行级权限也来自同一处，没有风控专用的旁路。
+RISK_VIEW_NAMES: tuple[str, ...] = ("va_risk_alert_stat",)
+
 RISK_MONITORING_CONFIG = AgentConfig(
     name="risk_monitoring",
     # 工具集落在风控域内：预警查询、工单操作、规则查询。它们声明这个 Agent 的能力
@@ -45,4 +53,5 @@ RISK_MONITORING_CONFIG = AgentConfig(
     # 预警是事实记录，查询它们得到的是事实性内容。
     content_classification_default=FACTUAL_CONTENT,
     # 风控 Agent 不做知识库检索，retrieval_top_k 保持缺省。
+    view_names=RISK_VIEW_NAMES,
 )

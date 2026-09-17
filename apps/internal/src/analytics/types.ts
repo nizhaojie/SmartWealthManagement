@@ -1,3 +1,10 @@
+// 受限查询的提问输入：问题 + 多轮追问的会话标识。数据分析与风控问答共用同一
+// 形状——两条路径是同一链条上的两份 Agent 配置。
+export type AnalyticsQueryInput = {
+  question: string;
+  sessionId: string;
+};
+
 export type AnalyticsQueryResponse = {
   question: string;
   sql: string;

@@ -1,9 +1,9 @@
 """受限查询的编排：跑查询链路，留下永久记录，再返回或报错。
 
-四个 Agent 共用这一条链路（ADR-0007）：调用方传入自己的 Agent 配置、
-视图范围与记忆命名空间，其余（生成、校验、执行、解读、留痕）完全一致。
-风控监测 Agent 的自然语言查询走的也是这里，只是把视图范围收窄到预警统计
-视图——「不新建一套查询链路」在代码上就是这一处复用。
+四个 Agent 共用这一条链路（ADR-0007）：调用方传入自己的 Agent 配置与记忆
+命名空间，其余（生成、校验、执行、解读、留痕）完全一致。视图范围收在 Agent
+配置里（``AgentConfig.view_names``），风控监测 Agent 因此只看得到预警统计视图
+——「不新建一套查询链路」在代码上就是这一处复用。
 
 多轮追问依赖短期记忆（与智能客服同一套 Redis 记忆，按员工 + 会话标识
 命名空间隔离）：上一轮问题进入查询生成的上下文，「那上个季度呢」才能
@@ -48,7 +48,6 @@ def run_query(
     cache: redis.Redis | None = None,
     session_id: str | None = None,
     config: AgentConfig = DATA_ANALYSIS_CONFIG,
-    view_names: Collection[str] | None = None,
     memory_namespace: str = DEFAULT_MEMORY_NAMESPACE,
 ) -> AnalyticsQueryResponse:
     history: list[dict] = []
@@ -57,7 +56,7 @@ def run_query(
             cache, _memory_session(employee, session_id, memory_namespace)
         )
 
-    graph = build_graph(db, settings, employee=employee, view_names=view_names)
+    graph = build_graph(db, settings, employee=employee, view_names=config.view_names)
     final_state: AnalyticsState = graph.invoke(
         {"question": question, "history": history}
     )

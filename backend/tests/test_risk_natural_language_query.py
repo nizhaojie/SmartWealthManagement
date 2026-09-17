@@ -22,8 +22,7 @@ from sqlalchemy import create_engine, delete, select, text
 from sqlalchemy.orm import Session as OrmSession
 
 from app.agent.classification import FACTUAL_CONTENT
-from app.agent.config import RISK_MONITORING_CONFIG
-from app.agent.risk_query import RISK_VIEW_NAMES
+from app.agent.config import RISK_MONITORING_CONFIG, RISK_VIEW_NAMES
 from app.analytics import llm as analytics_llm
 from app.db.analytics_account import ANALYTICS_VIEW_NAMES, setup_analytics_account
 from app.db.models import RiskAlert
@@ -194,6 +193,8 @@ def test_risk_agent_is_a_config_with_its_domain_tools():
     }
     # 预警是事实记录，查询它们得到的是事实性内容。
     assert RISK_MONITORING_CONFIG.content_classification_default == FACTUAL_CONTENT
+    # 视图范围是 Agent 定义的一部分，与工具集同类。
+    assert RISK_MONITORING_CONFIG.view_names == RISK_VIEW_NAMES
 
 
 def test_risk_query_reuses_an_existing_semantic_view():

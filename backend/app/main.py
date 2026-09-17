@@ -11,12 +11,14 @@ from app.api.advisory import customer_router as advisory_customer_router
 from app.api.advisory import router as advisory_router
 from app.api.advisory_request import internal_router as advisory_request_internal_router
 from app.api.advisory_request import router as advisory_request_router
+from app.api.agents import router as agents_router
 from app.api.analytics import router as analytics_router
 from app.api.auth import router as auth_router
 from app.api.chat import router as chat_router
 from app.api.conversations import router as conversations_router
 from app.api.customer_assets import internal_router as customer_assets_internal_router
 from app.api.customer_assets import router as customer_assets_router
+from app.api.customers import router as customers_router
 from app.api.graph import router as graph_router
 from app.api.health import router as health_router
 from app.api.knowledge import router as knowledge_router
@@ -126,6 +128,8 @@ async def handle_uncaught_error(_request: Request, _exc: Exception):
 
 app.include_router(health_router)
 app.include_router(auth_router)
+app.include_router(agents_router)
+app.include_router(customers_router)
 app.include_router(knowledge_router)
 app.include_router(chat_router)
 app.include_router(conversations_router)

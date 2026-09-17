@@ -5,9 +5,12 @@ import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const backend = join(root, "backend");
+// BACKEND_PYTHON 指定解释器（如 conda 环境的 python.exe）；未设置时退回 backend/.venv。
+const envPython = process.env.BACKEND_PYTHON;
 const winPython = join(backend, ".venv", "Scripts", "python.exe");
 const nixPython = join(backend, ".venv", "bin", "python");
-const python = existsSync(winPython) ? winPython : nixPython;
+const python =
+  envPython && existsSync(envPython) ? envPython : existsSync(winPython) ? winPython : nixPython;
 
 // --demo：确定性回放模式（ADR-0008）。预置问答走回放，不发起任何对外部
 // 服务的调用，演示不依赖 LLM、Milvus、Neo4j、Redis 的健康状态。

@@ -103,23 +103,24 @@ onBeforeUnmount(dispose);
 </template>
 
 <style scoped>
+/* 着色一律经 --wm-* 令牌（tokenDiscipline.test.ts 有裸色值闸门），行为与结构保持原样 */
 .chart-frame {
   margin: 0;
   padding: 1rem;
-  border: 1px solid #e6e8eb;
-  border-radius: 8px;
+  border: 1px solid var(--wm-border);
+  border-radius: var(--wm-radius-md);
 }
 
 .chart-frame__title {
   margin-bottom: 0.25rem;
-  color: #1f2937;
+  color: var(--wm-text-primary);
   font-size: 0.95rem;
   font-weight: 600;
 }
 
 .chart-frame__hint {
   margin: 0 0 0.5rem;
-  color: #6b7280;
+  color: var(--wm-text-muted);
   font-size: 0.85rem;
 }
 
@@ -134,10 +135,10 @@ onBeforeUnmount(dispose);
   min-height: 140px;
   margin: 0;
   padding: 1rem;
-  border: 1px dashed #d5d9e0;
-  border-radius: 8px;
-  background: #fafbfc;
-  color: #6b7280;
+  border: 1px dashed var(--wm-border);
+  border-radius: var(--wm-radius-md);
+  background: var(--wm-bg-page);
+  color: var(--wm-text-muted);
   text-align: center;
 }
 
@@ -148,8 +149,8 @@ onBeforeUnmount(dispose);
   justify-content: center;
   gap: 0.75rem;
   min-height: 180px;
-  border-radius: 8px;
-  background: #fafbfc;
+  border-radius: var(--wm-radius-md);
+  background: var(--wm-bg-page);
 }
 
 .chart-frame__bars {
@@ -161,8 +162,8 @@ onBeforeUnmount(dispose);
 
 .chart-frame__bars span {
   width: 22px;
-  border-radius: 4px;
-  background: #e6e9ef;
+  border-radius: var(--wm-radius-sm);
+  background: var(--wm-border);
   animation: chart-frame-pulse 1.2s ease-in-out infinite;
 }
 
@@ -184,7 +185,7 @@ onBeforeUnmount(dispose);
 
 .chart-frame__loading-text {
   margin: 0;
-  color: #9aa2ae;
+  color: var(--wm-text-muted);
   font-size: 0.85rem;
 }
 

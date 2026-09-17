@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
+import { SectionCard } from "@wealth/shared";
 import {
   getCustomerAssets,
   getCustomerProfile,
@@ -70,8 +71,7 @@ onMounted(loadCustomers);
 
 <template>
   <div class="profile-workspace">
-    <aside class="profile-workspace__list">
-      <h2>客户</h2>
+    <SectionCard title="客户" class="profile-workspace__list">
       <p v-if="loadError" class="profile-workspace__error">{{ loadError }}</p>
       <button
         v-for="customer in customers"
@@ -83,7 +83,7 @@ onMounted(loadCustomers);
         <strong>{{ customer.real_name }}</strong>
         <span>{{ customer.risk_level ?? "未评测" }} · {{ customer.customer_level }}</span>
       </button>
-    </aside>
+    </SectionCard>
     <ProfilePanel
       v-if="profile"
       :profile="profile"
@@ -99,23 +99,8 @@ onMounted(loadCustomers);
 .profile-workspace {
   display: grid;
   grid-template-columns: 240px minmax(0, 1fr);
-  gap: 20px;
+  gap: var(--wm-space-5);
   min-height: 70vh;
-  --blotter: #10263a;
-  --paper: #f3f6f8;
-}
-
-.profile-workspace__list {
-  background: white;
-  padding: 16px;
-  border-top: 3px solid var(--blotter);
-}
-
-.profile-workspace__list h2 {
-  margin: 0 0 12px;
-  font-size: 12px;
-  letter-spacing: 0.2em;
-  color: var(--blotter);
 }
 
 .profile-workspace__list button {
@@ -123,31 +108,35 @@ onMounted(loadCustomers);
   flex-direction: column;
   align-items: flex-start;
   width: 100%;
-  margin-bottom: 8px;
-  padding: 10px 8px;
+  margin-bottom: var(--wm-space-2);
+  padding: var(--wm-space-2);
   background: none;
   border: 0;
+  /* 3px 左指示条：激活态标记，同 AppShell 导航与 StatCard 左条规格 */
   border-left: 3px solid transparent;
+  border-radius: var(--wm-radius-sm);
   cursor: pointer;
   text-align: left;
+  color: var(--wm-text-primary);
 }
 
 .profile-workspace__list button.is-active {
-  border-left-color: #9a7b4f;
-  background: var(--paper);
+  border-left-color: var(--wm-color-primary);
+  background: var(--wm-color-primary-tint);
 }
 
 .profile-workspace__list span {
-  color: #5c6570;
+  color: var(--wm-text-muted);
   font-size: 12px;
 }
 
 .profile-workspace__error {
-  color: #b42318;
+  color: var(--wm-color-danger);
 }
 
 .profile-workspace__empty {
   align-self: center;
+  color: var(--wm-text-muted);
 }
 
 @media (max-width: 720px) {

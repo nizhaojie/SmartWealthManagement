@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
-import { ApiError } from "@wealth/shared";
+import { ApiError, SectionCard } from "@wealth/shared";
 import AnalyticsResultView from "../analytics/AnalyticsResultView.vue";
 import type { AnalyticsQueryResponse } from "../analytics/types";
 import { RISK_OFFICER } from "../auth/identity";
@@ -463,7 +463,7 @@ onMounted(() => {
       </el-tab-pane>
 
       <el-tab-pane label="自然语言查询" name="query">
-        <el-card>
+        <SectionCard title="提问">
           <div class="risk-monitoring__query-composer">
             <el-input
               v-model="queryQuestion"
@@ -495,7 +495,7 @@ onMounted(() => {
               {{ example.question }}
             </button>
           </div>
-        </el-card>
+        </SectionCard>
 
         <el-alert
           v-if="queryFailure"
@@ -515,50 +515,53 @@ onMounted(() => {
 .risk-monitoring {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: var(--wm-space-4);
 }
 
 .risk-monitoring__filters {
   display: flex;
   flex-wrap: wrap;
-  gap: 12px;
-  margin-bottom: 12px;
+  gap: var(--wm-space-3);
+  margin-bottom: var(--wm-space-3);
 }
 
 .risk-monitoring__error {
-  color: #b42318;
+  color: var(--wm-color-danger);
 }
 
 .risk-monitoring__query-composer {
   display: flex;
-  gap: 12px;
+  gap: var(--wm-space-3);
   align-items: flex-start;
 }
 
 .risk-monitoring__examples {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--wm-space-2);
   flex-wrap: wrap;
-  margin-top: 12px;
+  margin-top: var(--wm-space-3);
 }
 
 .risk-monitoring__example {
   cursor: pointer;
-  border: 1px solid #d3dce6;
-  border-radius: 12px;
-  background: #f4f4f5;
-  padding: 2px 10px;
+  /* 示例问题做成药丸按钮：1px 边线（令牌纪律声明的极少数例外） */
+  border: 1px solid var(--wm-border);
+  border-radius: var(--wm-radius-lg);
+  background: var(--wm-bg-page);
+  padding: var(--wm-space-1) var(--wm-space-3);
   font-size: 12px;
-  color: #606266;
+  color: var(--wm-text-secondary);
 }
 
 .risk-monitoring__example:hover {
-  background: #e9e9eb;
+  /* 中性面没有比 bg-page 深一档的专用令牌，以边框令牌作最深的悬停底色（不引入新色值） */
+  background: var(--wm-border);
+  color: var(--wm-text-primary);
 }
 
 .risk-monitoring__hint {
-  color: #909399;
+  color: var(--wm-text-muted);
   font-size: 12px;
 }
 </style>

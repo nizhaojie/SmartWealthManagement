@@ -139,82 +139,88 @@ function attrEntries(node: GraphNode): [string, string][] {
 
 <style scoped>
 .customer-graph {
-  margin-bottom: 20px;
+  margin-bottom: var(--wm-space-4);
 }
 
 .customer-graph__head {
   display: flex;
   justify-content: space-between;
   align-items: baseline;
-  margin-bottom: 8px;
+  margin-bottom: var(--wm-space-2);
 }
 
 .customer-graph__head h3 {
   margin: 0;
   font-size: 1rem;
+  color: var(--wm-text-primary);
 }
 
 .customer-graph__synced {
   margin: 0;
   font-size: 0.8rem;
-  color: #6b7280;
+  color: var(--wm-text-muted);
 }
 
 .customer-graph__error {
-  color: #b3261e;
+  color: var(--wm-color-danger);
 }
 
 .customer-graph__controls {
   display: flex;
   flex-wrap: wrap;
-  gap: 12px;
+  gap: var(--wm-space-3);
   align-items: center;
-  margin-bottom: 8px;
+  margin-bottom: var(--wm-space-2);
   font-size: 0.85rem;
+  color: var(--wm-text-secondary);
 }
 
 .customer-graph__filter {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--wm-space-1);
 }
 
 .customer-graph__detail {
-  margin-top: 12px;
-  padding: 12px 16px;
-  border: 1px solid #e6e8eb;
-  border-radius: 8px;
+  margin-top: var(--wm-space-3);
+  padding: var(--wm-space-3) var(--wm-space-4);
+  /* 节点要素浮层的 1px 边线（令牌纪律声明的极少数例外） */
+  border: 1px solid var(--wm-border);
+  border-radius: var(--wm-radius-md);
+  background: var(--wm-bg-page);
 }
 
 .customer-graph__detail-head {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--wm-space-2);
 }
 
 .customer-graph__detail-head h4 {
   margin: 0;
+  color: var(--wm-text-primary);
 }
 
 .customer-graph__marked {
-  color: #b3261e;
+  color: var(--wm-color-danger);
   font-size: 0.85rem;
 }
 
 .customer-graph__detail dl {
   display: grid;
   grid-template-columns: auto 1fr;
-  gap: 4px 12px;
-  margin: 8px 0 0;
+  gap: var(--wm-space-1) var(--wm-space-3);
+  margin: var(--wm-space-2) 0 0;
 }
 
 .customer-graph__detail dt {
-  color: #6b7280;
+  color: var(--wm-text-muted);
   font-size: 0.8rem;
 }
 
 .customer-graph__detail dd {
   margin: 0;
   font-size: 0.85rem;
+  color: var(--wm-text-primary);
 }
 </style>

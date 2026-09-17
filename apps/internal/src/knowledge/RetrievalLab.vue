@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
+import { SectionCard } from "@wealth/shared";
 import { searchKnowledge } from "./api";
 import RetrievalHitCard from "./RetrievalHitCard.vue";
 import { KNOWLEDGE_TYPES, type ChunkHit, type KnowledgeType } from "./types";
@@ -93,7 +94,7 @@ function hitPresentation(hit: ChunkHit): {
 </script>
 
 <template>
-  <div class="retrieval-lab">
+  <SectionCard title="检索试验">
     <div class="retrieval-lab__form">
       <el-input
         v-model="query"
@@ -133,15 +134,15 @@ function hitPresentation(hit: ChunkHit): {
         :score-text="row.scoreText"
       />
     </template>
-  </div>
+  </SectionCard>
 </template>
 
 <style scoped>
 .retrieval-lab__form {
   display: flex;
   align-items: flex-start;
-  gap: 12px;
-  margin-bottom: 16px;
+  gap: var(--wm-space-3);
+  margin-bottom: var(--wm-space-4);
 }
 
 .retrieval-lab__form :deep(.el-textarea) {
@@ -149,19 +150,21 @@ function hitPresentation(hit: ChunkHit): {
 }
 
 .retrieval-lab__error {
-  color: var(--el-color-danger);
+  color: var(--wm-color-danger);
 }
 
 .retrieval-lab__verdict {
-  margin: 0 0 12px;
+  margin: 0 0 var(--wm-space-3);
   font-weight: 600;
+  color: var(--wm-text-primary);
 }
 
+/* 阈值分隔线是装饰性虚线（2px dashed），不属于 1px 细线例外，特意保留厚度 */
 .retrieval-lab__threshold {
-  margin: 16px 0;
-  padding: 8px 0;
-  border-top: 2px dashed var(--el-color-warning);
-  color: var(--el-color-warning);
+  margin: var(--wm-space-4) 0;
+  padding: var(--wm-space-2) 0;
+  border-top: 2px dashed var(--wm-color-warning);
+  color: var(--wm-color-warning);
   font-weight: 600;
   text-align: center;
 }

@@ -1,5 +1,6 @@
 \ufeff<script setup lang="ts">
 import { computed, ref } from "vue";
+import { SectionCard } from "@wealth/shared";
 import { toCsv } from "./csv";
 import type { AnalyticsQueryResponse } from "./types";
 
@@ -30,7 +31,7 @@ function exportCsv() {
 </script>
 
 <template>
-  <el-card class="analytics-result">
+  <SectionCard title="查询结果" class="analytics-result">
     <p class="analytics-result__interpretation" data-test="interpretation">
       {{ result.interpretation }}
     </p>
@@ -66,43 +67,47 @@ function exportCsv() {
         :label="column"
       />
     </el-table>
-  </el-card>
+  </SectionCard>
 </template>
 
 <style scoped>
 .analytics-result__interpretation {
   margin-top: 0;
   line-height: 1.7;
+  color: var(--wm-text-primary);
 }
 
+/* 免责声明用 warning 淡染底：底色由令牌现场混白派生，不存裸色值 */
 .analytics-result__disclaimer {
-  padding: 8px 12px;
-  background: #fdf6ec;
-  border-left: 3px solid #e6a23c;
-  color: #7a5b16;
+  padding: var(--wm-space-2) var(--wm-space-3);
+  background: color-mix(in srgb, var(--wm-color-warning) 8%, var(--wm-bg-card));
+  /* 3px warning 左条：提示条规格，同 StatCard 左条（非 1px 细线例外） */
+  border-left: 3px solid var(--wm-color-warning);
+  color: var(--wm-color-warning);
   font-size: 13px;
 }
 
 .analytics-result__toolbar {
   display: flex;
   align-items: center;
-  gap: 12px;
-  margin: 12px 0;
+  gap: var(--wm-space-3);
+  margin: var(--wm-space-3) 0;
 }
 
 .analytics-result__meta {
-  color: #909399;
+  color: var(--wm-text-muted);
   font-size: 12px;
 }
 
 .analytics-result__sql {
-  background: #f5f7fa;
-  padding: 12px;
+  background: var(--wm-bg-page);
+  padding: var(--wm-space-3);
   overflow-x: auto;
   font-size: 13px;
+  color: var(--wm-text-secondary);
 }
 
 .analytics-result__truncated {
-  margin-bottom: 12px;
+  margin-bottom: var(--wm-space-3);
 }
 </style>

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
+import { SectionCard } from "@wealth/shared";
 import { fetchHealth, type HealthSnapshot } from "../api/health";
 
 const snapshot = ref<HealthSnapshot | null>(null);
@@ -15,8 +16,7 @@ onMounted(async () => {
 </script>
 
 <template>
-  <el-card>
-    <h1>系统健康状态</h1>
+  <SectionCard title="系统健康状态">
     <p v-if="error">无法获取健康状态</p>
     <template v-else-if="snapshot">
       <p>总体：{{ snapshot.status === "ok" ? "正常" : "降级" }}</p>
@@ -28,5 +28,5 @@ onMounted(async () => {
       <p>生成模型：{{ snapshot.llm_provider }}</p>
     </template>
     <p v-else>加载中…</p>
-  </el-card>
+  </SectionCard>
 </template>

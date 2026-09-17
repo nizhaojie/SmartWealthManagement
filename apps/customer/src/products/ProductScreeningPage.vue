@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from "vue";
-import { ApiError } from "@wealth/shared";
+import { ApiError, SectionCard } from "@wealth/shared";
 import { listAdvisoryRequests, submitAdvisoryRequest } from "../advisory/api";
 import type { AdvisoryRequest } from "../advisory/types";
 import { getProduct, listProducts } from "./api";
@@ -120,126 +120,149 @@ onMounted(async () => {
 </script>
 
 <template>
-  <el-card>
-    <h1>产品筛选</h1>
-    <p data-testid="not-recommendation">{{ DISCLAIMER }}</p>
+  <div class="product-screening">
+    <h1 class="page-title">产品筛选</h1>
+    <SectionCard title="筛选条件">
+      <p data-testid="not-recommendation" class="disclaimer">{{ DISCLAIMER }}</p>
 
-    <form @submit.prevent="loadProducts">
-      <label>
-        产品类型
-        <select name="product_type" v-model="filters.product_type">
-          <option value="">全部</option>
-          <option v-for="type in PRODUCT_TYPES" :key="type" :value="type">{{ type }}</option>
-        </select>
-      </label>
-      <label>
-        产品风险等级
-        <select name="risk_level" v-model="filters.risk_level">
-          <option value="">全部</option>
-          <option v-for="level in PRODUCT_RISK_LEVELS" :key="level" :value="level">{{ level }}</option>
-        </select>
-      </label>
-      <label>
-        期限（天，上限）
-        <input name="max_term_days" v-model="filters.max_term_days" inputmode="numeric" />
-      </label>
-      <label>
-        起投金额（上限）
-        <input name="min_amount" v-model="filters.min_amount" inputmode="decimal" />
-      </label>
-      <label>
-        业绩基准（下限）
-        <input name="min_expected_return" v-model="filters.min_expected_return" inputmode="decimal" />
-      </label>
-      <el-button name="apply-filters" native-type="submit" :loading="loading">筛选</el-button>
-    </form>
+      <form @submit.prevent="loadProducts">
+        <label>
+          产品类型
+          <select name="product_type" v-model="filters.product_type">
+            <option value="">全部</option>
+            <option v-for="type in PRODUCT_TYPES" :key="type" :value="type">{{ type }}</option>
+          </select>
+        </label>
+        <label>
+          产品风险等级
+          <select name="risk_level" v-model="filters.risk_level">
+            <option value="">全部</option>
+            <option v-for="level in PRODUCT_RISK_LEVELS" :key="level" :value="level">{{ level }}</option>
+          </select>
+        </label>
+        <label>
+          期限（天，上限）
+          <input name="max_term_days" v-model="filters.max_term_days" inputmode="numeric" />
+        </label>
+        <label>
+          起投金额（上限）
+          <input name="min_amount" v-model="filters.min_amount" inputmode="decimal" />
+        </label>
+        <label>
+          业绩基准（下限）
+          <input name="min_expected_return" v-model="filters.min_expected_return" inputmode="decimal" />
+        </label>
+        <el-button name="apply-filters" native-type="submit" :loading="loading">筛选</el-button>
+      </form>
+    </SectionCard>
 
-    <p v-if="errorMessage" role="alert">{{ errorMessage }}</p>
-    <p v-else-if="!loading && products.length === 0" data-testid="empty-hint">{{ EMPTY_HINT }}</p>
+    <SectionCard title="符合条件的产品">
+      <p v-if="errorMessage" role="alert">{{ errorMessage }}</p>
+      <p v-else-if="!loading && products.length === 0" data-testid="empty-hint">{{ EMPTY_HINT }}</p>
 
-    <div v-if="products.length" class="table-wrap">
-    <table>
-      <thead>
-        <tr>
-          <th>代码</th>
-          <th>名称</th>
-          <th>类型</th>
-          <th>产品风险等级</th>
-          <th>业绩基准</th>
-          <th>期限</th>
-          <th>起投金额</th>
-          <th>费率</th>
-          <th>详情</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr
-          v-for="product in products"
-          :key="product.product_code"
-          :data-product-code="product.product_code"
-        >
-          <td>{{ product.product_code }}</td>
-          <td>{{ product.product_name }}</td>
-          <td>{{ product.product_type }}</td>
-          <td>{{ product.risk_level }}</td>
-          <td>{{ product.expected_return }}</td>
-          <td>{{ product.term_days }}</td>
-          <td>{{ product.min_amount }}</td>
-          <td>{{ product.fee_rate }}</td>
-          <td>
-            <button type="button" :name="`detail-${product.product_code}`" @click="openDetail(product)">
-              查看
-            </button>
-          </td>
-        </tr>
-      </tbody>
-    </table>
-    </div>
+      <div v-if="products.length" class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>代码</th>
+              <th>名称</th>
+              <th>类型</th>
+              <th>产品风险等级</th>
+              <th>业绩基准</th>
+              <th>期限</th>
+              <th>起投金额</th>
+              <th>费率</th>
+              <th>详情</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr
+              v-for="product in products"
+              :key="product.product_code"
+              :data-product-code="product.product_code"
+            >
+              <td>{{ product.product_code }}</td>
+              <td>{{ product.product_name }}</td>
+              <td>{{ product.product_type }}</td>
+              <td>{{ product.risk_level }}</td>
+              <td>{{ product.expected_return }}</td>
+              <td>{{ product.term_days }}</td>
+              <td>{{ product.min_amount }}</td>
+              <td>{{ product.fee_rate }}</td>
+              <td>
+                <button type="button" :name="`detail-${product.product_code}`" @click="openDetail(product)">
+                  查看
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
 
-    <el-button name="request-advisory" @click="requestAdvisory">请顾问出具方案</el-button>
+      <el-button name="request-advisory" @click="requestAdvisory">请顾问出具方案</el-button>
 
-    <p v-if="advisoryError" role="alert" data-testid="advisory-error">{{ advisoryError }}</p>
+      <p v-if="advisoryError" role="alert" data-testid="advisory-error">{{ advisoryError }}</p>
+    </SectionCard>
 
-    <section v-if="latestAdvisoryRequest" data-testid="advisory-request">
-      <h2>我的方案请求</h2>
-      <p>
-        状态：<strong data-testid="advisory-status">{{ latestAdvisoryRequest.status }}</strong>
-        <span>{{ STATUS_HINTS[latestAdvisoryRequest.status] }}</span>
-      </p>
-      <p>请求编号：{{ latestAdvisoryRequest.request_no }}</p>
-      <p>提交时间：{{ latestAdvisoryRequest.submitted_at }}</p>
-      <p v-if="advisoryCondition">触发条件：{{ advisoryCondition }}</p>
-    </section>
+    <SectionCard v-if="latestAdvisoryRequest" title="我的方案请求">
+      <section data-testid="advisory-request">
+        <p>
+          状态：<strong data-testid="advisory-status">{{ latestAdvisoryRequest.status }}</strong>
+          <span class="status-hint">{{ STATUS_HINTS[latestAdvisoryRequest.status] }}</span>
+        </p>
+        <p>请求编号：{{ latestAdvisoryRequest.request_no }}</p>
+        <p>提交时间：{{ latestAdvisoryRequest.submitted_at }}</p>
+        <p v-if="advisoryCondition">触发条件：{{ advisoryCondition }}</p>
+      </section>
+    </SectionCard>
 
-    <section v-if="selected" data-testid="product-detail">
-      <h2>产品详情</h2>
-      <p v-if="detailError" role="alert">{{ detailError }}</p>
-      <dl>
-        <div><dt>代码</dt><dd>{{ selected.product_code }}</dd></div>
-        <div><dt>名称</dt><dd>{{ selected.product_name }}</dd></div>
-        <div><dt>类型</dt><dd>{{ selected.product_type }}</dd></div>
-        <div><dt>产品风险等级</dt><dd>{{ selected.risk_level }}</dd></div>
-        <div><dt>业绩基准</dt><dd>{{ selected.expected_return }}</dd></div>
-        <div><dt>期限</dt><dd>{{ selected.term_days }}</dd></div>
-        <div><dt>起投金额</dt><dd>{{ selected.min_amount }}</dd></div>
-        <div><dt>费率</dt><dd>{{ selected.fee_rate }}</dd></div>
-        <div><dt>基金经理</dt><dd>{{ selected.fund_manager }}</dd></div>
-      </dl>
-    </section>
-  </el-card>
+    <SectionCard v-if="selected" title="产品详情">
+      <section data-testid="product-detail">
+        <p v-if="detailError" role="alert">{{ detailError }}</p>
+        <dl>
+          <div><dt>代码</dt><dd>{{ selected.product_code }}</dd></div>
+          <div><dt>名称</dt><dd>{{ selected.product_name }}</dd></div>
+          <div><dt>类型</dt><dd>{{ selected.product_type }}</dd></div>
+          <div><dt>产品风险等级</dt><dd>{{ selected.risk_level }}</dd></div>
+          <div><dt>业绩基准</dt><dd>{{ selected.expected_return }}</dd></div>
+          <div><dt>期限</dt><dd>{{ selected.term_days }}</dd></div>
+          <div><dt>起投金额</dt><dd>{{ selected.min_amount }}</dd></div>
+          <div><dt>费率</dt><dd>{{ selected.fee_rate }}</dd></div>
+          <div><dt>基金经理</dt><dd>{{ selected.fund_manager }}</dd></div>
+        </dl>
+      </section>
+    </SectionCard>
+  </div>
 </template>
 
 <style scoped>
+.product-screening {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wm-space-4);
+}
+
+.page-title {
+  margin: 0;
+  font-size: 1.25rem;
+  color: var(--wm-text-primary);
+}
+
+.disclaimer {
+  margin: 0 0 var(--wm-space-4);
+  color: var(--wm-text-secondary);
+}
+
 form {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.75rem 1rem;
+  gap: var(--wm-space-3) var(--wm-space-4);
   align-items: flex-end;
-  margin: 1rem 0;
 }
 
 .table-wrap {
   overflow-x: auto;
+  margin-bottom: var(--wm-space-4);
 }
 
 table {
@@ -250,8 +273,14 @@ table {
 th,
 td {
   text-align: left;
-  padding: 0.5rem 0.75rem;
-  border-bottom: 1px solid var(--el-border-color-lighter);
+  padding: var(--wm-space-2) var(--wm-space-3);
+  /* 表格行的 1px 分隔细线（令牌纪律声明的极少数例外） */
+  border-bottom: 1px solid var(--wm-border-hairline);
   white-space: nowrap;
+}
+
+.status-hint {
+  margin-left: var(--wm-space-2);
+  color: var(--wm-text-muted);
 }
 </style>

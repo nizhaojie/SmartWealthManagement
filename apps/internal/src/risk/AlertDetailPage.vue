@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { ApiError } from "@wealth/shared";
+import { ApiError, SectionCard } from "@wealth/shared";
 import { currentEmployee } from "../auth/store";
 import { deriveWorkOrder, escalateAlert, excludeAlert, getAlert } from "./api";
 import {
@@ -111,10 +111,9 @@ onMounted(load);
 <template>
   <div class="alert-detail" data-test="alert-detail">
     <p v-if="loading">加载中…</p>
-    <el-card v-else-if="forbidden" data-test="alert-forbidden">
-      <h2 role="alert">无权查看</h2>
-      <p>{{ forbiddenMessage }}</p>
-    </el-card>
+    <SectionCard v-else-if="forbidden" title="无权查看" data-test="alert-forbidden">
+      <p role="alert">{{ forbiddenMessage }}</p>
+    </SectionCard>
     <p v-else-if="loadError" role="alert" class="alert-detail__error" data-test="alert-load-error">
       {{ loadError }}
     </p>
@@ -122,7 +121,7 @@ onMounted(load);
     <template v-else-if="detail">
       <header class="alert-detail__header">
         <el-button data-test="back-to-alerts" @click="backToList">返回预警列表</el-button>
-        <h2>预警 #{{ detail.id }} · {{ detail.alert_type }}</h2>
+        <h2 class="alert-detail__title">预警 #{{ detail.id }} · {{ detail.alert_type }}</h2>
         <el-tag :type="levelTagType(detail.alert_level)" data-test="alert-level">
           {{ detail.alert_level }}
         </el-tag>
@@ -131,8 +130,7 @@ onMounted(load);
         </el-tag>
       </header>
 
-      <el-card>
-        <h3>命中依据</h3>
+      <SectionCard title="命中依据">
         <!-- 依据落到字段与值：哪个字段、什么值、超过什么阈值。这是判断误报的全部依据，
              所以它在这里是分列的，不是一句「命中某某规则」。 -->
         <el-table
@@ -161,10 +159,9 @@ onMounted(load);
         <p v-if="detail.handled_by_name" class="alert-detail__meta" data-test="handled-by">
           处置人 {{ detail.handled_by_name }} · {{ detail.handle_result }}
         </p>
-      </el-card>
+      </SectionCard>
 
-      <el-card data-test="customer-card">
-        <h3>客户</h3>
+      <SectionCard title="客户" data-test="customer-card">
         <el-descriptions :column="4" border>
           <el-descriptions-item label="姓名">{{ detail.customer.real_name }}</el-descriptions-item>
           <el-descriptions-item label="客户分层">
@@ -177,10 +174,9 @@ onMounted(load);
             {{ detail.customer.manager_name || "—" }}
           </el-descriptions-item>
         </el-descriptions>
-      </el-card>
+      </SectionCard>
 
-      <el-card>
-        <h3>关联交易</h3>
+      <SectionCard title="关联交易">
         <el-table :data="detail.transactions" data-test="transactions-table">
           <el-table-column prop="transaction_no" label="流水号" min-width="200" />
           <el-table-column prop="transaction_type" label="类型" width="90" />
@@ -193,10 +189,9 @@ onMounted(load);
             </template>
           </el-table-column>
         </el-table>
-      </el-card>
+      </SectionCard>
 
-      <el-card>
-        <h3>该客户的历史预警</h3>
+      <SectionCard title="该客户的历史预警">
         <el-empty
           v-if="!detail.customer_history.length"
           description="这位客户没有其他预警记录"
@@ -219,10 +214,9 @@ onMounted(load);
             </template>
           </el-table-column>
         </el-table>
-      </el-card>
+      </SectionCard>
 
-      <el-card>
-        <h3>工单</h3>
+      <SectionCard title="工单">
         <div v-if="detail.work_order" data-test="work-order-link">
           <p>
             已派生工单 {{ detail.work_order.work_order_no }}（{{ detail.work_order.status }}）
@@ -232,10 +226,9 @@ onMounted(load);
           </el-button>
         </div>
         <p v-else>这条预警还没有派生工单。</p>
-      </el-card>
+      </SectionCard>
 
-      <el-card v-if="disposable" data-test="disposition">
-        <h3>处置</h3>
+      <SectionCard v-if="disposable" title="处置" data-test="disposition">
         <el-input
           v-model="reason"
           type="textarea"
@@ -274,7 +267,7 @@ onMounted(load);
         <p v-if="actionError" role="alert" class="alert-detail__error" data-test="action-error">
           {{ actionError }}
         </p>
-      </el-card>
+      </SectionCard>
       <p
         v-else-if="detail.status === '未处理'"
         class="alert-detail__hint"
@@ -290,41 +283,43 @@ onMounted(load);
 .alert-detail {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: var(--wm-space-4);
 }
 
 .alert-detail__header {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: var(--wm-space-3);
 }
 
-.alert-detail__header h2 {
+.alert-detail__title {
   margin: 0;
+  color: var(--wm-text-primary);
 }
 
 .alert-detail__meta {
-  color: #606266;
-  margin: 8px 0 0;
+  color: var(--wm-text-secondary);
+  margin: var(--wm-space-2) 0 0;
 }
 
 .alert-detail__trigger {
   white-space: pre-wrap;
   margin: 0;
+  color: var(--wm-text-primary);
 }
 
 .alert-detail__actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 12px;
+  gap: var(--wm-space-2);
+  margin-top: var(--wm-space-3);
 }
 
 .alert-detail__error {
-  color: #b42318;
+  color: var(--wm-color-danger);
 }
 
 .alert-detail__hint {
-  color: #909399;
+  color: var(--wm-text-muted);
 }
 </style>

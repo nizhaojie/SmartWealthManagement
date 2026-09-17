@@ -284,18 +284,25 @@ function submitCorrection() {
 </template>
 
 <style scoped>
+/*
+ * 客户档案面：整页一张卡。旧的纸档配色（blotter/paper/brass/stamp/signal）
+ * 全部收敛到 --wm-* 令牌：墨色→text-primary、纸面→bg-card、黄铜→warning、
+ * 印章红→danger、来源青→text-muted。构成不变，只换皮。
+ *
+ * 偏离声明：本页是 04 号 ticket「内容包进 SectionCard」纪律下的唯一例外——
+ * 档案头（眉标/姓名/日期戳）与印章/熔断构成不适配 SectionCard 的标题栏插槽，
+ * 硬套等于重排信息架构；故按 spec「复合组件：页面级独有模式留在各自应用」
+ * 在应用内复刻 SectionCard 的容器配方（白面/边线/圆角/阴影/间距），
+ * 视觉与其余页面的卡片保持同一语言。
+ */
 .customer-file {
-  --blotter: #10263a;
-  --paper: #f3f6f8;
-  --brass: #9a7b4f;
-  --stamp: #b42318;
-  --signal: #0f766e;
-  --graphite: #243140;
-  --rule: color-mix(in srgb, var(--blotter) 14%, transparent);
-  background: var(--paper);
-  color: var(--graphite);
-  padding: 28px 28px 36px;
-  border: 1px solid var(--rule);
+  background: var(--wm-bg-card);
+  color: var(--wm-text-secondary);
+  padding: var(--wm-space-5);
+  /* 档案卡 1px 边线（令牌纪律声明的极少数例外） */
+  border: 1px solid var(--wm-border);
+  border-radius: var(--wm-radius-lg);
+  box-shadow: var(--wm-shadow-card);
   position: relative;
 }
 
@@ -303,10 +310,11 @@ function submitCorrection() {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-  gap: 16px;
-  border-bottom: 3px solid var(--blotter);
-  padding-bottom: 16px;
-  margin-bottom: 20px;
+  gap: var(--wm-space-4);
+  /* 档头 3px 墨线：档案「装订线」，保留厚度（非 1px 细线例外） */
+  border-bottom: 3px solid var(--wm-text-primary);
+  padding-bottom: var(--wm-space-4);
+  margin-bottom: var(--wm-space-4);
 }
 
 .customer-file__eyebrow {
@@ -314,38 +322,40 @@ function submitCorrection() {
   letter-spacing: 0.32em;
   font-size: 11px;
   font-weight: 600;
-  color: var(--brass);
+  color: var(--wm-text-muted);
 }
 
 .customer-file__name {
-  margin: 8px 0 0;
-  font-family: "Bahnschrift", "Noto Sans SC", "Source Han Sans SC", sans-serif;
+  margin: var(--wm-space-2) 0 0;
   font-size: 34px;
   font-weight: 600;
   letter-spacing: 0.04em;
-  color: var(--blotter);
+  color: var(--wm-text-primary);
 }
 
 .customer-file__date {
   margin: 0;
-  padding: 8px 12px;
-  border: 1px solid var(--brass);
-  color: var(--blotter);
+  padding: var(--wm-space-2) var(--wm-space-3);
+  /* 日期戳 1px 边线（令牌纪律声明的极少数例外） */
+  border: 1px solid var(--wm-border-hairline);
+  border-radius: var(--wm-radius-sm);
+  color: var(--wm-text-muted);
   font-size: 12px;
   letter-spacing: 0.08em;
-  background: color-mix(in srgb, var(--brass) 12%, white);
+  background: var(--wm-bg-page);
 }
 
 .customer-file__warning {
-  background: #fbf0dc;
-  border-left: 4px solid var(--brass);
-  color: #8a4b08;
-  padding: 12px 16px;
-  margin-bottom: 20px;
+  background: color-mix(in srgb, var(--wm-color-warning) 8%, var(--wm-bg-card));
+  /* 4px warning 左条：警示条规格，同 StatCard 左条家族（非 1px 细线例外） */
+  border-left: 4px solid var(--wm-color-warning);
+  color: var(--wm-color-warning);
+  padding: var(--wm-space-3) var(--wm-space-4);
+  margin-bottom: var(--wm-space-4);
 }
 
 .customer-file__warning p {
-  margin: 0 0 6px;
+  margin: 0 0 var(--wm-space-1);
 }
 
 .customer-file__warning p:last-child {
@@ -356,21 +366,22 @@ function submitCorrection() {
 .customer-file__grade {
   display: grid;
   grid-template-columns: 96px minmax(0, 1fr);
-  gap: 16px;
+  gap: var(--wm-space-4);
   align-items: center;
-  margin-bottom: 24px;
+  margin-bottom: var(--wm-space-5);
 }
 
 .customer-file__break {
-  background: color-mix(in srgb, var(--stamp) 8%, white);
-  border: 1px solid color-mix(in srgb, var(--stamp) 35%, white);
-  padding: 12px 16px;
-  color: var(--stamp);
+  background: color-mix(in srgb, var(--wm-color-danger) 8%, var(--wm-bg-card));
+  border: 1px solid color-mix(in srgb, var(--wm-color-danger) 35%, var(--wm-bg-card));
+  border-radius: var(--wm-radius-md);
+  padding: var(--wm-space-3) var(--wm-space-4);
+  color: var(--wm-color-danger);
 }
 
 .customer-file__break h3,
 .customer-file__break p {
-  margin: 0 0 6px;
+  margin: 0 0 var(--wm-space-1);
 }
 
 .customer-file__stencil {
@@ -379,9 +390,10 @@ function submitCorrection() {
   height: 96px;
   display: grid;
   place-items: center;
-  border: 4px solid var(--blotter);
-  color: var(--blotter);
-  font-family: "Bahnschrift", "Noto Sans SC", sans-serif;
+  /* 4px 印章描边：仿印章粗边，保留厚度（非 1px 细线例外） */
+  border: 4px solid var(--wm-text-primary);
+  border-radius: var(--wm-radius-sm);
+  color: var(--wm-text-primary);
   font-size: 36px;
   font-weight: 700;
   letter-spacing: 0.04em;
@@ -389,8 +401,8 @@ function submitCorrection() {
 }
 
 .customer-file__stencil--void {
-  border-color: var(--stamp);
-  color: var(--stamp);
+  border-color: var(--wm-color-danger);
+  color: var(--wm-color-danger);
   font-size: 22px;
   text-decoration: line-through;
 }
@@ -399,45 +411,47 @@ function submitCorrection() {
   margin: 0;
   font-size: 13px;
   letter-spacing: 0.12em;
-  color: var(--signal);
+  color: var(--wm-text-muted);
 }
 
 .customer-file__grade strong {
   display: block;
-  margin-top: 4px;
+  margin-top: var(--wm-space-1);
   font-size: 26px;
-  color: var(--blotter);
+  color: var(--wm-text-primary);
 }
 
 .customer-file__allocation {
-  margin-bottom: 20px;
+  margin-bottom: var(--wm-space-4);
 }
 
 .customer-file__tags {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 14px;
+  gap: var(--wm-space-4);
 }
 
+/* 白卡上的字段瓦片：页面底色反衬 + 发丝线勾边 */
 .field-card {
-  background: white;
-  padding: 16px;
-  border-top: 3px solid var(--blotter);
-  box-shadow: 0 1px 0 var(--rule);
+  background: var(--wm-bg-page);
+  padding: var(--wm-space-4);
+  border: 1px solid var(--wm-border-hairline);
+  border-top: 3px solid var(--wm-text-primary);
+  border-radius: var(--wm-radius-sm);
 }
 
 .field-card.is-low {
-  border-top-color: var(--brass);
+  border-top-color: var(--wm-color-warning);
 }
 
 .field-card.is-expired {
-  border-top-color: var(--stamp);
+  border-top-color: var(--wm-color-danger);
 }
 
 .field-card__meta {
   display: flex;
   justify-content: space-between;
-  gap: 8px;
+  gap: var(--wm-space-2);
   align-items: flex-start;
 }
 
@@ -446,51 +460,52 @@ function submitCorrection() {
   font-size: 12px;
   letter-spacing: 0.14em;
   font-weight: 600;
+  color: var(--wm-text-primary);
 }
 
 .field-card__source {
   font-size: 11px;
-  color: var(--signal);
+  color: var(--wm-text-muted);
   white-space: nowrap;
 }
 
 .field-card__expired {
-  color: var(--stamp);
+  color: var(--wm-color-danger);
   border: 1px solid currentColor;
-  padding: 0 4px;
-  margin-right: 6px;
+  padding: 0 var(--wm-space-1);
+  margin-right: var(--wm-space-1);
   font-size: 10px;
 }
 
 .field-card__value {
-  margin: 12px 0;
+  margin: var(--wm-space-3) 0;
   font-size: 20px;
   font-weight: 600;
-  color: var(--blotter);
+  color: var(--wm-text-primary);
 }
 
 .field-card__confidence {
   font-variant-numeric: tabular-nums;
   font-size: 12px;
-  color: var(--signal);
+  color: var(--wm-text-muted);
 }
 
 .field-card__bar {
   display: block;
   height: 3px;
-  margin-top: 6px;
-  background: var(--signal);
+  margin-top: var(--wm-space-1);
+  background: var(--wm-text-muted);
 }
 
 .field-card.is-low .field-card__bar {
-  background: var(--brass);
+  background: var(--wm-color-warning);
 }
 
 .field-card__correct {
-  margin-top: 12px;
+  margin-top: var(--wm-space-3);
   background: none;
   border: 0;
-  color: var(--blotter);
+  color: var(--wm-color-primary);
   text-decoration: underline;
   text-underline-offset: 3px;
   cursor: pointer;
@@ -500,74 +515,82 @@ function submitCorrection() {
 .customer-file__dimensions,
 .customer-file__history,
 .customer-file__conflicts {
-  margin-top: 28px;
+  margin-top: var(--wm-space-5);
 }
 
 .customer-file__dimensions button {
-  background: var(--blotter);
-  color: var(--paper);
+  background: var(--wm-color-primary);
+  color: var(--wm-bg-card);
   border: 0;
-  padding: 8px 14px;
+  border-radius: var(--wm-radius-sm);
+  padding: var(--wm-space-2) var(--wm-space-3);
   cursor: pointer;
 }
 
 .customer-file__dimensions ul {
   list-style: none;
-  padding: 16px 0 0;
+  padding: var(--wm-space-4) 0 0;
   margin: 0;
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 12px;
+  gap: var(--wm-space-3);
 }
 
 .customer-file__dimensions li {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  border-top: 2px solid var(--brass);
-  padding-top: 8px;
+  gap: var(--wm-space-1);
+  /* 2px 黄铜顶线：维度刻度标记，保留厚度（非 1px 细线例外） */
+  border-top: 2px solid var(--wm-color-warning);
+  padding-top: var(--wm-space-2);
+  color: var(--wm-text-primary);
 }
 
 .customer-file__history ol,
 .customer-file__conflicts ol {
-  padding-left: 22px;
+  padding-left: var(--wm-space-5);
 }
 
 .customer-file__history li {
   display: grid;
   grid-template-columns: 110px minmax(0, 1fr) auto;
-  gap: 12px;
-  padding: 8px 0;
-  border-bottom: 1px dashed var(--rule);
+  gap: var(--wm-space-3);
+  padding: var(--wm-space-2) 0;
+  /* 历次记录的 1px 虚线分隔（令牌纪律声明的极少数例外） */
+  border-bottom: 1px dashed var(--wm-border-hairline);
 }
 
 .customer-file__dialog {
   position: fixed;
-  right: 32px;
-  bottom: 32px;
+  right: var(--wm-space-6);
+  bottom: var(--wm-space-6);
   width: 320px;
-  background: white;
-  border: 1px solid var(--blotter);
-  padding: 16px;
+  background: var(--wm-bg-card);
+  /* 修正浮层 1px 边线（令牌纪律声明的极少数例外） */
+  border: 1px solid var(--wm-border);
+  border-radius: var(--wm-radius-md);
+  box-shadow: var(--wm-shadow-overlay);
+  padding: var(--wm-space-4);
   z-index: 5;
 }
 
 .customer-file__dialog label {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  margin: 10px 0;
+  gap: var(--wm-space-1);
+  margin: var(--wm-space-2) 0;
   font-size: 13px;
+  color: var(--wm-text-primary);
 }
 
 .customer-file__dialog-actions {
   display: flex;
   justify-content: flex-end;
-  gap: 8px;
+  gap: var(--wm-space-2);
 }
 
 .customer-file__error {
-  color: var(--stamp);
+  color: var(--wm-color-danger);
   font-size: 13px;
 }
 
@@ -581,12 +604,12 @@ function submitCorrection() {
   }
 
   .customer-file__date {
-    margin-top: 12px;
+    margin-top: var(--wm-space-3);
     display: inline-block;
   }
 
   .customer-file__stencil {
-    margin-bottom: 12px;
+    margin-bottom: var(--wm-space-3);
   }
 }
 

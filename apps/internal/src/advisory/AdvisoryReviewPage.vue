@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { ApiError } from "@wealth/shared";
+import { ApiError, SectionCard } from "@wealth/shared";
 import { ADVISOR } from "../auth/identity";
 import { currentEmployee } from "../auth/store";
 import {
@@ -156,10 +156,9 @@ onMounted(load);
 <template>
   <div class="advisory-review" data-test="advisory-review-page">
     <p v-if="loading">加载中…</p>
-    <el-card v-else-if="forbidden" data-test="forbidden">
-      <h2 role="alert">无权查看</h2>
-      <p>{{ forbiddenMessage }}</p>
-    </el-card>
+    <SectionCard v-else-if="forbidden" title="无权查看" data-test="forbidden">
+      <p role="alert">{{ forbiddenMessage }}</p>
+    </SectionCard>
     <p v-else-if="loadError" class="advisory-review__error" data-test="load-error">{{ loadError }}</p>
 
     <template v-else-if="draft && review">
@@ -179,8 +178,7 @@ onMounted(load);
       />
 
       <div class="advisory-review__panels">
-        <el-card data-test="original-panel">
-          <h2>AI 原稿</h2>
+        <SectionCard title="AI 原稿" data-test="original-panel">
           <el-table :data="draft.candidates" row-key="product_code">
             <el-table-column type="expand">
               <template #default="{ row }">
@@ -196,16 +194,15 @@ onMounted(load);
             <el-table-column prop="risk_level" label="风险等级" />
             <el-table-column prop="composite_score" label="综合得分" />
           </el-table>
-          <h3>配置建议</h3>
+          <h3 class="advisory-review__subheading">配置建议</h3>
           <ul class="advisory-review__allocation">
             <li v-for="(value, key) in draft.allocation_suggestion" :key="key">
               {{ key }}：{{ value }}%
             </li>
           </ul>
-        </el-card>
+        </SectionCard>
 
-        <el-card data-test="edited-panel">
-          <h2>编辑版本</h2>
+        <SectionCard title="编辑版本" data-test="edited-panel">
           <p v-if="removedCount" class="advisory-review__diff-note" data-test="removed-note">
             已从原稿移除 {{ removedCount }} 项推荐产品
           </p>
@@ -233,7 +230,7 @@ onMounted(load);
             <el-table-column prop="risk_level" label="风险等级" />
             <el-table-column prop="composite_score" label="综合得分" />
           </el-table>
-          <h3>配置建议</h3>
+          <h3 class="advisory-review__subheading">配置建议</h3>
           <ul class="advisory-review__allocation">
             <li v-for="(_value, key) in editedAllocation" :key="key">
               {{ key }}：
@@ -250,10 +247,10 @@ onMounted(load);
               </span>
             </li>
           </ul>
-        </el-card>
+        </SectionCard>
       </div>
 
-      <el-card v-if="isAdvisor && !isDecided" class="advisory-review__actions">
+      <SectionCard v-if="isAdvisor && !isDecided" title="审核决定" class="advisory-review__actions">
         <el-button type="primary" data-test="release" :loading="submitting" @click="submitRelease">
           放行
         </el-button>
@@ -276,18 +273,16 @@ onMounted(load);
           </el-button>
         </div>
         <p v-if="actionError" class="advisory-review__error" data-test="action-error">{{ actionError }}</p>
-      </el-card>
+      </SectionCard>
       <p v-else-if="!isAdvisor && !isDecided" class="advisory-review__hint" data-test="no-release-entry">
         当前角色无法放行或驳回，仅可查看与留言。
       </p>
 
-      <el-card v-if="final" data-test="final-panel">
-        <h2>顾问定稿</h2>
+      <SectionCard v-if="final" title="顾问定稿" data-test="final-panel">
         <p>放行人：{{ final.advisor_name }} · {{ formatDateTime(final.released_at) }}</p>
-      </el-card>
+      </SectionCard>
 
-      <el-card data-test="comments-panel">
-        <h2>留言</h2>
+      <SectionCard title="留言" data-test="comments-panel">
         <ul class="advisory-review__comments">
           <li v-for="comment in comments" :key="comment.id">
             <strong>{{ comment.author_name }}（{{ comment.author_role }}）</strong>
@@ -308,7 +303,7 @@ onMounted(load);
           </el-button>
         </div>
         <p v-if="commentError" class="advisory-review__error">{{ commentError }}</p>
-      </el-card>
+      </SectionCard>
     </template>
   </div>
 </template>
@@ -317,24 +312,29 @@ onMounted(load);
 .advisory-review {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: var(--wm-space-4);
 }
 
 .advisory-review__header {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: var(--wm-space-4);
 }
 
 .advisory-review__panels {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 16px;
+  gap: var(--wm-space-4);
+}
+
+.advisory-review__subheading {
+  margin: var(--wm-space-3) 0;
+  color: var(--wm-text-primary);
 }
 
 .advisory-review__breakdown {
   margin: 0;
-  padding-left: 20px;
+  padding-left: var(--wm-space-5);
 }
 
 .advisory-review__allocation {
@@ -342,52 +342,61 @@ onMounted(load);
   padding: 0;
   display: flex;
   flex-wrap: wrap;
-  gap: 12px;
+  gap: var(--wm-space-3);
+  color: var(--wm-text-primary);
 }
 
 .is-removed {
   text-decoration: line-through;
-  color: #909399;
+  color: var(--wm-text-muted);
 }
 
 .advisory-review__changed {
-  color: #e6a23c;
+  color: var(--wm-color-warning);
   font-size: 12px;
 }
 
 .advisory-review__diff-note {
-  color: #e6a23c;
+  color: var(--wm-color-warning);
 }
 
 .advisory-review__reject {
   display: flex;
-  gap: 8px;
+  gap: var(--wm-space-2);
   align-items: flex-start;
-  margin-top: 12px;
+  margin-top: var(--wm-space-3);
 }
 
 .advisory-review__error {
-  color: #b42318;
+  color: var(--wm-color-danger);
 }
 
 .advisory-review__hint {
-  color: #909399;
+  color: var(--wm-text-muted);
 }
 
 .advisory-review__comments {
   list-style: none;
   padding: 0;
+  margin: 0;
 }
 
 .advisory-review__comments li {
-  border-bottom: 1px dashed #dcdfe6;
-  padding: 8px 0;
+  /* 留言间的 1px 虚线分隔（令牌纪律声明的极少数例外） */
+  border-bottom: 1px dashed var(--wm-border-hairline);
+  padding: var(--wm-space-2) 0;
+}
+
+.advisory-review__comments span {
+  margin-left: var(--wm-space-2);
+  color: var(--wm-text-muted);
+  font-size: 12px;
 }
 
 .advisory-review__comment-form {
   display: flex;
-  gap: 8px;
-  margin-top: 12px;
+  gap: var(--wm-space-2);
+  margin-top: var(--wm-space-3);
 }
 
 @media (max-width: 900px) {

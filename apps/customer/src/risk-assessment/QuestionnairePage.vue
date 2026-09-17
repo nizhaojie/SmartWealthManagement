@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from "vue";
+import { SectionCard } from "@wealth/shared";
 import { getQuestionnaire, saveDraft, submitAssessment } from "./api";
 import type { AssessmentResult, Question } from "./types";
 
@@ -59,14 +60,13 @@ async function onSubmit() {
 </script>
 
 <template>
-  <el-card>
-    <h1>风险测评</h1>
+  <SectionCard title="风险测评">
     <p v-if="loading">正在加载问卷…</p>
     <p v-if="errorMessage" role="alert">{{ errorMessage }}</p>
     <form v-if="!loading" @submit.prevent="onSubmit">
       <fieldset v-for="question in questions" :key="question.id">
         <legend>{{ question.prompt }}</legend>
-        <p>{{ question.dimension }}</p>
+        <p class="dimension">{{ question.dimension }}</p>
         <label v-for="option in question.options" :key="option.id">
           <input
             type="radio"
@@ -82,5 +82,11 @@ async function onSubmit() {
         提交测评
       </el-button>
     </form>
-  </el-card>
+  </SectionCard>
 </template>
+
+<style scoped>
+.dimension {
+  color: var(--wm-text-muted);
+}
+</style>

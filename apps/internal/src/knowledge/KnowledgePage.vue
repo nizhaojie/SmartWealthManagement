@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ElMessage, ElMessageBox, type UploadFile } from "element-plus";
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import { SectionCard } from "@wealth/shared";
 import { deleteDocument, listDocuments, uploadDocument } from "./api";
 import {
   DOCUMENT_STATUSES,
@@ -148,8 +149,7 @@ onUnmounted(() => {
 
 <template>
   <div class="knowledge-page">
-    <el-card class="knowledge-page__upload">
-      <h3>上传文档</h3>
+    <SectionCard title="上传文档">
       <div class="knowledge-page__upload-form">
         <el-select v-model="uploadType" placeholder="知识类型" style="width: 140px">
           <el-option v-for="type in KNOWLEDGE_TYPES" :key="type" :label="type" :value="type" />
@@ -166,9 +166,9 @@ onUnmounted(() => {
         <el-button type="primary" :loading="uploading" @click="onUpload">上传</el-button>
       </div>
       <p v-if="uploadError" role="alert" class="knowledge-page__error">{{ uploadError }}</p>
-    </el-card>
+    </SectionCard>
 
-    <el-card class="knowledge-page__list">
+    <SectionCard title="文档列表">
       <div class="knowledge-page__filters">
         <el-select v-model="typeFilter" placeholder="按知识类型筛选" clearable style="width: 160px">
           <el-option v-for="type in KNOWLEDGE_TYPES" :key="type" :label="type" :value="type" />
@@ -194,7 +194,7 @@ onUnmounted(() => {
               </template>
             </el-tag>
             <el-tooltip v-if="row.status === 'failed' && row.failure_reason" :content="row.failure_reason">
-              <el-tag type="danger" size="small" style="margin-left: 4px">查看原因</el-tag>
+              <el-tag type="danger" size="small" class="failure-tag">查看原因</el-tag>
             </el-tooltip>
           </template>
         </el-table-column>
@@ -216,7 +216,7 @@ onUnmounted(() => {
           </template>
         </el-table-column>
       </el-table>
-    </el-card>
+    </SectionCard>
   </div>
 </template>
 
@@ -224,22 +224,26 @@ onUnmounted(() => {
 .knowledge-page {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: var(--wm-space-4);
 }
 
 .knowledge-page__upload-form {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: var(--wm-space-3);
 }
 
 .knowledge-page__filters {
   display: flex;
-  gap: 12px;
-  margin-bottom: 12px;
+  gap: var(--wm-space-3);
+  margin-bottom: var(--wm-space-3);
 }
 
 .knowledge-page__error {
-  color: var(--el-color-danger);
+  color: var(--wm-color-danger);
+}
+
+.failure-tag {
+  margin-left: var(--wm-space-1);
 }
 </style>

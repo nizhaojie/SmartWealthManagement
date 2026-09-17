@@ -235,6 +235,33 @@ describe("AssetsPage", () => {
     expect(rows[1].text()).toContain("F000002");
   });
 
+  // 红涨绿跌（中国金融惯例）：页面只按符号挂 up/down 类，颜色经 03 号令牌给出。
+  it("marks profit numbers by sign with the up/down classes", async () => {
+    vi.mocked(getAssets).mockResolvedValue(
+      makeAssets({
+        holding_count: 2,
+        holdings: [
+          makeHolding({ profit_loss: "420.00", profit_ratio: "2.1000" }),
+          makeHolding({
+            product_code: "F000002",
+            profit_loss: "-300.00",
+            profit_ratio: "-1.5000",
+          }),
+        ],
+      }),
+    );
+    const wrapper = await mountPage();
+
+    const rows = wrapper.findAll('[data-testid="holdings-table"] tbody tr');
+    // 第 6、7 列分别是盈亏（元）与盈亏比例（%）。
+    const gainCells = rows[0].findAll("td");
+    const lossCells = rows[1].findAll("td");
+    expect(gainCells[5].classes()).toContain("profit-up");
+    expect(gainCells[6].classes()).toContain("profit-up");
+    expect(lossCells[5].classes()).toContain("profit-down");
+    expect(lossCells[6].classes()).toContain("profit-down");
+  });
+
   it("renders a friendly empty state instead of an empty holdings table", async () => {
     vi.mocked(getAssets).mockResolvedValue(
       makeAssets({ total_market_value: "0.00", holding_count: 0, holdings: [] }),

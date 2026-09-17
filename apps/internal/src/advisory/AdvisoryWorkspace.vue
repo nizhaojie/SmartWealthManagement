@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
-import { ApiError } from "@wealth/shared";
+import { ApiError, SectionCard } from "@wealth/shared";
 import { generatePlan, getMyHistory, getQueue, listCustomersForPlan } from "./api";
 import type { AdvisoryHistoryEntry, AdvisoryQueue, CustomerOption } from "./types";
 
@@ -91,8 +91,7 @@ onMounted(load);
       {{ loadError }}
     </p>
 
-    <el-card class="advisory-workspace__section">
-      <h2>为客户发起生成</h2>
+    <SectionCard title="为客户发起生成">
       <div class="advisory-workspace__direct-generate">
         <el-select v-model="directGenerateCustomerId" placeholder="选择客户" data-test="direct-customer-select">
           <el-option v-for="customer in customers" :key="customer.id" :label="customer.real_name" :value="customer.id" />
@@ -106,10 +105,9 @@ onMounted(load);
           生成方案
         </el-button>
       </div>
-    </el-card>
+    </SectionCard>
 
-    <el-card class="advisory-workspace__section">
-      <h2>待生成的方案请求</h2>
+    <SectionCard title="待生成的方案请求">
       <el-table :data="queue.pending_requests" data-test="pending-requests-table">
         <el-table-column prop="customer_name" label="客户" sortable />
         <el-table-column prop="request_no" label="请求编号" />
@@ -134,10 +132,9 @@ onMounted(load);
         </el-table-column>
       </el-table>
       <p v-if="!queue.pending_requests.length" class="advisory-workspace__hint">暂无待生成的方案请求</p>
-    </el-card>
+    </SectionCard>
 
-    <el-card class="advisory-workspace__section">
-      <h2>待审核</h2>
+    <SectionCard title="待审核">
       <el-table :data="queue.pending_reviews" data-test="pending-reviews-table">
         <el-table-column prop="customer_name" label="客户" sortable />
         <el-table-column prop="status" label="状态" sortable />
@@ -158,10 +155,9 @@ onMounted(load);
         </el-table-column>
       </el-table>
       <p v-if="!queue.pending_reviews.length" class="advisory-workspace__hint">暂无待审核内容</p>
-    </el-card>
+    </SectionCard>
 
-    <el-card class="advisory-workspace__section">
-      <h2>我审核过的记录</h2>
+    <SectionCard title="我审核过的记录">
       <el-table :data="history" data-test="history-table">
         <el-table-column prop="customer_name" label="客户" />
         <el-table-column prop="action" label="操作" />
@@ -171,7 +167,7 @@ onMounted(load);
         </el-table-column>
       </el-table>
       <p v-if="!history.length" class="advisory-workspace__hint">还没有审核过的记录</p>
-    </el-card>
+    </SectionCard>
 
     <el-dialog
       :model-value="generating !== null"
@@ -203,29 +199,22 @@ onMounted(load);
 .advisory-workspace {
   display: flex;
   flex-direction: column;
-  gap: 16px;
-}
-
-.advisory-workspace__section h2 {
-  margin: 0 0 12px;
-  font-size: 14px;
-  letter-spacing: 0.1em;
-  color: #10263a;
+  gap: var(--wm-space-4);
 }
 
 .advisory-workspace__direct-generate {
   display: flex;
-  gap: 12px;
+  gap: var(--wm-space-3);
   align-items: center;
 }
 
 .advisory-workspace__hint {
-  color: #909399;
+  color: var(--wm-text-muted);
   font-size: 12px;
-  margin-top: 8px;
+  margin-bottom: 0;
 }
 
 .advisory-workspace__error {
-  color: #b42318;
+  color: var(--wm-color-danger);
 }
 </style>

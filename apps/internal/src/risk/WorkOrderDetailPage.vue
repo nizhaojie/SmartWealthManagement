@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { ApiError } from "@wealth/shared";
+import { ApiError, SectionCard } from "@wealth/shared";
 import { currentEmployee } from "../auth/store";
 import { acceptWorkOrder, closeWorkOrder, completeWorkOrder, getWorkOrder } from "./api";
 import { canHandleWorkOrder, errorMessage, formatDateTime, workOrderTagType } from "./riskView";
@@ -106,10 +106,9 @@ onMounted(load);
 <template>
   <div class="work-order-detail" data-test="work-order-detail">
     <p v-if="loading">加载中…</p>
-    <el-card v-else-if="forbidden" data-test="work-order-forbidden">
-      <h2 role="alert">无权查看</h2>
-      <p>{{ forbiddenMessage }}</p>
-    </el-card>
+    <SectionCard v-else-if="forbidden" title="无权查看" data-test="work-order-forbidden">
+      <p role="alert">{{ forbiddenMessage }}</p>
+    </SectionCard>
     <p v-else-if="loadError" role="alert" class="work-order-detail__error" data-test="load-error">
       {{ loadError }}
     </p>
@@ -117,13 +116,13 @@ onMounted(load);
     <template v-else-if="detail">
       <header class="work-order-detail__header">
         <el-button data-test="back-to-work-orders" @click="backToList">返回工单列表</el-button>
-        <h2>{{ detail.work_order_no }}</h2>
+        <h2 class="work-order-detail__title">{{ detail.work_order_no }}</h2>
         <el-tag :type="workOrderTagType(detail.status)" data-test="work-order-status">
           {{ detail.status }}
         </el-tag>
       </header>
 
-      <el-card>
+      <SectionCard title="工单概况">
         <el-descriptions :column="3" border>
           <el-descriptions-item label="来源">{{ detail.order_type }}</el-descriptions-item>
           <el-descriptions-item label="优先级">{{ detail.priority }}</el-descriptions-item>
@@ -140,10 +139,9 @@ onMounted(load);
             {{ detail.alert_id ?? "—" }}
           </el-descriptions-item>
         </el-descriptions>
-      </el-card>
+      </SectionCard>
 
-      <el-card v-if="canAct" data-test="work-order-actions">
-        <h3>处置</h3>
+      <SectionCard v-if="canAct" title="处置" data-test="work-order-actions">
         <el-input
           v-model="reason"
           type="textarea"
@@ -199,7 +197,7 @@ onMounted(load);
         >
           {{ actionError }}
         </p>
-      </el-card>
+      </SectionCard>
       <p v-else-if="detail.status === '已完成' || detail.status === '已关闭'" class="work-order-detail__hint" data-test="terminal-hint">
         工单已{{ detail.status.slice(1) }}，不能再流转。
       </p>
@@ -207,8 +205,7 @@ onMounted(load);
         当前角色只能查看，流转由风控专员完成。
       </p>
 
-      <el-card>
-        <h3>流转留痕</h3>
+      <SectionCard title="流转留痕">
         <el-table :data="detail.transitions" data-test="transitions-table">
           <el-table-column label="流转" min-width="180">
             <template #default="{ row }">
@@ -223,7 +220,7 @@ onMounted(load);
             </template>
           </el-table-column>
         </el-table>
-      </el-card>
+      </SectionCard>
     </template>
   </div>
 </template>
@@ -232,34 +229,35 @@ onMounted(load);
 .work-order-detail {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: var(--wm-space-4);
 }
 
 .work-order-detail__header {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: var(--wm-space-3);
 }
 
-.work-order-detail__header h2 {
+.work-order-detail__title {
   margin: 0;
+  color: var(--wm-text-primary);
 }
 
 .work-order-detail__conclusion {
-  margin-top: 12px;
+  margin-top: var(--wm-space-3);
 }
 
 .work-order-detail__buttons {
   display: flex;
-  gap: 8px;
-  margin-top: 12px;
+  gap: var(--wm-space-2);
+  margin-top: var(--wm-space-3);
 }
 
 .work-order-detail__error {
-  color: #b42318;
+  color: var(--wm-color-danger);
 }
 
 .work-order-detail__hint {
-  color: #909399;
+  color: var(--wm-text-muted);
 }
 </style>

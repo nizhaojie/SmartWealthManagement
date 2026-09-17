@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
-import { ApiError } from "@wealth/shared";
+import { ApiError, SectionCard } from "@wealth/shared";
 import { listAnalyticsExamples, listAnalyticsHistory, runAnalyticsQuery } from "./api";
 import AnalyticsResultView from "./AnalyticsResultView.vue";
 import type {
@@ -65,8 +65,7 @@ onMounted(async () => {
 
 <template>
   <div class="analytics-workspace">
-    <aside class="analytics-workspace__history">
-      <h2>历史查询</h2>
+    <SectionCard title="历史查询" class="analytics-workspace__history">
       <button
         v-for="entry in history"
         :key="entry.id"
@@ -79,10 +78,10 @@ onMounted(async () => {
         <span>{{ entry.status }} · {{ formatDateTime(entry.create_time) }}</span>
       </button>
       <p v-if="!history.length" class="analytics-workspace__hint">还没有历史查询</p>
-    </aside>
+    </SectionCard>
 
     <div class="analytics-workspace__main">
-      <el-card>
+      <SectionCard title="提问">
         <div class="analytics-workspace__composer">
           <el-input
             v-model="question"
@@ -114,7 +113,7 @@ onMounted(async () => {
             {{ example.question }}
           </button>
         </div>
-      </el-card>
+      </SectionCard>
 
       <el-alert
         v-if="failureReason"
@@ -133,21 +132,11 @@ onMounted(async () => {
 .analytics-workspace {
   display: grid;
   grid-template-columns: 260px minmax(0, 1fr);
-  gap: 20px;
+  gap: var(--wm-space-5);
 }
 
 .analytics-workspace__history {
-  background: white;
-  padding: 16px;
-  border-top: 3px solid #10263a;
   align-self: start;
-}
-
-.analytics-workspace__history h2 {
-  margin: 0 0 12px;
-  font-size: 12px;
-  letter-spacing: 0.2em;
-  color: #10263a;
 }
 
 .analytics-workspace__history-item {
@@ -155,61 +144,66 @@ onMounted(async () => {
   flex-direction: column;
   align-items: flex-start;
   width: 100%;
-  margin-bottom: 8px;
-  padding: 8px;
+  margin-bottom: var(--wm-space-2);
+  padding: var(--wm-space-2);
   background: none;
   border: 0;
+  /* 3px 左指示条：悬停态标记，与 StatCard 左条同规格（非 1px 细线例外） */
   border-left: 3px solid transparent;
   cursor: pointer;
   text-align: left;
+  color: var(--wm-text-primary);
 }
 
 .analytics-workspace__history-item:hover {
-  border-left-color: #9a7b4f;
-  background: #f3f6f8;
+  border-left-color: var(--wm-color-primary);
+  background: var(--wm-bg-page);
 }
 
 .analytics-workspace__history-item span {
-  color: #909399;
+  color: var(--wm-text-muted);
   font-size: 12px;
 }
 
 .analytics-workspace__main {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: var(--wm-space-4);
 }
 
 .analytics-workspace__composer {
   display: flex;
-  gap: 12px;
+  gap: var(--wm-space-3);
   align-items: flex-start;
 }
 
 .analytics-workspace__examples {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--wm-space-2);
   flex-wrap: wrap;
-  margin-top: 12px;
+  margin-top: var(--wm-space-3);
 }
 
 .analytics-workspace__example {
   cursor: pointer;
-  border: 1px solid #d3dce6;
-  border-radius: 12px;
-  background: #f4f4f5;
-  padding: 2px 10px;
+  /* 示例问题做成药丸按钮：1px 边线（令牌纪律声明的极少数例外） */
+  border: 1px solid var(--wm-border);
+  border-radius: var(--wm-radius-lg);
+  background: var(--wm-bg-page);
+  padding: var(--wm-space-1) var(--wm-space-3);
   font-size: 12px;
-  color: #606266;
+  color: var(--wm-text-secondary);
 }
 
 .analytics-workspace__example:hover {
-  background: #e9e9eb;
+  /* 中性面没有比 bg-page 深一档的专用令牌，以边框令牌作最深的悬停底色（不引入新色值） */
+  background: var(--wm-border);
+  color: var(--wm-text-primary);
 }
 
 .analytics-workspace__hint {
-  color: #909399;
+  color: var(--wm-text-muted);
   font-size: 12px;
 }
 

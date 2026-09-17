@@ -119,17 +119,20 @@ function percent(share: string): string {
 
 <style scoped>
 .hint {
-  margin: 0.25rem 0 0.75rem;
+  margin: var(--wm-space-1) 0 var(--wm-space-3);
+  color: var(--wm-text-secondary);
 }
 
 h3 {
   margin: 0;
   font-size: 1rem;
+  color: var(--wm-text-primary);
 }
 
 h4 {
-  margin: 1rem 0 0.5rem;
+  margin: var(--wm-space-4) 0 var(--wm-space-2);
   font-size: 0.95rem;
+  color: var(--wm-text-primary);
 }
 
 table {
@@ -140,8 +143,9 @@ table {
 th,
 td {
   text-align: left;
-  padding: 0.35rem 0.6rem;
-  border-bottom: 1px solid var(--el-border-color-lighter);
+  padding: var(--wm-space-1) var(--wm-space-2);
+  /* 表格行的 1px 分隔细线（令牌纪律声明的极少数例外） */
+  border-bottom: 1px solid var(--wm-border-hairline);
   white-space: nowrap;
 }
 
@@ -154,9 +158,9 @@ ul {
 li {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.5rem;
+  gap: var(--wm-space-2);
   align-items: baseline;
-  padding: 0.25rem 0;
+  padding: var(--wm-space-1) 0;
 }
 
 button {

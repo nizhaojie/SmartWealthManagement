@@ -24,28 +24,30 @@ defineProps<{
 
 <style scoped>
 .retrieval-hit {
-  margin-bottom: 8px;
-  padding: 12px;
-  border: 1px solid var(--el-border-color);
-  border-radius: 4px;
+  margin-bottom: var(--wm-space-2);
+  padding: var(--wm-space-3);
+  /* 命中卡片的 1px 边线（令牌纪律声明的极少数例外） */
+  border: 1px solid var(--wm-border);
+  border-radius: var(--wm-radius-sm);
 }
 
 .retrieval-hit--above {
-  border-left: 4px solid var(--el-color-success);
+  border-left: 4px solid var(--wm-color-success);
 }
 
+/* 未过线的命中弱化呈现：muted 左条 + 页面底色，不引入新的灰色 */
 .retrieval-hit--below {
-  border-left: 4px solid var(--el-color-info);
-  background: var(--el-fill-color-light);
+  border-left: 4px solid var(--wm-text-muted);
+  background: var(--wm-bg-page);
 }
 
 .retrieval-hit__meta {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
-  margin-bottom: 8px;
-  color: var(--el-text-color-secondary);
+  gap: var(--wm-space-2);
+  margin-bottom: var(--wm-space-2);
+  color: var(--wm-text-secondary);
   font-size: 13px;
 }
 
@@ -55,6 +57,7 @@ defineProps<{
 
 .retrieval-hit__content {
   margin: 0;
+  color: var(--wm-text-primary);
   white-space: pre-wrap;
 }
 </style>

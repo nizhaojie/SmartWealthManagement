@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { nextTick, reactive, ref } from "vue";
+import { SectionCard } from "@wealth/shared";
 import { streamChatMessage, type Citation } from "./api";
 
 type ChatMessage = {
@@ -123,55 +124,53 @@ async function send(): Promise<void> {
 </script>
 
 <template>
-  <section class="chat-page">
-    <el-card class="chat-card">
-      <div ref="listEl" class="message-list">
-        <div v-for="message in messages" :key="message.id" :class="['message', message.role]">
-          <template v-if="message.role === 'assistant' && message.done">
-            <span
-              v-for="(segment, index) in renderSegments(message.text, message.citations)"
-              :key="index"
+  <SectionCard title="智能客服">
+    <div ref="listEl" class="message-list">
+      <div v-for="message in messages" :key="message.id" :class="['message', message.role]">
+        <template v-if="message.role === 'assistant' && message.done">
+          <span
+            v-for="(segment, index) in renderSegments(message.text, message.citations)"
+            :key="index"
+          >
+            <template v-if="segment.type === 'text'">{{ segment.value }}</template>
+            <button
+              v-else
+              type="button"
+              class="citation-badge"
+              :aria-expanded="isCitationOpen(message.id, segment.citationIndex)"
+              :aria-controls="citationPanelId(message.id, segment.citationIndex)"
+              @click="toggleCitation(message.id, segment.citationIndex)"
+            >{{ segment.marker }}</button>
+          </span>
+          <template v-for="(citation, citationIndex) in message.citations" :key="`panel-${citationIndex}`">
+            <div
+              v-if="isCitationOpen(message.id, citationIndex)"
+              :id="citationPanelId(message.id, citationIndex)"
+              class="citation-panel"
+              role="dialog"
+              :aria-label="`引用来源：${citation.title}`"
             >
-              <template v-if="segment.type === 'text'">{{ segment.value }}</template>
-              <button
-                v-else
-                type="button"
-                class="citation-badge"
-                :aria-expanded="isCitationOpen(message.id, segment.citationIndex)"
-                :aria-controls="citationPanelId(message.id, segment.citationIndex)"
-                @click="toggleCitation(message.id, segment.citationIndex)"
-              >{{ segment.marker }}</button>
-            </span>
-            <template v-for="(citation, citationIndex) in message.citations" :key="`panel-${citationIndex}`">
-              <div
-                v-if="isCitationOpen(message.id, citationIndex)"
-                :id="citationPanelId(message.id, citationIndex)"
-                class="citation-panel"
-                role="dialog"
-                :aria-label="`引用来源：${citation.title}`"
-              >
-                <p class="citation-panel-title">{{ citation.title }}</p>
-                <p class="citation-panel-source">来源文件：{{ citation.source_file }}</p>
-                <p v-if="citation.heading_path.length" class="citation-panel-heading">
-                  段落位置：{{ citation.heading_path.join(" / ") }}
-                </p>
-              </div>
-            </template>
+              <p class="citation-panel-title">{{ citation.title }}</p>
+              <p class="citation-panel-source">来源文件：{{ citation.source_file }}</p>
+              <p v-if="citation.heading_path.length" class="citation-panel-heading">
+                段落位置：{{ citation.heading_path.join(" / ") }}
+              </p>
+            </div>
           </template>
-          <template v-else>{{ message.text }}</template>
-        </div>
+        </template>
+        <template v-else>{{ message.text }}</template>
       </div>
-      <form class="chat-input" @submit.prevent="send">
-        <el-input
-          v-model="draft"
-          name="chat-message"
-          placeholder="向智能客服提问产品要素、政策条款或常见问题"
-          :disabled="sending"
-        />
-        <el-button type="primary" native-type="submit" :loading="sending">发送</el-button>
-      </form>
-    </el-card>
-  </section>
+    </div>
+    <form class="chat-input" @submit.prevent="send">
+      <el-input
+        v-model="draft"
+        name="chat-message"
+        placeholder="向智能客服提问产品要素、政策条款或常见问题"
+        :disabled="sending"
+      />
+      <el-button type="primary" native-type="submit" :loading="sending">发送</el-button>
+    </form>
+  </SectionCard>
 </template>
 
 <style scoped>
@@ -180,13 +179,14 @@ async function send(): Promise<void> {
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: var(--wm-space-3);
 }
 
 .message.user {
   align-self: flex-end;
 }
 
+/* 引用角标是合规呈现面：必须保持可点、可定位，只做令牌化不做结构改动 */
 .citation-badge {
   border: none;
   background: none;
@@ -194,12 +194,36 @@ async function send(): Promise<void> {
   cursor: pointer;
   vertical-align: super;
   font-size: 0.75em;
-  padding: 0 2px;
+  padding: 0 var(--wm-space-1);
+}
+
+.citation-panel {
+  margin-top: var(--wm-space-2);
+  padding: var(--wm-space-2) var(--wm-space-3);
+  /* 引用面板的 1px 边线（令牌纪律声明的极少数例外） */
+  border: 1px solid var(--wm-border-hairline);
+  border-radius: var(--wm-radius-sm);
+  background-color: var(--wm-bg-page);
+}
+
+.citation-panel p {
+  margin: 0;
+}
+
+.citation-panel-title {
+  color: var(--wm-text-primary);
+  font-weight: 600;
+}
+
+.citation-panel-source,
+.citation-panel-heading {
+  color: var(--wm-text-muted);
+  font-size: 0.85rem;
 }
 
 .chat-input {
   display: flex;
-  gap: 8px;
-  margin-top: 12px;
+  gap: var(--wm-space-2);
+  margin-top: var(--wm-space-3);
 }
 </style>

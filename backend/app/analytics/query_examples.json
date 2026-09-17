@@ -13,5 +13,15 @@
     "question": "最近一个月各产品的申购金额",
     "sql": "SELECT product_name, SUM(amount) AS total_amount FROM va_transaction_stat WHERE transaction_type = '申购' AND trade_time >= DATE_SUB(CURDATE(), INTERVAL 1 MONTH) GROUP BY product_name ORDER BY total_amount DESC",
     "views": ["va_transaction_stat"]
+  },
+  {
+    "question": "今天有哪些高风险预警",
+    "sql": "SELECT alert_id, customer_id, alert_type, alert_level, alert_status, alerted_at FROM va_risk_alert_stat WHERE alert_level = '重度' AND alerted_at >= CURDATE() ORDER BY alerted_at DESC",
+    "views": ["va_risk_alert_stat"]
+  },
+  {
+    "question": "还没处理的预警有多少",
+    "sql": "SELECT COUNT(*) AS alert_count FROM va_risk_alert_stat WHERE alert_status = '未处理'",
+    "views": ["va_risk_alert_stat"]
   }
 ]

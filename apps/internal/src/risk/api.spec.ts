@@ -10,6 +10,7 @@ vi.mock("../api/http", () => ({ http: { get, post, patch } }));
 
 import {
   acceptWorkOrder,
+  askRiskQuestion,
   closeWorkOrder,
   completeWorkOrder,
   deriveWorkOrder,
@@ -18,6 +19,7 @@ import {
   getAlert,
   getWorkOrder,
   listAlerts,
+  listRiskQueryExamples,
   listRiskRules,
   listWorkOrders,
   setRiskRuleEnabled,
@@ -141,5 +143,22 @@ describe("risk api", () => {
       enabled: false,
       reason: "",
     });
+  });
+
+  it("asks a plain-language question through the risk-monitoring endpoint", async () => {
+    post.mockResolvedValue({});
+
+    await askRiskQuestion({ question: "今天有哪些高风险预警", sessionId: "s-1" });
+
+    expect(post).toHaveBeenCalledWith("/api/internal/risk-monitoring/query", {
+      question: "今天有哪些高风险预警",
+      session_id: "s-1",
+    });
+  });
+
+  it("reads the risk-domain example questions from their own endpoint", async () => {
+    await listRiskQueryExamples();
+
+    expect(get).toHaveBeenCalledWith("/api/internal/risk-monitoring/examples");
   });
 });

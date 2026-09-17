@@ -3,15 +3,25 @@ import { flushPromises, mount } from "@vue/test-utils";
 import { createMemoryHistory, createRouter } from "vue-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "@wealth/shared";
+import type { AnalyticsQueryResponse } from "../analytics/types";
 import { ADVISOR, RISK_OFFICER } from "../auth/identity";
 import { currentEmployee } from "../auth/store";
 import type { AlertSummary, RiskRule, WorkOrder } from "./types";
 
-const { listAlerts, listWorkOrders, listRiskRules, setRiskRuleEnabled } = vi.hoisted(() => ({
+const {
+  listAlerts,
+  listWorkOrders,
+  listRiskRules,
+  setRiskRuleEnabled,
+  askRiskQuestion,
+  listRiskQueryExamples,
+} = vi.hoisted(() => ({
   listAlerts: vi.fn(),
   listWorkOrders: vi.fn(),
   listRiskRules: vi.fn(),
   setRiskRuleEnabled: vi.fn(),
+  askRiskQuestion: vi.fn(),
+  listRiskQueryExamples: vi.fn(),
 }));
 
 vi.mock("./api", () => ({
@@ -19,6 +29,8 @@ vi.mock("./api", () => ({
   listWorkOrders,
   listRiskRules,
   setRiskRuleEnabled,
+  askRiskQuestion,
+  listRiskQueryExamples,
 }));
 
 import RiskMonitoringWorkspace from "./RiskMonitoringWorkspace.vue";
@@ -85,6 +97,24 @@ function makeRule(overrides: Partial<RiskRule> = {}): RiskRule {
   };
 }
 
+function makeRiskAnswer(
+  overrides: Partial<AnalyticsQueryResponse> = {},
+): AnalyticsQueryResponse {
+  return {
+    question: "今天有哪些高风险预警",
+    sql: "SELECT alert_id, alert_level FROM va_risk_alert_stat WHERE alert_level = '重度'",
+    columns: ["alert_id", "alert_level"],
+    rows: [[3, "重度"]],
+    row_count: 1,
+    truncated: false,
+    views: ["va_risk_alert_stat"],
+    interpretation: "今天共有 1 条重度预警。数据口径：预警统计视图。",
+    content_classification: "事实性内容",
+    disclaimer: null,
+    ...overrides,
+  };
+}
+
 function makeRouter() {
   return createRouter({
     history: createMemoryHistory(),
@@ -125,6 +155,8 @@ describe("RiskMonitoringWorkspace", () => {
     listWorkOrders.mockReset().mockResolvedValue([]);
     listRiskRules.mockReset().mockResolvedValue([]);
     setRiskRuleEnabled.mockReset();
+    askRiskQuestion.mockReset();
+    listRiskQueryExamples.mockReset().mockResolvedValue([]);
     currentEmployee.value = { real_name: "周风控", employee_role: RISK_OFFICER };
   });
 
@@ -316,5 +348,69 @@ describe("RiskMonitoringWorkspace", () => {
 
     expect(router.currentRoute.value.name).toBe("risk-work-order-detail");
     expect(router.currentRoute.value.params.workOrderId).toBe("7");
+  });
+
+  it("answers a plain-language question with alert rows and the interpretation", async () => {
+    askRiskQuestion.mockResolvedValue(makeRiskAnswer());
+    const { wrapper } = await mountWorkspace();
+
+    await wrapper.get('textarea[name="risk-question"]').setValue("今天有哪些高风险预警");
+    await wrapper.get('[data-test="ask-risk-query"]').trigger("click");
+    await flushPromises();
+
+    expect(askRiskQuestion).toHaveBeenCalledWith({
+      question: "今天有哪些高风险预警",
+      sessionId: expect.any(String),
+    });
+    // 结构化结果与解读同时呈现，而不是只有一张表。
+    expect(wrapper.text()).toContain("今天共有 1 条重度预警");
+    expect(wrapper.get('[data-test="result-table"]').text()).toContain("重度");
+  });
+
+  it("sends the same session id across questions so follow-ups share context", async () => {
+    askRiskQuestion.mockResolvedValue(makeRiskAnswer());
+    const { wrapper } = await mountWorkspace();
+
+    await wrapper.get('textarea[name="risk-question"]').setValue("今天有哪些高风险预警");
+    await wrapper.get('[data-test="ask-risk-query"]').trigger("click");
+    await flushPromises();
+    await wrapper.get('textarea[name="risk-question"]').setValue("那昨天呢");
+    await wrapper.get('[data-test="ask-risk-query"]').trigger("click");
+    await flushPromises();
+
+    expect(askRiskQuestion).toHaveBeenCalledTimes(2);
+    const first = askRiskQuestion.mock.calls[0][0];
+    const second = askRiskQuestion.mock.calls[1][0];
+    expect(first.sessionId).toBeTruthy();
+    expect(second.sessionId).toBe(first.sessionId);
+  });
+
+  it("offers risk-domain example questions and reuses one on click", async () => {
+    listRiskQueryExamples.mockResolvedValue([{ question: "今天有哪些高风险预警" }]);
+    const { wrapper } = await mountWorkspace();
+
+    const example = wrapper.get('[data-test="risk-query-example"]');
+    expect(example.text()).toContain("今天有哪些高风险预警");
+
+    await example.trigger("click");
+    await flushPromises();
+
+    expect(
+      (wrapper.get('textarea[name="risk-question"]').element as HTMLTextAreaElement).value,
+    ).toBe("今天有哪些高风险预警");
+  });
+
+  it("shows the reason instead of a result when the question is out of scope", async () => {
+    askRiskQuestion.mockRejectedValue(
+      new ApiError({ code: 1101, message: "问题超出可查范围", data: null, trace_id: "" }),
+    );
+    const { wrapper } = await mountWorkspace();
+
+    await wrapper.get('textarea[name="risk-question"]').setValue("今天天气怎么样");
+    await wrapper.get('[data-test="ask-risk-query"]').trigger("click");
+    await flushPromises();
+
+    expect(wrapper.get('[data-test="risk-query-failure"]').text()).toContain("问题超出可查范围");
+    expect(wrapper.find('[data-test="result-table"]').exists()).toBe(false);
   });
 });

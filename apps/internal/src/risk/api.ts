@@ -1,4 +1,5 @@
 import { http } from "../api/http";
+import type { AnalyticsQueryResponse } from "../analytics/types";
 import type {
   AlertDetail,
   AlertLevel,
@@ -91,4 +92,23 @@ export function setRiskRuleEnabled(ruleId: number, enabled: boolean): Promise<Ri
     // 启停不强制理由（阈值调整才强制）：这里没有要解释的口径变化，只记谁改的。
     reason: "",
   });
+}
+
+export type RiskQuestionInput = {
+  question: string;
+  // 多轮追问的会话标识：同一会话内上一轮问题进入生成上下文。
+  sessionId: string;
+};
+
+export function askRiskQuestion(input: RiskQuestionInput): Promise<AnalyticsQueryResponse> {
+  // 走风控监测 Agent 自己的查询入口：视图范围收窄到风控域，与数据分析
+  // 模块互不影响（同一条受限查询链路，不同的 Agent 配置）。
+  return http.post<AnalyticsQueryResponse>("/api/internal/risk-monitoring/query", {
+    question: input.question,
+    session_id: input.sessionId,
+  });
+}
+
+export function listRiskQueryExamples(): Promise<{ question: string }[]> {
+  return http.get<{ question: string }[]>("/api/internal/risk-monitoring/examples");
 }

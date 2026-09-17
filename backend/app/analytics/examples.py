@@ -6,6 +6,7 @@
 """
 
 import json
+from collections.abc import Iterable
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -46,5 +47,12 @@ def _load_examples(path: str) -> tuple[QueryExample, ...]:
 def examples_for_views(
     examples: tuple[QueryExample, ...], views: list[ViewSpec]
 ) -> list[QueryExample]:
-    selected = {view.name for view in views}
+    return examples_for_view_names(examples, (view.name for view in views))
+
+
+def examples_for_view_names(
+    examples: tuple[QueryExample, ...], view_names: Iterable[str]
+) -> list[QueryExample]:
+    """只保留与给定视图集合相交的示例；空集合时返回空（不给任何示例）。"""
+    selected = set(view_names)
     return [example for example in examples if selected & set(example.views)]

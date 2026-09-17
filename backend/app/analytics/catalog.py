@@ -5,6 +5,7 @@
 保证注入的定义与迁移创建的视图不漂移。
 """
 
+from collections.abc import Collection
 from dataclasses import dataclass
 
 from sqlalchemy import bindparam, text
@@ -52,12 +53,20 @@ VIEW_CATALOG: tuple[ViewSpec, ...] = (
 )
 
 
-def select_views(question: str) -> list[ViewSpec]:
-    """按问题关键词筛出相关视图；一个都匹配不上时返回空（超出可查范围）。"""
+def select_views(
+    question: str, *, allowed: Collection[str] | None = None
+) -> list[ViewSpec]:
+    """按问题关键词筛出相关视图；一个都匹配不上时返回空（超出可查范围）。
+
+    ``allowed`` 把候选收窄到某个 Agent 的视图范围（如风控监测 Agent 只看得到
+    预警统计视图）。它是提示词注入范围的收紧，不是权限边界——行级权限与脱敏
+    内建在视图定义里，与这里无关。
+    """
     return [
         spec
         for spec in VIEW_CATALOG
-        if any(keyword in question for keyword in spec.keywords)
+        if (allowed is None or spec.name in allowed)
+        and any(keyword in question for keyword in spec.keywords)
     ]
 
 

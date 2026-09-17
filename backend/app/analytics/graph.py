@@ -6,6 +6,7 @@ ADR-0007：与智能客服共用一套 LangGraph 运行时。链路是线性的�
 问题由 service 层放进 ``history``，生成节点把它作为上下文。
 """
 
+from collections.abc import Collection
 from typing import TypedDict
 
 from langgraph.graph import END, StateGraph
@@ -33,7 +34,19 @@ class AnalyticsState(TypedDict, total=False):
     error_message: str
 
 
-def build_graph(db: Session, settings: Settings, *, employee: Employee):
+def build_graph(
+    db: Session,
+    settings: Settings,
+    *,
+    employee: Employee,
+    view_names: Collection[str] | None = None,
+):
+    """查询链路：选视图 → 生成 → 校验 → 执行 → 解读（ADR-0010）。
+
+    ``view_names`` 限定这个 Agent 的视图范围，缺省时是全部语义视图。风控监测
+    Agent 传入预警视图，于是超出风控域的问题在选视图一步就没有候选，直接判为
+    「超出可查范围」——模型看不到也生成不出别的域的查询。
+    """
     graph = StateGraph(AnalyticsState)
 
     def select_views_node(state: AnalyticsState) -> dict:
@@ -44,7 +57,7 @@ def build_graph(db: Session, settings: Settings, *, employee: Employee):
             for message in state.get("history", [])
             if message.get("role") == "user"
         )
-        views = catalog.select_views(context)
+        views = catalog.select_views(context, allowed=view_names)
         if not views:
             return {
                 "error_code": OUT_OF_SCOPE_CODE,

@@ -1,9 +1,19 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
+import { ApiError } from "@wealth/shared";
+import AnalyticsResultView from "../analytics/AnalyticsResultView.vue";
+import type { AnalyticsQueryResponse } from "../analytics/types";
 import { RISK_OFFICER } from "../auth/identity";
 import { currentEmployee } from "../auth/store";
-import { listAlerts, listRiskRules, listWorkOrders, setRiskRuleEnabled } from "./api";
+import {
+  askRiskQuestion,
+  listAlerts,
+  listRiskQueryExamples,
+  listRiskRules,
+  listWorkOrders,
+  setRiskRuleEnabled,
+} from "./api";
 import {
   ALERT_SORT_OPTIONS,
   confidenceText,
@@ -50,7 +60,43 @@ const workOrderStatusFilter = ref<WorkOrderStatus | "">("");
 const rules = ref<RiskRule[]>([]);
 const ruleError = ref("");
 
+// 自然语言查询：风控专员问「今天有哪些高风险预警」，不必自己组合筛选条件。
+// 问句由风控监测 Agent 转成对预警语义视图的查询；模型只把结果讲成人话，
+// 等级与依据仍来自规则引擎的确定性求值。sessionId 圈定这一轮工作台的追问
+// 上下文（上一轮问题进入本轮），重新打开页面即重新开始。
+const querySessionId = crypto.randomUUID();
+const queryQuestion = ref("");
+const askingQuery = ref(false);
+const queryResult = ref<AnalyticsQueryResponse | null>(null);
+const queryFailure = ref("");
+const queryExamples = ref<{ question: string }[]>([]);
+
 const visibleAlerts = computed(() => sortAlerts(alerts.value, sortBy.value));
+
+async function askQuery() {
+  const text = queryQuestion.value.trim();
+  if (!text || askingQuery.value) {
+    return;
+  }
+  askingQuery.value = true;
+  queryFailure.value = "";
+  try {
+    queryResult.value = await askRiskQuestion({
+      question: text,
+      sessionId: querySessionId,
+    });
+  } catch (error) {
+    queryResult.value = null;
+    queryFailure.value =
+      error instanceof ApiError ? error.message : "查询失败，请稍后重试";
+  } finally {
+    askingQuery.value = false;
+  }
+}
+
+function reuseQueryQuestion(text: string) {
+  queryQuestion.value = text;
+}
 
 async function loadAlerts() {
   loadingAlerts.value = true;
@@ -93,6 +139,15 @@ async function loadRules() {
   }
 }
 
+async function loadQueryExamples() {
+  try {
+    queryExamples.value = await listRiskQueryExamples();
+  } catch {
+    // 示例加载失败不阻塞提问主流程。
+    queryExamples.value = [];
+  }
+}
+
 async function toggleRule(rule: RiskRule, enabled: boolean) {
   ruleError.value = "";
   try {
@@ -126,6 +181,7 @@ onMounted(() => {
   void loadAlerts();
   void loadWorkOrders();
   void loadRules();
+  void loadQueryExamples();
 });
 </script>
 
@@ -329,6 +385,52 @@ onMounted(() => {
           </el-table-column>
         </el-table>
       </el-tab-pane>
+
+      <el-tab-pane label="自然语言查询" name="query">
+        <el-card>
+          <div class="risk-monitoring__query-composer">
+            <el-input
+              v-model="queryQuestion"
+              type="textarea"
+              :rows="2"
+              name="risk-question"
+              placeholder="用日常语言提问，例如：今天有哪些高风险预警"
+              @keydown.ctrl.enter="askQuery"
+            />
+            <el-button
+              type="primary"
+              :loading="askingQuery"
+              data-test="ask-risk-query"
+              @click="askQuery"
+            >
+              {{ askingQuery ? "正在查询…" : "提问" }}
+            </el-button>
+          </div>
+          <div v-if="queryExamples.length" class="risk-monitoring__examples">
+            <span class="risk-monitoring__hint">试试这样问：</span>
+            <button
+              v-for="example in queryExamples"
+              :key="example.question"
+              type="button"
+              class="risk-monitoring__example"
+              data-test="risk-query-example"
+              @click="reuseQueryQuestion(example.question)"
+            >
+              {{ example.question }}
+            </button>
+          </div>
+        </el-card>
+
+        <el-alert
+          v-if="queryFailure"
+          type="info"
+          :closable="false"
+          data-test="risk-query-failure"
+          :title="queryFailure"
+        />
+
+        <AnalyticsResultView v-if="queryResult" :result="queryResult" />
+      </el-tab-pane>
     </el-tabs>
   </div>
 </template>
@@ -349,5 +451,38 @@ onMounted(() => {
 
 .risk-monitoring__error {
   color: #b42318;
+}
+
+.risk-monitoring__query-composer {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.risk-monitoring__examples {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+
+.risk-monitoring__example {
+  cursor: pointer;
+  border: 1px solid #d3dce6;
+  border-radius: 12px;
+  background: #f4f4f5;
+  padding: 2px 10px;
+  font-size: 12px;
+  color: #606266;
+}
+
+.risk-monitoring__example:hover {
+  background: #e9e9eb;
+}
+
+.risk-monitoring__hint {
+  color: #909399;
+  font-size: 12px;
 }
 </style>

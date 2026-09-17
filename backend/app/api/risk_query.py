@@ -1,13 +1,20 @@
+"""风控监测 Agent 的自然语言查询入口。
+
+风控专员用日常语言提问（「今天有哪些高风险预警」），不必自己组合筛选条件。
+落点在风控模块而不是数据分析模块：这里装配的是风控监测 Agent 的配置与视图
+范围（``app.risk_monitoring.query``），数据分析模块的回答范围不受影响。
+
+任何内部员工都可以提问；能查到哪些行由语义视图内建的行级权限决定——客户经理
+只看得到名下客户的预警，身份取自登录凭证，不取自问题文本。
+"""
+
 import redis
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
+from app.agent.risk_query import RISK_VIEW_NAMES, run_risk_query
 from app.analytics.schemas import AnalyticsQueryRequest
-from app.analytics.service import (
-    list_example_questions,
-    list_query_history,
-    run_query,
-)
+from app.analytics.service import list_example_questions
 from app.auth.dependencies import current_employee
 from app.db.models import Employee
 from app.db.session import get_session
@@ -15,20 +22,18 @@ from app.http import ok
 from app.redis_client import get_redis
 from app.settings import Settings, get_settings
 
-router = APIRouter(prefix="/api/internal/analytics")
+router = APIRouter(prefix="/api/internal/risk-monitoring")
 
 
 @router.post("/query")
-def run_analytics_query(
+def run_query_endpoint(
     body: AnalyticsQueryRequest,
     employee: Employee = Depends(current_employee),
     db: Session = Depends(get_session),
     cache: redis.Redis = Depends(get_redis),
     settings: Settings = Depends(get_settings),
 ):
-    # 任何内部员工都可提问；能查到哪些行由视图内建的行级权限决定，
-    # 身份取自登录凭证（employee），不取自问题文本。
-    answer = run_query(
+    answer = run_risk_query(
         db,
         settings,
         employee=employee,
@@ -39,19 +44,10 @@ def run_analytics_query(
     return ok(answer.model_dump())
 
 
-@router.get("/history")
-def get_history(
-    employee: Employee = Depends(current_employee),
-    db: Session = Depends(get_session),
-):
-    items = list_query_history(db, employee=employee)
-    return ok([item.model_dump(mode="json") for item in items])
-
-
 @router.get("/examples")
 def get_examples(
     _employee: Employee = Depends(current_employee),
     settings: Settings = Depends(get_settings),
 ):
-    items = list_example_questions(settings)
+    items = list_example_questions(settings, view_names=RISK_VIEW_NAMES)
     return ok([item.model_dump() for item in items])

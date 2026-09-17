@@ -1,0 +1,76 @@
+/*
+ * 设计令牌层：全局唯一的视觉数值事实源（spec「设计令牌层」）。
+ * 前缀 --wm-，避免与 Element Plus 的 --el-* 撞名；EP 主题化映射见文件末尾。
+ * 色彩令牌的 TS 只读镜像在同目录 tokens.ts，改值需两处同步并跑 tokens.test.ts。
+ * 后续壳、复合组件与逐页改造只消费这里的变量，不允许各自发明色值。
+ */
+
+:root {
+  /* 品牌 */
+  --wm-color-primary: #1f6feb;
+
+  /* 涨跌：红涨绿跌（中国金融惯例）。与 success/danger 同值但独立命名，保留分叉余地 */
+  --wm-color-up: #c81e1e;
+  --wm-color-down: #1e7a46;
+
+  /* 语义状态 */
+  --wm-color-success: #1e7a46;
+  --wm-color-warning: #b45309;
+  --wm-color-danger: #c81e1e;
+
+  /* 文字 */
+  --wm-text-primary: #1f2937;
+  --wm-text-secondary: #374151;
+  --wm-text-muted: #6b7280;
+  /* 豁免：对白底 2.54:1，不满足正文级——仅限 placeholder 与装饰，禁用于有意义文字 */
+  --wm-text-placeholder: #9ca3af;
+
+  /* 中性面 */
+  --wm-bg-page: #f5f7fa;
+  --wm-bg-card: #ffffff;
+  --wm-border: #e5e7eb;
+  --wm-border-hairline: #eef0f3;
+
+  /* 圆角 */
+  --wm-radius-sm: 4px;
+  --wm-radius-md: 8px;
+  --wm-radius-lg: 12px;
+
+  /* 阴影 */
+  --wm-shadow-card: 0 1px 2px rgba(16, 24, 40, 0.06);
+  --wm-shadow-overlay: 0 4px 16px rgba(16, 24, 40, 0.12);
+
+  /* 间距刻度：4/8/12/16/24/32 */
+  --wm-space-1: 4px;
+  --wm-space-2: 8px;
+  --wm-space-3: 12px;
+  --wm-space-4: 16px;
+  --wm-space-5: 24px;
+  --wm-space-6: 32px;
+
+  /* 字体 */
+  --wm-font-family: system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei",
+    sans-serif;
+
+  /* 布局常量 */
+  --wm-sidebar-width: 220px;
+  --wm-topbar-height: 56px;
+
+  /*
+   * Element Plus 主题化：主色及其明暗派生全部映射到令牌，
+   * 否则按钮 hover/disabled 态会露出 EP 默认蓝。
+   * 派生比例沿用 EP 自身的混色公式（light-N = (10-N)×10% 主色 + N×10% 白，
+   * dark-2 = 80% 主色 + 20% 黑），用 color-mix 现场派生，不另存会漂移的硬编码色。
+   */
+  --el-color-primary: var(--wm-color-primary);
+  --el-color-primary-dark-2: color-mix(in srgb, var(--wm-color-primary) 80%, black);
+  --el-color-primary-light-1: color-mix(in srgb, var(--wm-color-primary) 90%, white);
+  --el-color-primary-light-2: color-mix(in srgb, var(--wm-color-primary) 80%, white);
+  --el-color-primary-light-3: color-mix(in srgb, var(--wm-color-primary) 70%, white);
+  --el-color-primary-light-4: color-mix(in srgb, var(--wm-color-primary) 60%, white);
+  --el-color-primary-light-5: color-mix(in srgb, var(--wm-color-primary) 50%, white);
+  --el-color-primary-light-6: color-mix(in srgb, var(--wm-color-primary) 40%, white);
+  --el-color-primary-light-7: color-mix(in srgb, var(--wm-color-primary) 30%, white);
+  --el-color-primary-light-8: color-mix(in srgb, var(--wm-color-primary) 20%, white);
+  --el-color-primary-light-9: color-mix(in srgb, var(--wm-color-primary) 10%, white);
+}

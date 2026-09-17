@@ -6,3 +6,9 @@ declare module "*.vue" {
   const component: DefineComponent<Record<string, unknown>, Record<string, unknown>, unknown>;
   export default component;
 }
+
+// Vite 的 ?raw 后缀：以字符串形式导入文件原文（如令牌测试读取 tokens.css）。
+declare module "*?raw" {
+  const content: string;
+  export default content;
+}

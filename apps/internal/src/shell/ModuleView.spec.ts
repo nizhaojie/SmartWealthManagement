@@ -2,7 +2,7 @@ import ElementPlus from "element-plus";
 import { flushPromises, mount } from "@vue/test-utils";
 import { createMemoryHistory, createRouter } from "vue-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ADVISOR, RISK_OFFICER } from "../auth/identity";
+import { ACCOUNT_MANAGER, ADVISOR, RISK_OFFICER } from "../auth/identity";
 import { currentEmployee } from "../auth/store";
 import ModuleView from "./ModuleView.vue";
 import { MODULES } from "./modules";
@@ -31,6 +31,21 @@ vi.mock("../advisory/api", () => ({
   getMyHistory: vi.fn().mockResolvedValue([]),
   listCustomersForPlan: vi.fn().mockResolvedValue([]),
   generatePlan: vi.fn(),
+}));
+
+vi.mock("../risk/api", () => ({
+  listAlerts: vi.fn().mockResolvedValue([]),
+  listWorkOrders: vi.fn().mockResolvedValue([]),
+  listRiskRules: vi.fn().mockResolvedValue([]),
+  setRiskRuleEnabled: vi.fn(),
+  getAlert: vi.fn(),
+  getWorkOrder: vi.fn(),
+  excludeAlert: vi.fn(),
+  escalateAlert: vi.fn(),
+  deriveWorkOrder: vi.fn(),
+  acceptWorkOrder: vi.fn(),
+  completeWorkOrder: vi.fn(),
+  closeWorkOrder: vi.fn(),
 }));
 
 async function mountModuleViewAt(path: string) {
@@ -64,12 +79,21 @@ describe("ModuleView", () => {
   });
 
   it("renders the placeholder explanation for a module the role is allowed to see", async () => {
+    currentEmployee.value = { real_name: "刘经理", employee_role: ACCOUNT_MANAGER };
+
+    const wrapper = await mountModuleViewAt("/customer-relations");
+
+    expect(wrapper.text()).toContain("该模块尚未实现");
+    expect(wrapper.text()).toContain("客户关系");
+  });
+
+  it("opens the risk monitoring workspace on its own route", async () => {
     currentEmployee.value = { real_name: "周风控", employee_role: RISK_OFFICER };
 
     const wrapper = await mountModuleViewAt("/risk-monitoring");
 
-    expect(wrapper.text()).toContain("该模块尚未实现");
-    expect(wrapper.text()).toContain("风控监测");
+    expect(wrapper.text()).not.toContain("该模块尚未实现");
+    expect(wrapper.text()).toContain("预警列表");
   });
 
   it("opens the data analysis workspace on its own route", async () => {

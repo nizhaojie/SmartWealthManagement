@@ -43,8 +43,11 @@ export const MODULES: ModuleDefinition[] = [
     id: "risk-monitoring",
     path: "/risk-monitoring",
     label: "风控监测",
-    description: "查看风控预警并处置工单。",
-    roles: [RISK_OFFICER],
+    // 三个角色都能进：理财顾问与客户经理要看得见自己客户的预警状态，而处置
+    // （排除、升级、工单流转）只放开给风控专员——后端按角色再挡一次，界面把
+    // 处置表单换成一句说明。客户经理的可见范围收紧到名下客户，与工单、审核一致。
+    description: "查看风控预警与工单；风控专员在此处置。",
+    roles: ALL_ROLES,
   },
   {
     id: "customer-relations",

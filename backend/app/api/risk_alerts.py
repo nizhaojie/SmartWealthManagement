@@ -1,7 +1,8 @@
-"""预警自身的处置入口：排除、升级，以及从预警派生工单。
+"""预警的读取与处置入口：列表、详情、排除、升级，以及从预警派生工单。
 
 三个写操作都收在风控专员手里，也都要求非空理由——预警的关闭与升级由人做出并
-留下署名，系统不做这件事（`app.risk_monitoring.alert_status`）。
+留下署名，系统不做这件事（`app.risk_monitoring.alert_status`）。读操作对所有内部
+员工开放，但客户经理只看得到自己名下客户的预警（`app.risk_monitoring.alert_service`）。
 """
 
 from datetime import datetime, timezone
@@ -10,12 +11,12 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.auth.dependencies import require_employee_role
+from app.auth.dependencies import current_employee, require_employee_role
 from app.auth.roles import RISK_OFFICER
 from app.db.models import Employee, RiskAlert
 from app.db.session import get_session
 from app.http import ok
-from app.risk_monitoring import alerting, disposition
+from app.risk_monitoring import alert_service, alerting, disposition
 from app.work_order import service as work_orders
 
 router = APIRouter(prefix="/api/internal/risk-alerts")
@@ -35,6 +36,36 @@ class DeriveWorkOrderRequest(BaseModel):
 
 def _disposition_response(alert: RiskAlert, employee: Employee) -> dict:
     return {**alerting.alert_response(alert), "handled_by_name": employee.real_name}
+
+
+@router.get("")
+def list_risk_alerts(
+    alert_level: str | None = None,
+    status: str | None = None,
+    created_from: datetime | None = None,
+    created_to: datetime | None = None,
+    employee: Employee = Depends(current_employee),
+    db: Session = Depends(get_session),
+):
+    return ok(
+        alert_service.list_alerts(
+            db,
+            employee=employee,
+            alert_level=alert_level,
+            status=status,
+            created_from=created_from,
+            created_to=created_to,
+        )
+    )
+
+
+@router.get("/{alert_id}")
+def get_risk_alert(
+    alert_id: int,
+    employee: Employee = Depends(current_employee),
+    db: Session = Depends(get_session),
+):
+    return ok(alert_service.detail(db, alert_id, employee=employee))
 
 
 @router.post("/{alert_id}/exclude")

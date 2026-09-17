@@ -17,6 +17,7 @@ from collections.abc import Iterable
 from decimal import ROUND_HALF_UP, Decimal
 
 from app.risk_monitoring.context import RuleHit
+from app.risk_monitoring.operators import OPERATOR_REGISTRY
 
 LEVEL_LIGHT = "轻度"
 LEVEL_MODERATE = "中度"
@@ -83,3 +84,28 @@ def render_trigger_detail(hits: Iterable[RuleHit]) -> str:
     ——风控专员靠这个判断是不是误报。
     """
     return "\n".join(f"{hit.rule_name}（{hit.rule_code}）：{hit.evidence}" for hit in hits)
+
+
+def hit_evidence(hit: RuleHit) -> dict:
+    """一次命中的结构化依据，用于落库与界面渲染。
+
+    与 `render_trigger_detail` 是同一份事实的两种呈现：文本给人一眼读完，结构给
+    界面把「哪个字段、什么值、超过什么阈值」分列展示。算子的呈现名也从算子表取，
+    不在这里另抄一份——规则能用的算子就是那张表里列出的那些。
+    """
+    operator = OPERATOR_REGISTRY.get(hit.operator)
+    return {
+        "rule_code": hit.rule_code,
+        "rule_name": hit.rule_name,
+        "category": hit.category,
+        "alert_level": hit.alert_level,
+        "weight": float(hit.weight),
+        "field": hit.field,
+        "field_label": hit.field_label,
+        "operator": hit.operator,
+        "operator_label": operator.label if operator is not None else hit.operator,
+        "operator_symbol": operator.symbol if operator is not None else "",
+        "threshold": hit.threshold,
+        "observed_value": hit.observed_value,
+        "evidence": hit.evidence,
+    }

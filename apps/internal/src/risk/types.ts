@@ -1,0 +1,153 @@
+export const ALERT_LEVELS = ["轻度", "中度", "重度"] as const;
+export type AlertLevel = (typeof ALERT_LEVELS)[number];
+
+// 预警自身的处置状态只有这三个：未处理，以及由人做出的两个结论。没有「自动关闭」
+// 这一档——系统不会因为置信度低或超时把预警消化掉。
+export const ALERT_STATUSES = ["未处理", "已排除", "已升级"] as const;
+export type AlertStatus = (typeof ALERT_STATUSES)[number];
+
+export const WORK_ORDER_STATUSES = ["待处理", "处理中", "已完成", "已关闭"] as const;
+export type WorkOrderStatus = (typeof WORK_ORDER_STATUSES)[number];
+
+/**
+ * 一条命中规则及其依据快照。
+ *
+ * `field_label` / `observed_value` / `operator_symbol` / `threshold` 是风控专员判断
+ * 误报时要看的东西——「交易金额 520000 ≥ 阈值 50000」。依据在命中那一刻固化，
+ * 规则阈值后来被调过也不会改写它。
+ */
+export type AlertRuleHit = {
+  rule_code: string;
+  rule_name: string;
+  category: string;
+  alert_level: AlertLevel;
+  weight: number;
+  field: string;
+  field_label: string;
+  operator: string;
+  operator_label: string;
+  operator_symbol: string;
+  threshold: string;
+  observed_value: string;
+  evidence: string;
+};
+
+export type AlertSummary = {
+  id: number;
+  customer_id: number;
+  customer_name: string;
+  alert_type: string;
+  alert_level: AlertLevel;
+  confidence: number;
+  rule_codes: string[];
+  rule_count: number;
+  transaction_ids: number[];
+  status: AlertStatus;
+  created_at: string;
+  work_order_id: number | null;
+  work_order_status: WorkOrderStatus | null;
+};
+
+export type AlertTransaction = {
+  id: number;
+  transaction_no: string;
+  customer_id: number;
+  product_id: number;
+  product_code: string;
+  product_name: string;
+  transaction_type: string;
+  amount: string;
+  shares: string;
+  nav: string;
+  fee: string;
+  status: string;
+  occurred_at: string;
+};
+
+export type AlertCustomer = {
+  customer_id: number;
+  real_name: string;
+  customer_level: string;
+  risk_level: string | null;
+  manager_name: string;
+};
+
+export type AlertHistoryEntry = {
+  id: number;
+  alert_type: string;
+  alert_level: AlertLevel;
+  confidence: number;
+  rule_codes: string[];
+  status: AlertStatus;
+  created_at: string;
+};
+
+export type AlertDetail = {
+  id: number;
+  customer_id: number;
+  customer_name: string;
+  alert_type: string;
+  alert_level: AlertLevel;
+  confidence: number;
+  rule_codes: string[];
+  rule_hits: AlertRuleHit[];
+  transaction_ids: number[];
+  trigger_detail: string;
+  status: AlertStatus;
+  handler_id: number | null;
+  handle_result: string | null;
+  handled_by_name: string;
+  created_at: string;
+  customer: AlertCustomer;
+  transactions: AlertTransaction[];
+  customer_history: AlertHistoryEntry[];
+  work_order: WorkOrder | null;
+};
+
+export type WorkOrder = {
+  id: number;
+  work_order_no: string;
+  order_type: string;
+  sub_type: string | null;
+  alert_id: number | null;
+  customer_id: number | null;
+  handler_id: number | null;
+  handler_name: string;
+  status: WorkOrderStatus;
+  current_node: string;
+  priority: string;
+  biz_content: Record<string, unknown> | null;
+  handle_reason: string | null;
+  handle_result: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type WorkOrderTransition = {
+  from_status: WorkOrderStatus | null;
+  to_status: WorkOrderStatus;
+  handler_id: number;
+  handler_name: string;
+  reason: string;
+  handled_at: string;
+};
+
+export type WorkOrderDetail = WorkOrder & { transitions: WorkOrderTransition[] };
+
+export type RiskRule = {
+  id: number;
+  rule_code: string;
+  rule_name: string;
+  category: string;
+  description: string;
+  field: string;
+  field_label: string;
+  operator: string;
+  operator_label: string;
+  threshold: Record<string, string>;
+  threshold_text: string;
+  window_hours: number | null;
+  alert_level: AlertLevel;
+  weight: number;
+  enabled: boolean;
+};

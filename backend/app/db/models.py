@@ -445,6 +445,13 @@ class RiskAlert(Base):
         Numeric(5, 2), comment="置信度；仅用于排序与分级展示"
     )
     rule_codes: Mapped[list] = mapped_column(JSON, comment="命中的规则编号")
+    # 命中依据的结构化快照（字段、实测值、阈值）。它是**命中那一刻**的口径：阈值可以
+    # 被调整，展示时回查规则会把今天的口径套到过去的预警上，而风控专员正是靠这个
+    # 判断误报。形状与 `app.risk_monitoring.context.RuleHit` 一一对应，
+    # `trigger_detail` 是同一份事实的文本呈现。
+    rule_hits: Mapped[list] = mapped_column(
+        JSON, comment="命中规则的依据快照：字段、实测值、阈值"
+    )
     trigger_detail: Mapped[str] = mapped_column(Text, comment="触发详情")
     transaction_ids: Mapped[list | None] = mapped_column(JSON, comment="关联交易标识")
     status: Mapped[str] = mapped_column(String(16), comment="预警状态")

@@ -45,6 +45,7 @@ from app.risk_monitoring.grading import (
     alert_type_for,
     compute_confidence,
     grade_alert_level,
+    hit_evidence,
     render_trigger_detail,
 )
 from app.tracing import get_trace_id
@@ -224,6 +225,9 @@ def create_alerts_for_transaction(
         ),
         confidence=compute_confidence(hits),
         rule_codes=[hit.rule_code for hit in hits],
+        # 依据在命中这一刻固化：阈值会被调整（`fin_risk_rule_change` 记着谁改的），
+        # 展示时回查规则等于用今天的口径解释过去的预警。
+        rule_hits=[hit_evidence(hit) for hit in hits],
         trigger_detail=render_trigger_detail(hits),
         transaction_ids=[transaction.id],
         status=ALERT_STATUS_OPEN,
@@ -344,7 +348,13 @@ def transaction_response(transaction: Transaction) -> dict:
     }
 
 
-def alert_response(alert: RiskAlert) -> dict:
+def alert_core(alert: RiskAlert) -> dict:
+    """预警自身的那组事实字段。
+
+    列表行、详情与「这位客户的历史预警」说的是同一条预警的同一组事实，形状从这里
+    出一份：各拼一遍的话，将来加一个字段时总有一个视图会漏掉它，而漏掉的那个视图
+    看起来仍然是「正常」的。
+    """
     return {
         "id": alert.id,
         "customer_id": alert.customer_id,
@@ -353,10 +363,17 @@ def alert_response(alert: RiskAlert) -> dict:
         "confidence": float(alert.confidence),
         "rule_codes": list(alert.rule_codes or []),
         "transaction_ids": list(alert.transaction_ids or []),
-        "trigger_detail": alert.trigger_detail,
         "status": alert.status,
+        "created_at": alert.create_time.isoformat(),
+    }
+
+
+def alert_response(alert: RiskAlert) -> dict:
+    return {
+        **alert_core(alert),
+        "rule_hits": list(alert.rule_hits or []),
+        "trigger_detail": alert.trigger_detail,
         # 处置留痕：还没处置时两列都为空，「未处理」是它们的搭档状态。
         "handler_id": alert.handler_id,
         "handle_result": alert.handle_result,
-        "created_at": alert.create_time.isoformat(),
     }

@@ -2,6 +2,8 @@ import { createRouter, createWebHistory, type RouteRecordRaw } from "vue-router"
 import AdvisoryReviewPage from "../advisory/AdvisoryReviewPage.vue";
 import LoginPage from "../auth/LoginPage.vue";
 import { currentEmployee, isAuthenticated, restoreSession } from "../auth/store";
+import AlertDetailPage from "../risk/AlertDetailPage.vue";
+import WorkOrderDetailPage from "../risk/WorkOrderDetailPage.vue";
 import ModuleView from "../shell/ModuleView.vue";
 import { defaultPathFor, MODULES } from "../shell/modules";
 import WorkbenchShell from "../shell/WorkbenchShell.vue";
@@ -23,12 +25,29 @@ const advisoryReviewRoute: RouteRecordRaw = {
   meta: { moduleId: "advisory" },
 };
 
+// 预警详情与工单处置页各有独立 URL：风控专员要能把一条预警的链接直接发给同事
+// （见 issue 04）。它们同样不经过 ModuleView 的角色过滤——能看哪一条由后端按
+// 客户归属判定，组件把 403 渲染成「无权查看」。
+const riskAlertRoute: RouteRecordRaw = {
+  path: "risk-monitoring/alerts/:alertId",
+  name: "risk-alert-detail",
+  component: AlertDetailPage,
+  meta: { moduleId: "risk-monitoring" },
+};
+
+const riskWorkOrderRoute: RouteRecordRaw = {
+  path: "risk-monitoring/work-orders/:workOrderId",
+  name: "risk-work-order-detail",
+  component: WorkOrderDetailPage,
+  meta: { moduleId: "risk-monitoring" },
+};
+
 const routes: RouteRecordRaw[] = [
   { path: "/login", name: "login", component: LoginPage, meta: { public: true } },
   {
     path: "/",
     component: WorkbenchShell,
-    children: [...moduleRoutes, advisoryReviewRoute],
+    children: [...moduleRoutes, advisoryReviewRoute, riskAlertRoute, riskWorkOrderRoute],
   },
 ];
 

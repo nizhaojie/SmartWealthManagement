@@ -31,7 +31,9 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.auth.roles import ACCOUNT_MANAGER
+from app.customer_scope import is_under_management, restrict_to_own_customers
 from app.db.models import Customer, Employee, RiskAlert, WorkOrder, WorkOrderTransition
+from app.employees import names_by_id
 from app.exceptions import AppError
 from app.risk_monitoring.alert_status import ALERT_STATUS_OPEN
 from app.risk_monitoring.grading import LEVEL_LIGHT, LEVEL_MODERATE, LEVEL_SEVERE
@@ -301,7 +303,7 @@ def detail(db: Session, work_order_id: int, *, employee: Employee) -> dict:
             .order_by(WorkOrderTransition.id.asc())
         ).all()
     )
-    names = _handler_names(db, {work_order.handler_id, *(row.handler_id for row in records)})
+    names = names_by_id(db, {work_order.handler_id, *(row.handler_id for row in records)})
     handler_name = names.get(work_order.handler_id, "") if work_order.handler_id else ""
     return {
         **serialize(work_order, handler_name=handler_name),
@@ -412,10 +414,10 @@ def _insert(
 
 def _ensure_can_view(db: Session, employee: Employee, work_order: WorkOrder) -> None:
     """客户经理只能看自己名下客户的工单，其他内部角色不受限。"""
-    if employee.employee_role != ACCOUNT_MANAGER:
+    if not restrict_to_own_customers(employee):
         return
     customer = db.get(Customer, work_order.customer_id) if work_order.customer_id else None
-    if customer is None or customer.manager_id != employee.id:
+    if not is_under_management(customer, employee):
         raise AppError(403, NOT_YOUR_CUSTOMER_MESSAGE)
 
 
@@ -484,13 +486,3 @@ def _checked_conclusion(conclusion: str | None, *, required: bool) -> str | None
             raise AppError(400, CONCLUSION_REQUIRED_MESSAGE)
         return None
     return conclusion.strip()
-
-
-def _handler_names(db: Session, employee_ids: set[int | None]) -> dict[int, str]:
-    ids = {employee_id for employee_id in employee_ids if employee_id is not None}
-    if not ids:
-        return {}
-    return {
-        employee.id: employee.real_name
-        for employee in db.scalars(select(Employee).where(Employee.id.in_(ids))).all()
-    }

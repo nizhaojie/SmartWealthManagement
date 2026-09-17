@@ -7,7 +7,7 @@ app.api.advisory），这里只管「谁能看」——客户经理能看能评�
 
 from sqlalchemy.orm import Session
 
-from app.auth.roles import ACCOUNT_MANAGER
+from app.customer_scope import is_under_management, restrict_to_own_customers
 from app.db.models import Customer, Employee
 from app.exceptions import AppError
 
@@ -16,11 +16,11 @@ CUSTOMER_NOT_FOUND_MESSAGE = "客户不存在"
 
 
 def ensure_can_view(db: Session, employee: Employee, customer_id: int) -> None:
-    if employee.employee_role != ACCOUNT_MANAGER:
+    if not restrict_to_own_customers(employee):
         return
 
     customer = db.get(Customer, customer_id)
     if customer is None:
         raise AppError(404, CUSTOMER_NOT_FOUND_MESSAGE)
-    if customer.manager_id != employee.id:
+    if not is_under_management(customer, employee):
         raise AppError(403, NOT_YOUR_CUSTOMER_MESSAGE)

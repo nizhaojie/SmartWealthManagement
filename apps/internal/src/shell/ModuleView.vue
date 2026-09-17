@@ -5,6 +5,7 @@ import DataAnalysisWorkspace from "../analytics/DataAnalysisWorkspace.vue";
 import { currentEmployee } from "../auth/store";
 import KnowledgeWorkspace from "../knowledge/KnowledgeWorkspace.vue";
 import ProfileWorkspace from "../profile/ProfileWorkspace.vue";
+import RiskMonitoringWorkspace from "../risk/RiskMonitoringWorkspace.vue";
 import ModuleForbidden from "./ModuleForbidden.vue";
 import ModulePlaceholder from "./ModulePlaceholder.vue";
 import { useCurrentModule } from "./useCurrentModule";
@@ -27,5 +28,6 @@ const allowed = computed(() => {
   <DataAnalysisWorkspace v-else-if="module?.id === 'data-analysis'" />
   <ProfileWorkspace v-else-if="module?.id === 'profile'" />
   <AdvisoryWorkspace v-else-if="module?.id === 'advisory'" />
+  <RiskMonitoringWorkspace v-else-if="module?.id === 'risk-monitoring'" />
   <ModulePlaceholder v-else-if="module" :module="module" />
 </template>

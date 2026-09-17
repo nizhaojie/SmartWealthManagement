@@ -33,6 +33,10 @@ vi.mock("../advisory/AdvisoryReviewPage.vue", () => ({
   default: { name: "AdvisoryReviewPage", template: "<div />" },
 }));
 
+vi.mock("../risk/RiskMonitoringWorkspace.vue", () => ({
+  default: { name: "RiskMonitoringWorkspace", template: "<div />" },
+}));
+
 function createShellRouter() {
   return createRouter({
     history: createMemoryHistory(),
@@ -79,7 +83,6 @@ describe("WorkbenchShell", () => {
     const advisorNav = advisorWrapper.find(".workbench-shell__aside").text();
     expect(advisorNav).toContain("投顾助手");
     expect(advisorNav).toContain("客户画像");
-    expect(advisorNav).not.toContain("风控监测");
     expect(advisorNav).not.toContain("客户关系");
 
     const riskWrapper = await mountShellAt("/knowledge", RISK_OFFICER);
@@ -94,7 +97,14 @@ describe("WorkbenchShell", () => {
     expect(managerNav).toContain("客户关系");
     expect(managerNav).not.toContain("投顾助手");
     expect(managerNav).not.toContain("客户画像");
-    expect(managerNav).not.toContain("风控监测");
+  });
+
+  it("shows the risk module to every role, since advisors and managers need to see their customers' alerts", async () => {
+    for (const role of [ADVISOR, RISK_OFFICER, ACCOUNT_MANAGER]) {
+      const wrapper = await mountShellAt("/knowledge", role);
+      expect(wrapper.find(".workbench-shell__aside").text()).toContain("风控监测");
+      wrapper.unmount();
+    }
   });
 
   it("shows the logout entry point for every role on every route", async () => {

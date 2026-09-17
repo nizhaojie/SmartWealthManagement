@@ -17,3 +17,8 @@ def get_session() -> Iterator[Session]:
     engine = _engine(get_settings().database_url)
     with Session(engine) as session:
         yield session
+
+
+def open_session() -> Session:
+    """请求上下文之外（周期任务）用的会话工厂，调用方负责关闭。"""
+    return Session(_engine(get_settings().database_url))

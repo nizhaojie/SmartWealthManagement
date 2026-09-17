@@ -8,12 +8,14 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.customer_profile.confidence import (
+    CONFLICT_PENALTY_STEP,
     SOURCE_ADVISOR,
     SOURCE_INITIAL_CONFIDENCE,
     compute_confidence,
     source_rank,
 )
 from app.customer_profile.judgement import age_from_id_number, judge_profile
+from app.customer_profile.rerank import MemoryUnit, rerank, weights_for_scenario
 from app.db.models import (
     Customer,
     CustomerProfile,
@@ -44,6 +46,11 @@ TAG_LABELS = {
 
 ALLOWED_TAG_KEYS = frozenset(TAG_LABELS)
 ALLOWED_SOURCES = frozenset(SOURCE_INITIAL_CONFIDENCE)
+
+# 综合重排的两项「原始信号」如何从标签自身的历史推出来：
+# - 历史准确率：标签被后续独立证据确认的次数归一化，还没被确认过就是 0；
+# - 冲突惩罚：被相反证据冲撞的次数归一化，和基础置信分里用的是同一个步长。
+HISTORICAL_ACCURACY_PER_EVIDENCE = 0.25
 
 
 def _cache_key(customer_id: int) -> str:
@@ -159,6 +166,8 @@ def write_tag(
         if incoming_rank < current_rank:
             return
         existing.evidence_count += 1
+        # 又确认了一次，这条标签不再是「该重新确认的旧信息」。
+        existing.expired = False
         if incoming_rank > current_rank:
             existing.source = source
             existing.observed_at = now
@@ -186,6 +195,8 @@ def write_tag(
     existing.evidence_count = 0
     existing.observed_at = now
     existing.reason = reason.strip() if reason else None
+    # 改写后的值是新写入的，过期标记随之复位。
+    existing.expired = False
     _sync_profile_field(profile, tag_key, value)
     _finish_write(db, cache, profile, customer_id, now)
 
@@ -214,6 +225,7 @@ def _load_snapshot(db: Session, customer_id: int) -> dict:
                 "evidence_count": tag.evidence_count,
                 "observed_at": tag.observed_at.isoformat(),
                 "reason": tag.reason,
+                "expired": bool(tag.expired),
             }
             for tag in tags
         ],
@@ -277,7 +289,16 @@ def get_internal_profile(
     *,
     customer_id: int,
     now: datetime,
+    scenario: str | None = None,
+    query: str | None = None,
+    weights_overrides: dict[str, dict[str, float]] | None = None,
 ) -> dict:
+    """读取客户画像。
+
+    不传 ``scenario`` 时保持标签的写入顺序（既有行为）；传了则按该场景的五因子权重
+    重排——同一批标签在「产品推荐」与「风险研判」下先后不同。重排只改变顺序，不删标签：
+    低分的排在后面，取舍由调用方决定（见 `rerank.rerank`）。
+    """
     snapshot = _cache_get(cache, customer_id)
     if snapshot is None:
         snapshot = _load_snapshot(db, customer_id)
@@ -287,6 +308,7 @@ def get_internal_profile(
     for record in snapshot["conflict_records"]:
         key = record["tag_key"]
         conflict_counts[key] = conflict_counts.get(key, 0) + 1
+    evidence_counts = {item["key"]: item["evidence_count"] for item in snapshot["tags"]}
 
     tags = []
     for item in snapshot["tags"]:
@@ -305,8 +327,21 @@ def get_internal_profile(
                     now=now,
                 ),
                 "observed_at": item["observed_at"],
+                "expired": item.get("expired", False),
             }
         )
+
+    if scenario is not None:
+        tags = _rank_tags(
+            tags,
+            evidence_counts=evidence_counts,
+            conflict_counts=conflict_counts,
+            scenario=scenario,
+            query=query,
+            now=now,
+            weights_overrides=weights_overrides,
+        )
+
     return {
         "customer_id": snapshot["customer_id"],
         "real_name": snapshot["real_name"],
@@ -315,6 +350,80 @@ def get_internal_profile(
         "conflict_records": snapshot["conflict_records"],
         "judgement": _build_judgement(db, customer_id, snapshot, now),
     }
+
+
+def _rank_tags(
+    tags: list[dict],
+    *,
+    evidence_counts: dict[str, int],
+    conflict_counts: dict[str, int],
+    scenario: str,
+    query: str | None,
+    now: datetime,
+    weights_overrides: dict[str, dict[str, float]] | None,
+) -> list[dict]:
+    """把标签适配成记忆单元交给重排纯函数，再把得分挂回标签回复。"""
+    units = [
+        MemoryUnit(
+            key=tag["key"],
+            semantic_similarity=_similarity_to_query(tag, query),
+            observed_at=datetime.fromisoformat(tag["observed_at"]),
+            historical_accuracy=_historical_accuracy(evidence_counts.get(tag["key"], 0)),
+            base_confidence=tag["confidence"],
+            conflict_penalty=_conflict_penalty(conflict_counts.get(tag["key"], 0)),
+        )
+        for tag in tags
+    ]
+    ranked = rerank(
+        units,
+        weights=weights_for_scenario(scenario, overrides=weights_overrides),
+        now=now,
+    )
+    by_key = {tag["key"]: tag for tag in tags}
+    return [
+        {**by_key[unit.key], "rerank_score": unit.score, "rerank_factors": unit.factors}
+        for unit in ranked
+    ]
+
+
+def _historical_accuracy(evidence_count: int) -> float:
+    return min(1.0, max(evidence_count, 0) * HISTORICAL_ACCURACY_PER_EVIDENCE)
+
+
+def _conflict_penalty(conflict_count: int) -> float:
+    return min(1.0, max(conflict_count, 0) * CONFLICT_PENALTY_STEP)
+
+
+def _similarity_to_query(tag: dict, query: str | None) -> float:
+    """标签与当前查询的相关度。
+
+    没有查询时所有标签同等相关（取 1.0），重排的顺序差异只来自其余四个因子；
+    有查询时用关键词重合度近似语义相似度——不额外调模型，与检索链路「向量超时降级为
+    关键词检索」同一思路，也是能让同一批标签在不同查询下先后翻转的那一项。
+    """
+    if not query or not query.strip():
+        return 1.0
+    return _keyword_similarity(f"{tag['label']} {_stringify(tag['value'])}", query)
+
+
+def _stringify(value: Any) -> str:
+    if isinstance(value, str):
+        return value
+    return json.dumps(value, ensure_ascii=False)
+
+
+def _keyword_similarity(text: str, query: str) -> float:
+    text_grams = _bigrams(text)
+    query_grams = _bigrams(query)
+    if not text_grams or not query_grams:
+        return 0.0
+    return round(len(text_grams & query_grams) / len(text_grams | query_grams), 4)
+
+
+def _bigrams(text: str) -> set[str]:
+    # 中文没有空格分词，按相邻两字切；英文与数字先转成小写，标点不参与。
+    chars = [char.lower() for char in text if char.isalnum()]
+    return {f"{chars[index]}{chars[index + 1]}" for index in range(len(chars) - 1)}
 
 
 def list_customers(db: Session) -> list[dict]:

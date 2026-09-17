@@ -1,4 +1,5 @@
 import logging
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -19,6 +20,7 @@ from app.api.customer_assets import router as customer_assets_router
 from app.api.graph import router as graph_router
 from app.api.health import router as health_router
 from app.api.knowledge import router as knowledge_router
+from app.api.customer_profile import calibration_router as customer_profile_calibration_router
 from app.api.customer_profile import internal_router as customer_profile_internal_router
 from app.api.customer_profile import router as customer_profile_router
 from app.api.risk_alerts import router as risk_alerts_router
@@ -35,6 +37,8 @@ from app.api.work_orders import router as work_orders_router
 from app.exceptions import AppError
 from app.http import fail
 from app.logging_setup import setup_logging
+from app import scheduler
+from app.settings import get_settings
 from app.tracing import bind_trace_id, get_trace_id
 
 setup_logging()
@@ -65,7 +69,17 @@ class TraceIdMiddleware:
         await self.app(scope, receive, send_with_trace)
 
 
-app = FastAPI(title="智能财富管家系统")
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    # 周期任务用进程内调度（spec Out of Scope 明确不引入分布式任务队列）。
+    scheduler.start(get_settings())
+    try:
+        yield
+    finally:
+        await scheduler.shutdown()
+
+
+app = FastAPI(title="智能财富管家系统", lifespan=lifespan)
 app.add_middleware(TraceIdMiddleware)
 app.add_middleware(
     CORSMiddleware,
@@ -118,6 +132,7 @@ app.include_router(risk_assessment_router)
 app.include_router(risk_assessment_internal_router)
 app.include_router(customer_profile_router)
 app.include_router(customer_profile_internal_router)
+app.include_router(customer_profile_calibration_router)
 app.include_router(suitability_router)
 app.include_router(suitability_internal_router)
 app.include_router(products_router)

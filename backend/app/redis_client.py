@@ -12,4 +12,9 @@ def _client(url: str) -> redis.Redis:
 
 
 def get_redis() -> Iterator[redis.Redis]:
-    yield _client(get_settings().redis_url)
+    yield redis_client()
+
+
+def redis_client() -> redis.Redis:
+    """请求上下文之外（周期任务）用的客户端。"""
+    return _client(get_settings().redis_url)

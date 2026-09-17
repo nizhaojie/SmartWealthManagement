@@ -15,6 +15,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.dialects.mysql import MEDIUMTEXT
 from sqlalchemy.orm import Mapped, mapped_column
@@ -112,6 +113,10 @@ class ProfileTag(Base):
     evidence_count: Mapped[int] = mapped_column(comment="证据条数")
     observed_at: Mapped[datetime] = mapped_column(DateTime, comment="写入时间")
     reason: Mapped[str | None] = mapped_column(Text, comment="修正理由")
+    # 最近一次校准把它标成过期的结果；新写入或修正过的标签重置为未过期。
+    expired: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=text("0"), comment="是否已过期"
+    )
     create_time: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     update_time: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now(), onupdate=func.now()

@@ -5,6 +5,8 @@ export type ProfileTag = {
   source: string;
   confidence: number;
   observed_at: string;
+  /** 最近一次周期校准把时间衰减后置信度过低的标签标成已过期。 */
+  expired?: boolean;
 };
 
 export type ConflictRecord = {

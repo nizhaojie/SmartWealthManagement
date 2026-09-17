@@ -210,11 +210,14 @@ function submitCorrection() {
         v-for="tag in profile.tags"
         :key="tag.key"
         class="field-card"
-        :class="{ 'is-low': tag.confidence < LOW_CONFIDENCE }"
+        :class="{ 'is-low': tag.confidence < LOW_CONFIDENCE, 'is-expired': tag.expired }"
       >
         <div class="field-card__meta">
           <h3>{{ tag.label }}</h3>
-          <span class="field-card__source">{{ tag.source }}</span>
+          <span class="field-card__source">
+            <span v-if="tag.expired" class="field-card__expired" data-test="tag-expired">已过期</span>
+            {{ tag.source }}
+          </span>
         </div>
         <p class="field-card__value">{{ formatValue(tag.value) }}</p>
         <div class="field-card__confidence">
@@ -427,6 +430,10 @@ function submitCorrection() {
   border-top-color: var(--brass);
 }
 
+.field-card.is-expired {
+  border-top-color: var(--stamp);
+}
+
 .field-card__meta {
   display: flex;
   justify-content: space-between;
@@ -445,6 +452,14 @@ function submitCorrection() {
   font-size: 11px;
   color: var(--signal);
   white-space: nowrap;
+}
+
+.field-card__expired {
+  color: var(--stamp);
+  border: 1px solid currentColor;
+  padding: 0 4px;
+  margin-right: 6px;
+  font-size: 10px;
 }
 
 .field-card__value {

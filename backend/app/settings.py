@@ -79,6 +79,15 @@ class Settings(BaseSettings):
     # 清理的时间基准由调用方显式传入（ADR-0011），这个值只决定保留多久。
     debug_trace_retention_days: int = 30
 
+    # 置信度的周期校准把时间衰减后低于该阈值的画像标签标记为已过期。
+    profile_tag_expiry_threshold: float = 0.4
+    # 周期校准的间隔（分钟），缺省每天一次；进程内调度，不引入分布式任务队列。
+    calibration_interval_minutes: int = 24 * 60
+
+    # 综合重排的场景权重覆盖：{场景: {因子: 权重}}。只给需要调整的场景写值，
+    # 其余场景用 app.customer_profile.rerank 里的缺省表——调整策略不改代码。
+    confidence_rerank_weights: dict[str, dict[str, float]] = {}
+
     # GraphRAG 融合排序权重：综合分 = vector_weight * 向量分 + graph_weight * 图谱分。
     # 两者默认相加为 1，与既有 retrieval_score_threshold 同一量纲，改权重不改代码。
     graphrag_vector_weight: float = 0.6

@@ -203,6 +203,47 @@ describe("ProfilePanel", () => {
     expect(wrapper.text()).toContain("置信度偏低");
   });
 
+  it("renders the confidence the backend decayed for this read, not the value at write time", () => {
+    const wrapper = mountPanel(
+      makeProfile({
+        tags: [
+          {
+            key: "investment_experience",
+            label: "投资经验",
+            value: "0-1年",
+            source: "风评问卷",
+            confidence: 0.31,
+            observed_at: "2022-03-16T09:00:00",
+          },
+        ],
+      }),
+    );
+
+    expect(wrapper.text()).toContain("0.31");
+    expect(wrapper.find("[data-test=profile-warning]").exists()).toBe(true);
+  });
+
+  it("marks a tag the periodic calibration flagged as expired", () => {
+    const wrapper = mountPanel(
+      makeProfile({
+        tags: [
+          {
+            key: "investment_experience",
+            label: "投资经验",
+            value: "0-1年",
+            source: "默认值",
+            confidence: 0,
+            observed_at: "2022-03-16T09:00:00",
+            expired: true,
+          },
+        ],
+      }),
+    );
+
+    expect(wrapper.get("[data-test=tag-expired]").text()).toBe("已过期");
+    expect(wrapper.text()).toContain("0.00");
+  });
+
   it("warns when the risk assessment has expired", () => {
     const wrapper = mountPanel(
       makeProfile({

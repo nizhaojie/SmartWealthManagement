@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { ref } from "vue";
+import { useRouter } from "vue-router";
 import { login } from "./store";
+
+const router = useRouter();
 
 const username = ref("");
 const password = ref("");
@@ -12,6 +15,7 @@ async function onSubmit() {
   submitting.value = true;
   try {
     await login(username.value, password.value);
+    await router.push({ name: "chat" });
   } catch {
     errorMessage.value = "账号或密码错误";
   } finally {

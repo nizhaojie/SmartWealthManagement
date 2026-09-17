@@ -10,7 +10,7 @@ export type ModuleDefinition = {
 
 const ALL_ROLES: EmployeeRole[] = [ADVISOR, RISK_OFFICER, ACCOUNT_MANAGER];
 
-export const MODULES: ModuleDefinition[] = [
+export const MODULES = [
   {
     id: "knowledge",
     path: "/knowledge",
@@ -56,7 +56,9 @@ export const MODULES: ModuleDefinition[] = [
     description: "查看归属客户的基本信息与服务记录。",
     roles: [ACCOUNT_MANAGER],
   },
-];
+] satisfies ModuleDefinition[];
+
+export type ModuleId = (typeof MODULES)[number]["id"];
 
 export function getModule(id: string | undefined): ModuleDefinition | undefined {
   return MODULES.find((module) => module.id === id);
@@ -70,5 +72,7 @@ export function defaultPathFor(role: EmployeeRole | null | undefined): string {
   if (!role) {
     return "/login";
   }
-  return visibleModules(role)[0]?.path ?? "/login";
+  // 登录后落到静态模块导航落地页（先看到全貌），不再直接进第一个可见模块。
+  // 无可见模块的角色由落地页自己的空态说明承接。
+  return "/";
 }

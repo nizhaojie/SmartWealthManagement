@@ -1,6 +1,6 @@
 import ElementPlus from "element-plus";
-import { flushPromises, mount } from "@vue/test-utils";
-import { createMemoryHistory, createRouter } from "vue-router";
+import { flushPromises, mount, type VueWrapper } from "@vue/test-utils";
+import { createMemoryHistory, createRouter, type Router } from "vue-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ACCOUNT_MANAGER, ADVISOR, RISK_OFFICER } from "../auth/identity";
 import { currentEmployee } from "../auth/store";
@@ -45,6 +45,7 @@ function createShellRouter() {
         path: "/",
         component: WorkbenchShell,
         children: [
+          { path: "", name: "landing", component: { template: "<div data-testid=\"landing\" />" } },
           ...MODULES.map((module) => ({
             path: module.path.slice(1),
             name: module.id,
@@ -63,14 +64,18 @@ function createShellRouter() {
   });
 }
 
-async function mountShellAt(initialPath: string, role: string, realName = "某员工") {
+async function mountShellAt(
+  initialPath: string,
+  role: string,
+  realName = "某员工",
+): Promise<{ wrapper: VueWrapper; router: Router }> {
   currentEmployee.value = { real_name: realName, employee_role: role as never };
   const router = createShellRouter();
   await router.push(initialPath);
   await router.isReady();
   const wrapper = mount(WorkbenchShell, { global: { plugins: [ElementPlus, router] } });
   await flushPromises();
-  return wrapper;
+  return { wrapper, router };
 }
 
 describe("WorkbenchShell", () => {
@@ -79,21 +84,21 @@ describe("WorkbenchShell", () => {
   });
 
   it("renders a different set of visible modules per role", async () => {
-    const advisorWrapper = await mountShellAt("/knowledge", ADVISOR);
-    const advisorNav = advisorWrapper.find(".workbench-shell__aside").text();
+    const { wrapper: advisorWrapper } = await mountShellAt("/knowledge", ADVISOR);
+    const advisorNav = advisorWrapper.find("aside").text();
     expect(advisorNav).toContain("投顾助手");
     expect(advisorNav).toContain("客户画像");
     expect(advisorNav).not.toContain("客户关系");
 
-    const riskWrapper = await mountShellAt("/knowledge", RISK_OFFICER);
-    const riskNav = riskWrapper.find(".workbench-shell__aside").text();
+    const { wrapper: riskWrapper } = await mountShellAt("/knowledge", RISK_OFFICER);
+    const riskNav = riskWrapper.find("aside").text();
     expect(riskNav).toContain("风控监测");
     expect(riskNav).not.toContain("投顾助手");
     expect(riskNav).not.toContain("客户画像");
     expect(riskNav).not.toContain("客户关系");
 
-    const managerWrapper = await mountShellAt("/knowledge", ACCOUNT_MANAGER);
-    const managerNav = managerWrapper.find(".workbench-shell__aside").text();
+    const { wrapper: managerWrapper } = await mountShellAt("/knowledge", ACCOUNT_MANAGER);
+    const managerNav = managerWrapper.find("aside").text();
     expect(managerNav).toContain("客户关系");
     expect(managerNav).not.toContain("投顾助手");
     expect(managerNav).not.toContain("客户画像");
@@ -101,8 +106,8 @@ describe("WorkbenchShell", () => {
 
   it("shows the risk module to every role, since advisors and managers need to see their customers' alerts", async () => {
     for (const role of [ADVISOR, RISK_OFFICER, ACCOUNT_MANAGER]) {
-      const wrapper = await mountShellAt("/knowledge", role);
-      expect(wrapper.find(".workbench-shell__aside").text()).toContain("风控监测");
+      const { wrapper } = await mountShellAt("/knowledge", role);
+      expect(wrapper.find("aside").text()).toContain("风控监测");
       wrapper.unmount();
     }
   });
@@ -110,7 +115,7 @@ describe("WorkbenchShell", () => {
   it("shows the logout entry point for every role on every route", async () => {
     for (const role of [ADVISOR, RISK_OFFICER, ACCOUNT_MANAGER]) {
       for (const module of MODULES) {
-        const wrapper = await mountShellAt(module.path, role);
+        const { wrapper } = await mountShellAt(module.path, role);
         const logoutButton = wrapper.find('button[name="logout"]');
         expect(logoutButton.exists()).toBe(true);
         wrapper.unmount();
@@ -119,26 +124,47 @@ describe("WorkbenchShell", () => {
   });
 
   it("renders the placeholder explanation with navigation and logout still present for an unimplemented module", async () => {
-    const wrapper = await mountShellAt("/customer-relations", ACCOUNT_MANAGER);
+    const { wrapper } = await mountShellAt("/customer-relations", ACCOUNT_MANAGER);
 
     expect(wrapper.text()).toContain("该模块尚未实现");
-    expect(wrapper.find(".workbench-shell__aside").exists()).toBe(true);
+    expect(wrapper.find("aside").exists()).toBe(true);
     expect(wrapper.find('button[name="logout"]').exists()).toBe(true);
   });
 
   it("shows the current employee's name and role", async () => {
-    const wrapper = await mountShellAt("/knowledge", ADVISOR, "陈顾问");
+    const { wrapper } = await mountShellAt("/knowledge", ADVISOR, "陈顾问");
 
     expect(wrapper.text()).toContain("陈顾问");
     expect(wrapper.text()).toContain(ADVISOR);
   });
 
   it("shows a breadcrumb for the current module", async () => {
-    const wrapper = await mountShellAt("/risk-monitoring", RISK_OFFICER);
+    const { wrapper } = await mountShellAt("/risk-monitoring", RISK_OFFICER);
 
     const breadcrumb = wrapper.find(".el-breadcrumb");
     expect(breadcrumb.text()).toContain("工作台");
     expect(breadcrumb.text()).toContain("风控监测");
+  });
+
+  it("marks the active module in the sidebar navigation", async () => {
+    const { wrapper } = await mountShellAt("/risk-monitoring", RISK_OFFICER);
+
+    const activeEntry = wrapper.find('aside button[aria-current="page"]');
+    expect(activeEntry.exists()).toBe(true);
+    expect(activeEntry.text()).toContain("风控监测");
+  });
+
+  it("navigates to the target module when its nav entry is clicked", async () => {
+    const { wrapper, router } = await mountShellAt("/knowledge", ADVISOR);
+
+    const advisoryEntry = wrapper
+      .findAll("aside button")
+      .find((button) => button.text() === "投顾助手");
+    expect(advisoryEntry).toBeDefined();
+    await advisoryEntry!.trigger("click");
+    await flushPromises();
+
+    expect(router.currentRoute.value.path).toBe("/advisory");
   });
 
   it("returns to the previous module when the browser back button is used", async () => {

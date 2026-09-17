@@ -5,6 +5,7 @@ import { currentEmployee, isAuthenticated, restoreSession } from "../auth/store"
 import AlertDetailPage from "../risk/AlertDetailPage.vue";
 import WorkOrderDetailPage from "../risk/WorkOrderDetailPage.vue";
 import ModuleView from "../shell/ModuleView.vue";
+import LandingPage from "../shell/LandingPage.vue";
 import { defaultPathFor, MODULES } from "../shell/modules";
 import WorkbenchShell from "../shell/WorkbenchShell.vue";
 
@@ -47,7 +48,13 @@ const routes: RouteRecordRaw[] = [
   {
     path: "/",
     component: WorkbenchShell,
-    children: [...moduleRoutes, advisoryReviewRoute, riskAlertRoute, riskWorkOrderRoute],
+    children: [
+      { path: "", name: "landing", component: LandingPage },
+      ...moduleRoutes,
+      advisoryReviewRoute,
+      riskAlertRoute,
+      riskWorkOrderRoute,
+    ],
   },
 ];
 
@@ -82,5 +89,5 @@ router.beforeEach(async (to) => {
   if (!isAuthenticated.value) {
     return { path: "/login" };
   }
-  return to.path === "/" ? defaultRedirect() : true;
+  return true;
 });

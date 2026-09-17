@@ -55,14 +55,16 @@ describe("App", () => {
     expect(wrapper.text()).toContain("员工登录");
   });
 
-  it("shows the workbench shell with the employee's identity after a successful login", async () => {
+  it("shows the landing page with the employee's identity after a successful login", async () => {
     vi.mocked(loginRequest).mockResolvedValue({ access_token: "access-token", refresh_token: "refresh-token" });
     vi.mocked(fetchCurrentEmployee).mockResolvedValue({ real_name: "陈顾问", employee_role: "理财顾问" });
     const wrapper = mountApp();
 
     await submitLogin(wrapper, "advisor1", "Test@1234");
 
-    expect(router.currentRoute.value.path).toBe("/knowledge");
+    expect(router.currentRoute.value.path).toBe("/");
+    expect(wrapper.text()).toContain("请选择一个模块开始工作");
+    expect(wrapper.text()).toContain("投顾助手");
     expect(wrapper.text()).toContain("陈顾问");
     expect(wrapper.text()).toContain("理财顾问");
   });
@@ -82,7 +84,7 @@ describe("App", () => {
     vi.mocked(fetchCurrentEmployee).mockResolvedValue({ real_name: "陈顾问", employee_role: "理财顾问" });
     const wrapper = mountApp();
     await submitLogin(wrapper, "advisor1", "Test@1234");
-    expect(router.currentRoute.value.path).toBe("/knowledge");
+    expect(router.currentRoute.value.path).toBe("/");
 
     clearTokens();
     await flushPromises();

@@ -8,6 +8,8 @@
 :root {
   /* 品牌 */
   --wm-color-primary: #1f6feb;
+  /* 主色淡染底(10% 主色混白):侧边导航激活项、入口卡片图标底座等浅色底 */
+  --wm-color-primary-tint: color-mix(in srgb, var(--wm-color-primary) 10%, white);
 
   /* 涨跌：红涨绿跌（中国金融惯例）。与 success/danger 同值但独立命名，保留分叉余地 */
   --wm-color-up: #c81e1e;

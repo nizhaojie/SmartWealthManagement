@@ -14,6 +14,9 @@ importers:
 
   apps/customer:
     dependencies:
+      '@element-plus/icons-vue':
+        specifier: ^2.3.1
+        version: 2.3.2(vue@3.5.42(typescript@5.9.3))
       '@wealth/shared':
         specifier: workspace:*
         version: link:../../packages/shared
@@ -23,6 +26,9 @@ importers:
       vue:
         specifier: ^3.5.21
         version: 3.5.42(typescript@5.9.3)
+      vue-router:
+        specifier: ^4.5.1
+        version: 4.6.4(vue@3.5.42(typescript@5.9.3))
     devDependencies:
       '@vitejs/plugin-vue':
         specifier: ^6.0.1
@@ -48,6 +54,9 @@ importers:
 
   apps/internal:
     dependencies:
+      '@element-plus/icons-vue':
+        specifier: ^2.3.1
+        version: 2.3.2(vue@3.5.42(typescript@5.9.3))
       '@wealth/shared':
         specifier: workspace:*
         version: link:../../packages/shared
@@ -92,6 +101,15 @@ importers:
         specifier: ^3.5.21
         version: 3.5.42(typescript@5.9.3)
     devDependencies:
+      '@vitejs/plugin-vue':
+        specifier: ^6.0.1
+        version: 6.0.8(vite@7.3.6)(vue@3.5.42(typescript@5.9.3))
+      '@vue/test-utils':
+        specifier: ^2.4.6
+        version: 2.5.0(@vue/compiler-dom@3.5.42)(@vue/server-renderer@3.5.42)(vue@3.5.42(typescript@5.9.3))
+      jsdom:
+        specifier: ^27.0.0
+        version: 27.4.0(supports-color@8.1.1)
       typescript:
         specifier: ~5.9.2
         version: 5.9.3

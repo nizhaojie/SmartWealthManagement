@@ -1,3 +1,4 @@
+import time
 from dataclasses import dataclass
 from typing import TypedDict
 
@@ -6,15 +7,21 @@ from langgraph.graph import END, StateGraph
 from neo4j import Driver
 from sqlalchemy.orm import Session
 
-from app.agent import archive, memory
+from app.agent import archive, debug_trace, memory
 from app.agent.citations import Citation, build_citations
 from app.agent.config import CUSTOMER_SERVICE_CONFIG
 from app.agent.fusion import fuse_and_rank
 from app.agent.intent import RETRIEVAL_INTENTS, Intent, classify_intent
 from app.knowledge.service import ChunkResult, search_chunks
 from app.knowledge_graph.graphrag import augment_with_graph
-from app.llm.provider import generate_chitchat_reply, generate_grounded_answer
+from app.llm.provider import (
+    build_chitchat_messages,
+    build_grounded_messages,
+    generate_chitchat_reply,
+    generate_grounded_answer,
+)
 from app.settings import Settings
+from app.tracing import get_trace_id
 
 
 def fallback_message(settings: Settings) -> str:
@@ -36,6 +43,9 @@ class AgentState(TypedDict, total=False):
     tool_calls: list[dict]
     answer: str
     citations: list[Citation]
+    # 真正送进（或本该送进）模型的完整提示词。只有会调用模型的节点会写它：
+    # 兜底与转人工是固定的脚本，不产生提示词，所以留痕里这一项为空。
+    prompt: list[dict]
 
 
 @dataclass
@@ -96,13 +106,20 @@ def _build_graph(db: Session, settings: Settings, driver: Driver, graph_namespac
         chunks = state["chunks"]
         result = generate_grounded_answer(state["question"], state["history"], chunks, settings)
         citations = build_citations(chunks, result.cited_chunk_numbers)
-        return {"answer": result.text, "citations": citations}
+        # 提示词在这里按同一纯函数再拼一次，而不是从模型结果里取：留痕不该依赖
+        # provider 有没有回传提示词，换掉 provider（或测试里打了桩）也不该丢这条。
+        prompt = build_grounded_messages(state["question"], state["history"], chunks)
+        return {"answer": result.text, "citations": citations, "prompt": prompt}
 
     def fallback_node(state: AgentState) -> dict:
         return {"answer": fallback_message(settings), "citations": []}
 
     def chitchat_node(state: AgentState) -> dict:
-        return {"answer": generate_chitchat_reply(state["question"], settings), "citations": []}
+        return {
+            "answer": generate_chitchat_reply(state["question"], settings),
+            "citations": [],
+            "prompt": build_chitchat_messages(state["question"]),
+        }
 
     def handoff_node(state: AgentState) -> dict:
         return {"answer": handoff_message(settings), "citations": []}
@@ -148,6 +165,22 @@ def _build_graph(db: Session, settings: Settings, driver: Driver, graph_namespac
     return graph.compile()
 
 
+def _serialize_snippets(chunks: list[ChunkResult]) -> list[dict]:
+    return [
+        {
+            "knowledge_id": chunk.knowledge_id,
+            "chunk_index": chunk.chunk_index,
+            "heading_path": chunk.heading_path,
+            "content": chunk.content,
+            "score": chunk.score,
+            "source": chunk.source,
+            "title": chunk.title,
+            "source_file": chunk.source_file,
+        }
+        for chunk in chunks
+    ]
+
+
 def run_customer_service_turn(
     db: Session,
     cache: redis.Redis,
@@ -160,9 +193,11 @@ def run_customer_service_turn(
 ) -> ChatTurnResult:
     history = memory.get_history(cache, session_id)
     graph = _build_graph(db, settings, driver, settings.neo4j_graph_namespace)
+    started = time.monotonic()
     final_state: AgentState = graph.invoke(
         {"question": question, "history": history, "tool_calls": []}
     )
+    duration_ms = int((time.monotonic() - started) * 1000)
 
     answer = final_state["answer"]
     citations = final_state.get("citations", [])
@@ -182,6 +217,18 @@ def run_customer_service_turn(
         citations=citations,
         tool_calls=tool_calls,
         content_classification=content_classification,
+    )
+
+    # 调试级留痕与审计级留痕同回合各写各的：审计级永久保存，这一条到期会被清理。
+    debug_trace.record(
+        db,
+        trace_id=get_trace_id(),
+        agent_type=CUSTOMER_SERVICE_CONFIG.name,
+        session_id=session_id,
+        user_id=user_id,
+        prompt=final_state.get("prompt"),
+        retrieval_snippets=_serialize_snippets(final_state.get("chunks", [])),
+        duration_ms=duration_ms,
     )
 
     return ChatTurnResult(

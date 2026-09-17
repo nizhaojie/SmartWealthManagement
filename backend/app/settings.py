@@ -75,6 +75,10 @@ class Settings(BaseSettings):
     chat_memory_token_budget: int = 2000
     human_service_channel: str = "95588"
 
+    # 调试级留痕的保留期（天）。期满后清理任务删除它们，审计级留痕不受影响。
+    # 清理的时间基准由调用方显式传入（ADR-0011），这个值只决定保留多久。
+    debug_trace_retention_days: int = 30
+
     # GraphRAG 融合排序权重：综合分 = vector_weight * 向量分 + graph_weight * 图谱分。
     # 两者默认相加为 1，与既有 retrieval_score_threshold 同一量纲，改权重不改代码。
     graphrag_vector_weight: float = 0.6

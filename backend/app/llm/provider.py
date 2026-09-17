@@ -29,6 +29,31 @@ class GroundedAnswer:
     cited_chunk_numbers: list[int] = field(default_factory=list)
 
 
+def build_grounded_messages(
+    question: str, history: list[dict], chunks: list[ChunkResult]
+) -> list[dict]:
+    """组装送进模型的完整提示词：系统约束 + 会话历史 + 带编号的检索片段与问题。
+
+    抽成公开的纯函数，好让调用方在写调试级留痕时取到与真正送进模型一致的那份提示词，
+    而不是另拼一份近似的。
+    """
+    numbered_chunks = "\n".join(
+        f"[{index}] {chunk.content}" for index, chunk in enumerate(chunks, start=1)
+    )
+    return [
+        {"role": "system", "content": GROUNDED_SYSTEM_PROMPT},
+        *history,
+        {"role": "user", "content": f"检索片段：\n{numbered_chunks}\n\n问题：{question}"},
+    ]
+
+
+def build_chitchat_messages(question: str) -> list[dict]:
+    return [
+        {"role": "system", "content": CHITCHAT_SYSTEM_PROMPT},
+        {"role": "user", "content": question},
+    ]
+
+
 def generate_grounded_answer(
     question: str,
     history: list[dict],
@@ -37,13 +62,14 @@ def generate_grounded_answer(
 ) -> GroundedAnswer:
     if settings.resolved_llm_provider == "fake":
         return _fake_grounded_answer(chunks)
-    return _openai_compatible_grounded_answer(question, history, chunks, settings)
+    messages = build_grounded_messages(question, history, chunks)
+    return _openai_compatible_grounded_answer(messages, settings)
 
 
 def generate_chitchat_reply(question: str, settings: Settings) -> str:
     if settings.resolved_llm_provider == "fake":
         return _fake_chitchat_reply()
-    return _openai_compatible_chitchat_reply(question, settings)
+    return _openai_compatible_chitchat_reply(build_chitchat_messages(question), settings)
 
 
 def _fake_grounded_answer(chunks: list[ChunkResult]) -> GroundedAnswer:
@@ -83,19 +109,8 @@ def chat_completion(messages: list[dict], settings: Settings) -> str:
 
 
 def _openai_compatible_grounded_answer(
-    question: str,
-    history: list[dict],
-    chunks: list[ChunkResult],
-    settings: Settings,
+    messages: list[dict], settings: Settings
 ) -> GroundedAnswer:
-    numbered_chunks = "\n".join(
-        f"[{index}] {chunk.content}" for index, chunk in enumerate(chunks, start=1)
-    )
-    messages = [
-        {"role": "system", "content": GROUNDED_SYSTEM_PROMPT},
-        *history,
-        {"role": "user", "content": f"检索片段：\n{numbered_chunks}\n\n问题：{question}"},
-    ]
     content = chat_completion(messages, settings)
     try:
         parsed = json.loads(content)
@@ -107,9 +122,5 @@ def _openai_compatible_grounded_answer(
         return GroundedAnswer(text=content, cited_chunk_numbers=[])
 
 
-def _openai_compatible_chitchat_reply(question: str, settings: Settings) -> str:
-    messages = [
-        {"role": "system", "content": CHITCHAT_SYSTEM_PROMPT},
-        {"role": "user", "content": question},
-    ]
+def _openai_compatible_chitchat_reply(messages: list[dict], settings: Settings) -> str:
     return chat_completion(messages, settings)

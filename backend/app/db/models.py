@@ -747,6 +747,36 @@ class ConversationArchive(Base):
     create_time: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 
+class AgentDebugTrace(Base):
+    """调试级留痕：完整提示词、原始检索片段、token 与耗时明细。
+
+    与 `conversation_archive`（审计级）是**两张表**而不是同一张表里的可空列——审计级
+    永久保存，调试级保留期满后按 ADR-0011 的显式时间基准清理。两张表分开，清理就
+    不可能误伤审计级记录，这一点由表结构保证而不是由 WHERE 条件的措辞保证。
+    """
+
+    __tablename__ = "agent_debug_trace"
+    __table_args__ = (
+        Index("ix_agent_debug_trace_trace_id", "trace_id"),
+        Index("ix_agent_debug_trace_session_id", "session_id"),
+        # 清理按 create_time 扫，索引让「删掉保留期之前的那批」不必全表扫。
+        Index("ix_agent_debug_trace_create_time", "create_time"),
+        {"comment": "调试级留痕"},
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    trace_id: Mapped[str] = mapped_column(String(64), comment="贯穿全链路的追踪标识")
+    session_id: Mapped[str | None] = mapped_column(String(64), comment="会话标识")
+    user_id: Mapped[int | None] = mapped_column(BigInteger, comment="使用者标识")
+    agent_type: Mapped[str] = mapped_column(String(32), comment="Agent")
+    prompt: Mapped[list | None] = mapped_column(JSON, comment="完整提示词（按角色分条）")
+    retrieval_snippets: Mapped[list | None] = mapped_column(JSON, comment="原始检索片段")
+    prompt_tokens: Mapped[int | None] = mapped_column(comment="输入 token 数")
+    completion_tokens: Mapped[int | None] = mapped_column(comment="输出 token 数")
+    duration_ms: Mapped[int | None] = mapped_column(comment="耗时（毫秒）")
+    create_time: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
 class AnalyticsQueryAudit(Base):
     __tablename__ = "biz_analytics_query_audit"
     __table_args__ = (

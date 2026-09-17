@@ -29,6 +29,7 @@ from app.api.risk_query import router as risk_query_router
 from app.api.risk_rules import router as risk_rules_router
 from app.api.suitability import internal_router as suitability_internal_router
 from app.api.suitability import router as suitability_router
+from app.api.traces import router as traces_router
 from app.api.transaction_events import router as transaction_events_router
 from app.api.work_orders import router as work_orders_router
 from app.exceptions import AppError
@@ -133,3 +134,4 @@ app.include_router(transaction_events_router)
 app.include_router(risk_alerts_router)
 app.include_router(risk_query_router)
 app.include_router(work_orders_router)
+app.include_router(traces_router)

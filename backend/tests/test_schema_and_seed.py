@@ -21,6 +21,7 @@ EXPECTED_TABLES = {
     "fin_risk_rule_change",
     "biz_work_order",
     "conversation_archive",
+    "agent_debug_trace",
     "fin_knowledge_meta",
 }
 

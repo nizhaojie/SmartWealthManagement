@@ -5,6 +5,8 @@ import type {
   AlertLevel,
   AlertStatus,
   AlertSummary,
+  FocusType,
+  RiskFocus,
   RiskRule,
   WorkOrder,
   WorkOrderDetail,
@@ -80,6 +82,10 @@ export function closeWorkOrder(
   input: { reason: string; conclusion: string },
 ): Promise<WorkOrder> {
   return http.post<WorkOrder>(`/api/internal/work-orders/${workOrderId}/close`, input);
+}
+
+export function listRiskFocus(focusType?: FocusType): Promise<RiskFocus[]> {
+  return http.get<RiskFocus[]>(`/api/internal/risk-focus${query({ focus_type: focusType })}`);
 }
 
 export function listRiskRules(): Promise<RiskRule[]> {

@@ -9,6 +9,7 @@ import { currentEmployee } from "../auth/store";
 import {
   askRiskQuestion,
   listAlerts,
+  listRiskFocus,
   listRiskQueryExamples,
   listRiskRules,
   listWorkOrders,
@@ -18,6 +19,7 @@ import {
   ALERT_SORT_OPTIONS,
   confidenceText,
   errorMessage,
+  focusSourceLabel,
   formatDateTime,
   levelTagType,
   sortAlerts,
@@ -28,10 +30,13 @@ import {
 import {
   ALERT_LEVELS,
   ALERT_STATUSES,
+  FOCUS_TYPES,
   WORK_ORDER_STATUSES,
   type AlertLevel,
   type AlertStatus,
   type AlertSummary,
+  type FocusType,
+  type RiskFocus,
   type RiskRule,
   type WorkOrder,
   type WorkOrderStatus,
@@ -59,6 +64,12 @@ const workOrderStatusFilter = ref<WorkOrderStatus | "">("");
 
 const rules = ref<RiskRule[]>([]);
 const ruleError = ref("");
+
+// 风险关注：其他 Agent 通过事件总线提醒过来的东西。列表只读——记录是订阅方在
+// 收到广播时写下的，界面既不新增也不修改它；要处置就去派生或流转工单。
+const focus = ref<RiskFocus[]>([]);
+const focusError = ref("");
+const focusTypeFilter = ref<FocusType | "">("");
 
 // 自然语言查询：风控专员问「今天有哪些高风险预警」，不必自己组合筛选条件。
 // 问句由风控监测 Agent 转成对预警语义视图的查询；模型只把结果讲成人话，
@@ -139,6 +150,16 @@ async function loadRules() {
   }
 }
 
+async function loadFocus() {
+  focusError.value = "";
+  try {
+    focus.value = await listRiskFocus(focusTypeFilter.value || undefined);
+  } catch (error) {
+    focus.value = [];
+    focusError.value = errorMessage(error, "加载风险关注失败");
+  }
+}
+
 async function loadQueryExamples() {
   try {
     queryExamples.value = await listRiskQueryExamples();
@@ -176,10 +197,12 @@ function openWorkOrder(workOrderId: number) {
 
 watch([levelFilter, statusFilter, dateRange], loadAlerts);
 watch(workOrderStatusFilter, loadWorkOrders);
+watch(focusTypeFilter, loadFocus);
 
 onMounted(() => {
   void loadAlerts();
   void loadWorkOrders();
+  void loadFocus();
   void loadRules();
   void loadQueryExamples();
 });
@@ -357,6 +380,59 @@ onMounted(() => {
               >
                 处置
               </el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+      </el-tab-pane>
+
+      <el-tab-pane label="风险关注" name="focus">
+        <div class="risk-monitoring__filters" data-test="focus-filters">
+          <el-select
+            v-model="focusTypeFilter"
+            placeholder="按类型筛选"
+            clearable
+            data-test="focus-type-filter"
+            style="width: 160px"
+          >
+            <el-option
+              v-for="focusType in FOCUS_TYPES"
+              :key="focusType"
+              :label="focusType"
+              :value="focusType"
+            />
+          </el-select>
+        </div>
+
+        <p v-if="focusError" role="alert" class="risk-monitoring__error" data-test="focus-error">
+          {{ focusError }}
+        </p>
+
+        <el-empty
+          v-if="!focus.length"
+          description="暂无风险关注"
+          data-test="focus-empty"
+        />
+        <el-table v-else :data="focus" data-test="focus-table">
+          <el-table-column label="时间" width="180">
+            <template #default="{ row }: { row: RiskFocus }">
+              {{ formatDateTime(row.occurred_at) }}
+            </template>
+          </el-table-column>
+          <el-table-column prop="customer_name" label="客户" width="110" />
+          <el-table-column label="类型" width="120">
+            <template #default="{ row }: { row: RiskFocus }">
+              <el-tag data-test="focus-type">{{ row.focus_type }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="等级" width="90">
+            <template #default="{ row }: { row: RiskFocus }">
+              {{ row.severity ?? "—" }}
+            </template>
+          </el-table-column>
+          <el-table-column prop="reason" label="理由" min-width="240" />
+          <el-table-column label="来源" width="160">
+            <template #default="{ row }: { row: RiskFocus }">
+              <span data-test="focus-source">{{ focusSourceLabel(row.source) }}</span>
             </template>
           </el-table-column>
         </el-table>

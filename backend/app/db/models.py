@@ -470,6 +470,36 @@ class RiskAlert(Base):
     )
 
 
+class RiskFocus(Base):
+    """风险关注：一个 Agent 注意到某位客户有风险，留给其他 Agent 的提示记录。
+
+    它既不是预警（规则命中的事实记录），也不是工单（处置流程的载体），而是一条
+    订阅留痕：发布方广播「发生了什么」，订阅方各自记下自己要的那一份，因此同一件
+    事可能产生多条方向不同的记录。字段与 `app.risk_focus` 一一对应。
+
+    不存原始事件载荷：记录只留读取方要看的那几样，广播不是数据通道，需要完整追溯
+    时回到权威来源。理由见 `app.risk_focus` 的模块说明。
+    """
+
+    __tablename__ = "biz_risk_focus"
+    __table_args__ = (
+        Index("ix_risk_focus_customer_id", "customer_id"),
+        {"comment": "风险关注"},
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    customer_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("sys_customer.id"), comment="客户标识"
+    )
+    focus_type: Mapped[str] = mapped_column(String(32), comment="关注类型")
+    severity: Mapped[str | None] = mapped_column(String(8), comment="等级；无等级时为空")
+    reason: Mapped[str] = mapped_column(Text, comment="关注理由")
+    source: Mapped[str] = mapped_column(String(32), comment="事件来源 Agent")
+    trace_id: Mapped[str | None] = mapped_column(String(64), comment="追踪标识")
+    occurred_at: Mapped[datetime] = mapped_column(DateTime, comment="事件发生时间")
+    create_time: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
 class WorkOrder(Base):
     """工单：处置某一事项的流程载体（CONTEXT「工单」）。
 

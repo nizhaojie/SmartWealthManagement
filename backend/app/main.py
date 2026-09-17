@@ -27,6 +27,7 @@ from app.api.risk_alerts import router as risk_alerts_router
 from app.api.risk_assessment import internal_router as risk_assessment_internal_router
 from app.api.risk_assessment import router as risk_assessment_router
 from app.api.products import router as products_router
+from app.api.risk_focus import router as risk_focus_router
 from app.api.risk_query import router as risk_query_router
 from app.api.risk_rules import router as risk_rules_router
 from app.api.suitability import internal_router as suitability_internal_router
@@ -148,5 +149,6 @@ app.include_router(risk_rules_router)
 app.include_router(transaction_events_router)
 app.include_router(risk_alerts_router)
 app.include_router(risk_query_router)
+app.include_router(risk_focus_router)
 app.include_router(work_orders_router)
 app.include_router(traces_router)

@@ -7,7 +7,7 @@
 app.advisory.runtime 的 checkpointer 承接，不是自己实现的状态机。
 """
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import TypedDict
 
 import redis
@@ -16,6 +16,7 @@ from langgraph.types import interrupt
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app import risk_focus
 from app.advisory.allocation import suggest_allocation
 from app.advisory.concentration import concentration_warnings
 from app.advisory.draft import DraftContent, record_draft
@@ -29,7 +30,11 @@ from app.advisory.review_status import (
 )
 from app.advisory.runtime import ADVISORY_CHECKPOINTER
 from app.advisory.scoring import TERM_HORIZON_DAYS, CandidateInput, rank_candidates
-from app.advisory.warnings import profile_warnings
+from app.advisory.warnings import (
+    RISK_FOCUS_LOOKBACK_DAYS,
+    profile_warnings,
+    risk_focus_warnings,
+)
 from app.agent.config import ADVISORY_CONFIG
 from app.customer_assets.look_through import portfolio_industry_exposure
 from app.customer_assets.service import list_held_product_codes
@@ -139,6 +144,18 @@ def build_graph(db: Session, cache: redis.Redis):
         found = profile_warnings(tags=profile["tags"], computed_at=computed_at, now=state["now"])
         exposure = portfolio_industry_exposure(db, customer_id=state["customer_id"])
         found = found + concentration_warnings(exposure)
+        # 风控预警带来的风险标记：订阅方在广播到达时写下的关注记录，这里只读。
+        # 广播漏了就是少一条提示，方案照常生成——协作是增强，不是前置条件。
+        focuses = [
+            risk_focus.focus_facts(row)
+            for row in risk_focus.recent_for_customer(
+                db,
+                customer_id=state["customer_id"],
+                focus_type=risk_focus.FOCUS_RISK_ALERT,
+                since=state["now"] - timedelta(days=RISK_FOCUS_LOOKBACK_DAYS),
+            )
+        ]
+        found = found + risk_focus_warnings(focuses)
         return {"warnings": found}
 
     def persist_draft_node(state: AdvisoryState) -> dict:

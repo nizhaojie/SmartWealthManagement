@@ -1,6 +1,7 @@
 import json
 import logging
 from collections.abc import Generator
+from datetime import datetime, timezone
 
 import redis
 from fastapi import APIRouter, Depends
@@ -12,6 +13,7 @@ from app.agent.graph import run_customer_service_turn
 from app.agent.schemas import ChatRequest, ChatResponse, CitationResponse
 from app.auth.dependencies import AuthContext, require_customer
 from app.db.session import get_session
+from app.event_bus import EventPublisher, get_event_publisher
 from app.http import ok
 from app.neo4j_client import get_neo4j
 from app.redis_client import get_redis
@@ -24,6 +26,10 @@ logger = logging.getLogger("app")
 SSE_MEDIA_TYPE = "text/event-stream"
 
 
+def _now() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
 def _run_turn(
     body: ChatRequest,
     db: Session,
@@ -31,15 +37,20 @@ def _run_turn(
     settings: Settings,
     auth: AuthContext,
     driver: Driver,
+    publisher: EventPublisher,
 ) -> ChatResponse:
     result = run_customer_service_turn(
         db,
         cache,
         settings,
         driver=driver,
+        publisher=publisher,
         session_id=auth.session_id,
         user_id=auth.subject_id,
         question=body.message,
+        # 时间基准在入口取一次并传下去（ADR-0011）：回合内产生的事件时刻要一致，
+        # 测试也要能把它固定住。
+        now=_now(),
     )
     return ChatResponse(
         answer=result.answer,
@@ -60,8 +71,9 @@ def send_message(
     settings: Settings = Depends(get_settings),
     auth: AuthContext = Depends(require_customer),
     driver: Driver = Depends(get_neo4j),
+    publisher: EventPublisher = Depends(get_event_publisher),
 ):
-    return ok(_run_turn(body, db, cache, settings, auth, driver).model_dump())
+    return ok(_run_turn(body, db, cache, settings, auth, driver, publisher).model_dump())
 
 
 def _sse_frame(data: dict, *, event: str | None = None) -> str:
@@ -89,6 +101,7 @@ def stream_message(
     settings: Settings = Depends(get_settings),
     auth: AuthContext = Depends(require_customer),
     driver: Driver = Depends(get_neo4j),
+    publisher: EventPublisher = Depends(get_event_publisher),
 ):
-    response = _run_turn(body, db, cache, settings, auth, driver)
+    response = _run_turn(body, db, cache, settings, auth, driver, publisher)
     return StreamingResponse(_stream_chat_response(response), media_type=SSE_MEDIA_TYPE)

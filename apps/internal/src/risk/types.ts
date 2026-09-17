@@ -104,6 +104,24 @@ export type AlertDetail = {
   work_order: WorkOrder | null;
 };
 
+// 风险关注：其他 Agent 提醒过来的东西（CONTEXT「风险关注」）。它不是预警（规则
+// 命中的事实记录），也不是工单（处置流程的载体），而是「谁在什么时候因为什么提醒了
+// 谁」的留痕；要处置就另开工单，不在这一行上流转。
+export const FOCUS_TYPES = ["风控预警", "高风险意图"] as const;
+export type FocusType = (typeof FOCUS_TYPES)[number];
+
+export type RiskFocus = {
+  id: number;
+  customer_id: number;
+  customer_name: string;
+  focus_type: FocusType;
+  severity: AlertLevel | null;
+  reason: string;
+  source: string;
+  trace_id: string | null;
+  occurred_at: string;
+};
+
 export type WorkOrder = {
   id: number;
   work_order_no: string;

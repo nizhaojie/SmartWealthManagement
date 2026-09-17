@@ -1,5 +1,6 @@
 import time
 from dataclasses import dataclass
+from datetime import datetime
 from typing import TypedDict
 
 import redis
@@ -12,6 +13,14 @@ from app.agent.citations import Citation, build_citations
 from app.agent.config import CUSTOMER_SERVICE_CONFIG
 from app.agent.fusion import fuse_and_rank
 from app.agent.intent import RETRIEVAL_INTENTS, Intent, classify_intent
+from app.agent.risk_intent import detect_risk_intent
+from app.event_bus import (
+    EVENT_RISK_INTENT_DETECTED,
+    SOURCE_CUSTOMER_SERVICE,
+    Event,
+    EventPublisher,
+    publish_safely,
+)
 from app.knowledge.service import ChunkResult, search_chunks
 from app.knowledge_graph.graphrag import augment_with_graph
 from app.llm.provider import (
@@ -181,15 +190,54 @@ def _serialize_snippets(chunks: list[ChunkResult]) -> list[dict]:
     ]
 
 
+def _publish_risk_intent(
+    publisher: EventPublisher,
+    *,
+    customer_id: int,
+    session_id: str,
+    question: str,
+    history: list[dict],
+    now: datetime,
+) -> None:
+    """察觉高风险意图就广播一条事件。
+
+    广播失败只记日志（`publish_safely` 的用意）：回答已经生成，不会因为风控那边
+    没收到而变成一次错误——协作是增强。载荷只带判定结论，不带问题原文。
+
+    事件时刻由调用方传入（ADR-0011），不在内部读时钟：这条时刻会落成关注记录的
+    `occurred_at`，进而决定投顾端风险标记的时间窗，它得能被测试固定住。
+    """
+    signal = detect_risk_intent(question, history=history)
+    if signal is None:
+        return
+    publish_safely(
+        publisher,
+        Event(
+            event_type=EVENT_RISK_INTENT_DETECTED,
+            source=SOURCE_CUSTOMER_SERVICE,
+            payload={
+                "customer_id": customer_id,
+                "session_id": session_id,
+                "intent_code": signal.code,
+                "reason": signal.reason,
+            },
+            occurred_at=now,
+            trace_id=get_trace_id(),
+        ),
+    )
+
+
 def run_customer_service_turn(
     db: Session,
     cache: redis.Redis,
     settings: Settings,
     *,
     driver: Driver,
+    publisher: EventPublisher,
     session_id: str,
     user_id: int,
     question: str,
+    now: datetime,
 ) -> ChatTurnResult:
     history = memory.get_history(cache, session_id)
     graph = _build_graph(db, settings, driver, settings.neo4j_graph_namespace)
@@ -233,6 +281,16 @@ def run_customer_service_turn(
         prompt_tokens=token_usage.prompt_tokens if token_usage else None,
         completion_tokens=token_usage.completion_tokens if token_usage else None,
         duration_ms=duration_ms,
+    )
+
+    # 留痕之后再广播：本次对话对使用者的价值已经确定，订阅方收不收到都不改变它。
+    _publish_risk_intent(
+        publisher,
+        customer_id=user_id,
+        session_id=session_id,
+        question=question,
+        history=history,
+        now=now,
     )
 
     return ChatTurnResult(

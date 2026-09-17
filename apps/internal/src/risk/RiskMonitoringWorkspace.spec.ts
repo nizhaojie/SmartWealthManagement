@@ -6,11 +6,12 @@ import { ApiError } from "@wealth/shared";
 import type { AnalyticsQueryResponse } from "../analytics/types";
 import { ADVISOR, RISK_OFFICER } from "../auth/identity";
 import { currentEmployee } from "../auth/store";
-import type { AlertSummary, RiskRule, WorkOrder } from "./types";
+import type { AlertSummary, RiskFocus, RiskRule, WorkOrder } from "./types";
 
 const {
   listAlerts,
   listWorkOrders,
+  listRiskFocus,
   listRiskRules,
   setRiskRuleEnabled,
   askRiskQuestion,
@@ -18,6 +19,7 @@ const {
 } = vi.hoisted(() => ({
   listAlerts: vi.fn(),
   listWorkOrders: vi.fn(),
+  listRiskFocus: vi.fn(),
   listRiskRules: vi.fn(),
   setRiskRuleEnabled: vi.fn(),
   askRiskQuestion: vi.fn(),
@@ -27,6 +29,7 @@ const {
 vi.mock("./api", () => ({
   listAlerts,
   listWorkOrders,
+  listRiskFocus,
   listRiskRules,
   setRiskRuleEnabled,
   askRiskQuestion,
@@ -72,6 +75,21 @@ function makeWorkOrder(overrides: Partial<WorkOrder> = {}): WorkOrder {
     handle_result: null,
     created_at: "2026-09-17T09:30:00",
     updated_at: "2026-09-17T09:30:00",
+    ...overrides,
+  };
+}
+
+function makeFocus(overrides: Partial<RiskFocus> = {}): RiskFocus {
+  return {
+    id: 5,
+    customer_id: 11,
+    customer_name: "王守成",
+    focus_type: "高风险意图",
+    severity: null,
+    reason: "客服识别到高风险意图：反复打听转账限额规避方式",
+    source: "customer-service-agent",
+    trace_id: "trace-1",
+    occurred_at: "2026-09-17T09:10:00",
     ...overrides,
   };
 }
@@ -153,6 +171,7 @@ describe("RiskMonitoringWorkspace", () => {
   beforeEach(() => {
     listAlerts.mockReset().mockResolvedValue([]);
     listWorkOrders.mockReset().mockResolvedValue([]);
+    listRiskFocus.mockReset().mockResolvedValue([]);
     listRiskRules.mockReset().mockResolvedValue([]);
     setRiskRuleEnabled.mockReset();
     askRiskQuestion.mockReset();
@@ -412,5 +431,58 @@ describe("RiskMonitoringWorkspace", () => {
 
     expect(wrapper.get('[data-test="risk-query-failure"]').text()).toContain("问题超出可查范围");
     expect(wrapper.find('[data-test="result-table"]').exists()).toBe(false);
+  });
+
+  it("lists what the other agents flagged, in a wording a risk officer reads", async () => {
+    listRiskFocus.mockResolvedValue([
+      makeFocus(),
+      makeFocus({
+        id: 6,
+        focus_type: "风控预警",
+        severity: "重度",
+        reason: "风控预警（重度）：命中规则 R001、R019",
+        source: "risk-monitoring-agent",
+      }),
+    ]);
+
+    const { wrapper } = await mountWorkspace();
+    const table = wrapper.get('[data-test="focus-table"]').text();
+
+    expect(table).toContain("王守成");
+    expect(table).toContain("高风险意图");
+    expect(table).toContain("反复打听转账限额");
+    expect(table).toContain("智能客服 Agent");
+    // 等级只对预警有意义，意图那一条显示占位符而不是空单元格。
+    expect(wrapper.get('[data-test="focus-table"]').text()).toContain("重度");
+  });
+
+  it("re-queries the backend when the focus type filter is picked", async () => {
+    listRiskFocus.mockResolvedValue([makeFocus()]);
+    const { wrapper } = await mountWorkspace();
+
+    const [typeSelect] = wrapper
+      .get('[data-test="focus-filters"]')
+      .findAllComponents({ name: "ElSelect" });
+    await typeSelect.setValue("风控预警");
+    await flushPromises();
+
+    expect(listRiskFocus).toHaveBeenLastCalledWith("风控预警");
+  });
+
+  it("renders an empty state when no agent has flagged anything", async () => {
+    const { wrapper } = await mountWorkspace();
+
+    expect(wrapper.get('[data-test="focus-empty"]').text()).toContain("暂无风险关注");
+    expect(wrapper.find('[data-test="focus-table"]').exists()).toBe(false);
+  });
+
+  it("shows the backend's message when the focus list cannot be loaded", async () => {
+    listRiskFocus.mockRejectedValue(
+      new ApiError({ code: 500, message: "服务内部错误", data: null, trace_id: "" }),
+    );
+
+    const { wrapper } = await mountWorkspace();
+
+    expect(wrapper.get('[data-test="focus-error"]').text()).toContain("服务内部错误");
   });
 });

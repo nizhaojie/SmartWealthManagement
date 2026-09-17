@@ -91,3 +91,17 @@ export function errorMessage(error: unknown, fallback: string): string {
 export function formatDateTime(value: string): string {
   return new Date(value).toLocaleString();
 }
+
+/**
+ * 风险关注记录的来源：事件载荷里是 Agent 的标识符，界面上要读得懂是谁提的醒。
+ * 没登记过的来源原样显示——新接入一个 Agent 时，界面宁可丑一点，也不要假装
+ * 它不存在。
+ */
+const FOCUS_SOURCE_LABELS: Record<string, string> = {
+  "risk-monitoring-agent": "风控监测 Agent",
+  "customer-service-agent": "智能客服 Agent",
+};
+
+export function focusSourceLabel(source: string): string {
+  return FOCUS_SOURCE_LABELS[source] ?? source;
+}

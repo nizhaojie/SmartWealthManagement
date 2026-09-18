@@ -64,4 +64,8 @@ echo   内部端: advisor1(理财顾问)  manager1/manager2(客户经理)  risk1(风控专员)
 echo   客户端: wangc1  lisic2  zhangc3  zhaoc4  qianc5
 echo.
 echo 停止方式：关闭三个子窗口后，在项目根目录执行 docker compose stop。
-pause
+echo.
+echo 本窗口将在 5 秒后自动关闭（按任意键可立即关闭）...
+timeout /t 5 /nobreak >nul
+endlocal
+exit /b 0

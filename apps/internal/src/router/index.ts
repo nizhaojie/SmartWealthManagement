@@ -1,14 +1,16 @@
 import { createRouter, createWebHistory, type RouteRecordRaw } from "vue-router";
 import AdvisoryReviewPage from "../advisory/AdvisoryReviewPage.vue";
 import LoginPage from "../auth/LoginPage.vue";
-import { currentEmployee, isAuthenticated, restoreSession } from "../auth/store";
 import AlertDetailPage from "../risk/AlertDetailPage.vue";
-import WorkOrderDetailPage from "../risk/WorkOrderDetailPage.vue";
-import ModuleView from "../shell/ModuleView.vue";
 import LandingPage from "../shell/LandingPage.vue";
-import { defaultPathFor, MODULES } from "../shell/modules";
+import ModuleView from "../shell/ModuleView.vue";
 import WorkbenchShell from "../shell/WorkbenchShell.vue";
+import { MODULES } from "../shell/modules";
+import { useAuthStore } from "../stores/auth";
+import WorkOrderDetailPage from "../work-orders/WorkOrderDetailPage.vue";
+import "./routeMeta";
 
+/** 七个模块各自一条 index 路由，主区统一由 ModuleView 按角色裁量。 */
 const moduleRoutes: RouteRecordRaw[] = MODULES.map((module) => ({
   path: module.path.slice(1),
   name: module.id,
@@ -16,44 +18,40 @@ const moduleRoutes: RouteRecordRaw[] = MODULES.map((module) => ({
   meta: { moduleId: module.id },
 }));
 
-// 独立于 advisory 模块的角色门槛之外：审核页要能被客户经理直接用链接
-// 打开（见 issue 04），查看范围收紧在组件与后端各自校验，不经过
-// ModuleView 的按模块角色过滤，否则客户经理会被 ModuleForbidden 拦下。
-const advisoryReviewRoute: RouteRecordRaw = {
-  path: "advisory/reviews/:draftId",
-  name: "advisory-review",
-  component: AdvisoryReviewPage,
-  meta: { moduleId: "advisory" },
-};
+/**
+ * 详情页绕过 ModuleView 的角色过滤：能不能看由后端 403 决定，页面把处置动作
+ * 按角色门控。硬在前端拦住它们只会让「客户经理能看但不能审」这类既有行为消失。
+ */
+const detailRoutes: RouteRecordRaw[] = [
+  {
+    path: "advisory/reviews/:draftId",
+    name: "advisory-review",
+    component: AdvisoryReviewPage,
+    meta: { moduleId: "advisory", pageLabel: "审核" },
+  },
+  {
+    path: "risk-monitoring/alerts/:alertId",
+    name: "risk-alert-detail",
+    component: AlertDetailPage,
+    meta: { moduleId: "risk-monitoring", pageLabel: "预警详情" },
+  },
+  {
+    path: "work-orders/:workOrderId",
+    name: "work-order-detail",
+    component: WorkOrderDetailPage,
+    meta: { moduleId: "work-orders", pageLabel: "工单详情" },
+  },
+];
 
-// 预警详情与工单处置页各有独立 URL：风控专员要能把一条预警的链接直接发给同事
-// （见 issue 04）。它们同样不经过 ModuleView 的角色过滤——能看哪一条由后端按
-// 客户归属判定，组件把 403 渲染成「无权查看」。
-const riskAlertRoute: RouteRecordRaw = {
-  path: "risk-monitoring/alerts/:alertId",
-  name: "risk-alert-detail",
-  component: AlertDetailPage,
-  meta: { moduleId: "risk-monitoring" },
-};
-
-const riskWorkOrderRoute: RouteRecordRaw = {
-  path: "risk-monitoring/work-orders/:workOrderId",
-  name: "risk-work-order-detail",
-  component: WorkOrderDetailPage,
-  meta: { moduleId: "risk-monitoring" },
-};
-
-const routes: RouteRecordRaw[] = [
+export const routes: RouteRecordRaw[] = [
   { path: "/login", name: "login", component: LoginPage, meta: { public: true } },
   {
     path: "/",
     component: WorkbenchShell,
     children: [
-      { path: "", name: "landing", component: LandingPage },
+      { path: "", name: "landing", component: LandingPage, meta: { pageLabel: "工作台" } },
       ...moduleRoutes,
-      advisoryReviewRoute,
-      riskAlertRoute,
-      riskWorkOrderRoute,
+      ...detailRoutes,
     ],
   },
 ];
@@ -63,31 +61,23 @@ export const router = createRouter({
   routes,
 });
 
-async function ensureIdentityLoaded(): Promise<void> {
-  if (!currentEmployee.value) {
-    await restoreSession();
-  }
-}
-
-function defaultRedirect() {
-  return { path: defaultPathFor(currentEmployee.value?.employee_role) };
-}
-
+// 门控只有两条：非 public 且未登录去登录页；已登录访问 login 回落地页。
+// 深链进来时先恢复会话（拿一次 /auth/me），恢复不了就当没登录。
 router.beforeEach(async (to) => {
+  const auth = useAuthStore();
+
   if (to.meta.public) {
-    if (!isAuthenticated.value) {
+    if (!auth.isAuthenticated) {
       return true;
     }
-    await ensureIdentityLoaded();
-    return isAuthenticated.value ? defaultRedirect() : true;
+    const restored = await auth.restoreSession();
+    return restored ? { path: "/" } : true;
   }
 
-  if (!isAuthenticated.value) {
-    return { path: "/login" };
+  if (!auth.isAuthenticated) {
+    return { name: "login" };
   }
-  await ensureIdentityLoaded();
-  if (!isAuthenticated.value) {
-    return { path: "/login" };
-  }
-  return true;
+
+  const restored = await auth.restoreSession();
+  return restored ? true : { name: "login" };
 });

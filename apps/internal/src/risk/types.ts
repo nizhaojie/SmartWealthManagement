@@ -1,3 +1,5 @@
+import type { WorkOrder, WorkOrderStatus } from "../work-orders/types";
+
 export const ALERT_LEVELS = ["轻度", "中度", "重度"] as const;
 export type AlertLevel = (typeof ALERT_LEVELS)[number];
 
@@ -5,9 +7,6 @@ export type AlertLevel = (typeof ALERT_LEVELS)[number];
 // 这一档——系统不会因为置信度低或超时把预警消化掉。
 export const ALERT_STATUSES = ["未处理", "已排除", "已升级"] as const;
 export type AlertStatus = (typeof ALERT_STATUSES)[number];
-
-export const WORK_ORDER_STATUSES = ["待处理", "处理中", "已完成", "已关闭"] as const;
-export type WorkOrderStatus = (typeof WORK_ORDER_STATUSES)[number];
 
 /**
  * 一条命中规则及其依据快照。
@@ -121,36 +120,6 @@ export type RiskFocus = {
   trace_id: string | null;
   occurred_at: string;
 };
-
-export type WorkOrder = {
-  id: number;
-  work_order_no: string;
-  order_type: string;
-  sub_type: string | null;
-  alert_id: number | null;
-  customer_id: number | null;
-  handler_id: number | null;
-  handler_name: string;
-  status: WorkOrderStatus;
-  current_node: string;
-  priority: string;
-  biz_content: Record<string, unknown> | null;
-  handle_reason: string | null;
-  handle_result: string | null;
-  created_at: string;
-  updated_at: string;
-};
-
-export type WorkOrderTransition = {
-  from_status: WorkOrderStatus | null;
-  to_status: WorkOrderStatus;
-  handler_id: number;
-  handler_name: string;
-  reason: string;
-  handled_at: string;
-};
-
-export type WorkOrderDetail = WorkOrder & { transitions: WorkOrderTransition[] };
 
 export type RiskRule = {
   id: number;

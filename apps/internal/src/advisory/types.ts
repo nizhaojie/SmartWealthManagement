@@ -18,6 +18,9 @@ export type AdvisoryCandidate = {
   reason: string;
 };
 
+/** 审核时在编辑版本上勾选的候选：去掉勾的不会进放行请求。 */
+export type EditableCandidate = AdvisoryCandidate & { included: boolean };
+
 export type AdvisoryWarning = {
   code: string;
   message: string;
@@ -90,11 +93,6 @@ export type AdvisoryHistoryEntry = {
   action: "放行" | "驳回";
   reason: string | null;
   decided_at: string;
-};
-
-export type CustomerOption = {
-  id: number;
-  real_name: string;
 };
 
 export type AdvisoryComment = {

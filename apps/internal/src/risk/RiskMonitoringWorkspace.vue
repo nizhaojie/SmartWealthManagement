@@ -1,567 +1,88 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from "vue";
-import { useRouter } from "vue-router";
-import { ApiError, PanelCard } from "@wealth/shared";
-import AnalyticsResultView from "../analytics/AnalyticsResultView.vue";
-import type { AnalyticsQueryResponse } from "../analytics/types";
-import { RISK_OFFICER } from "../auth/identity";
-import { currentEmployee } from "../auth/store";
-import {
-  askRiskQuestion,
-  listAlerts,
-  listRiskFocus,
-  listRiskQueryExamples,
-  listRiskRules,
-  listWorkOrders,
-  setRiskRuleEnabled,
-} from "./api";
-import {
-  ALERT_SORT_OPTIONS,
-  confidenceText,
-  errorMessage,
-  focusSourceLabel,
-  formatDateTime,
-  levelTagType,
-  sortAlerts,
-  statusTagType,
-  workOrderTagType,
-  type AlertSort,
-} from "./riskView";
-import {
-  ALERT_LEVELS,
-  ALERT_STATUSES,
-  FOCUS_TYPES,
-  WORK_ORDER_STATUSES,
-  type AlertLevel,
-  type AlertStatus,
-  type AlertSummary,
-  type FocusType,
-  type RiskFocus,
-  type RiskRule,
-  type WorkOrder,
-  type WorkOrderStatus,
-} from "./types";
+import { computed, reactive, ref } from "vue";
+import { PageHeader } from "@wealth/shared";
+import SummaryCard from "../inspector/SummaryCard.vue";
+import { useInspector } from "../shell/pageSlots";
+import AlertsTab from "./AlertsTab.vue";
+import RiskFocusTab from "./RiskFocusTab.vue";
+import RiskQueryTab from "./RiskQueryTab.vue";
+import RiskRulesTab from "./RiskRulesTab.vue";
+import type { TabSummary } from "./riskView";
 
-const router = useRouter();
+type TabKey = "alerts" | "focus" | "rules" | "query";
 
-// 风控专员在这里处置，其他角色只看得到自己范围内的那一部分——「看得见」不等于
-// 「能处置」，写操作由后端再挡一次。
-const isRiskOfficer = computed(() => currentEmployee.value?.employee_role === RISK_OFFICER);
+const TAB_LABELS: Record<TabKey, string> = {
+  alerts: "预警列表",
+  focus: "风险关注",
+  rules: "规则管理",
+  query: "自然语言查询",
+};
 
-const activeTab = ref("alerts");
+// 工单已拆成一级模块：这里只剩四个页签。
+const activeTab = ref<TabKey>("alerts");
 
-const alerts = ref<AlertSummary[]>([]);
-const alertError = ref("");
-const loadingAlerts = ref(false);
-const levelFilter = ref<AlertLevel | "">("");
-const statusFilter = ref<AlertStatus | "">("");
-const dateRange = ref<[Date, Date] | null>(null);
-const sortBy = ref<AlertSort>("created_desc");
-
-const workOrders = ref<WorkOrder[]>([]);
-const workOrderError = ref("");
-const workOrderStatusFilter = ref<WorkOrderStatus | "">("");
-
-const rules = ref<RiskRule[]>([]);
-const ruleError = ref("");
-
-// 风险关注：其他 Agent 通过事件总线提醒过来的东西。列表只读——记录是订阅方在
-// 收到广播时写下的，界面既不新增也不修改它；要处置就去派生或流转工单。
-const focus = ref<RiskFocus[]>([]);
-const focusError = ref("");
-const focusTypeFilter = ref<FocusType | "">("");
-
-// 自然语言查询：风控专员问「今天有哪些高风险预警」，不必自己组合筛选条件。
-// 问句由风控监测 Agent 转成对预警语义视图的查询；模型只把结果讲成人话，
-// 等级与依据仍来自规则引擎的确定性求值。sessionId 圈定这一轮工作台的追问
-// 上下文（上一轮问题进入本轮），重新打开页面即重新开始。
-const querySessionId = crypto.randomUUID();
-const queryQuestion = ref("");
-const askingQuery = ref(false);
-const queryResult = ref<AnalyticsQueryResponse | null>(null);
-const queryFailure = ref("");
-const queryExamples = ref<{ question: string }[]>([]);
-
-const visibleAlerts = computed(() => sortAlerts(alerts.value, sortBy.value));
-
-async function askQuery() {
-  const text = queryQuestion.value.trim();
-  if (!text || askingQuery.value) {
-    return;
-  }
-  askingQuery.value = true;
-  queryFailure.value = "";
-  try {
-    queryResult.value = await askRiskQuestion({
-      question: text,
-      sessionId: querySessionId,
-    });
-  } catch (error) {
-    queryResult.value = null;
-    queryFailure.value =
-      error instanceof ApiError ? error.message : "查询失败，请稍后重试";
-  } finally {
-    askingQuery.value = false;
-  }
-}
-
-function reuseQueryQuestion(text: string) {
-  queryQuestion.value = text;
-}
-
-async function loadAlerts() {
-  loadingAlerts.value = true;
-  alertError.value = "";
-  try {
-    const range = dateRange.value;
-    alerts.value = await listAlerts({
-      alertLevel: levelFilter.value || undefined,
-      status: statusFilter.value || undefined,
-      createdFrom: range ? range[0].toISOString() : undefined,
-      createdTo: range ? range[1].toISOString() : undefined,
-    });
-  } catch (error) {
-    alerts.value = [];
-    alertError.value = errorMessage(error, "加载预警列表失败");
-  } finally {
-    loadingAlerts.value = false;
-  }
-}
-
-async function loadWorkOrders() {
-  workOrderError.value = "";
-  try {
-    workOrders.value = await listWorkOrders({
-      status: workOrderStatusFilter.value || undefined,
-    });
-  } catch (error) {
-    workOrders.value = [];
-    workOrderError.value = errorMessage(error, "加载工单列表失败");
-  }
-}
-
-async function loadRules() {
-  ruleError.value = "";
-  try {
-    rules.value = await listRiskRules();
-  } catch (error) {
-    rules.value = [];
-    ruleError.value = errorMessage(error, "加载规则列表失败");
-  }
-}
-
-async function loadFocus() {
-  focusError.value = "";
-  try {
-    focus.value = await listRiskFocus(focusTypeFilter.value || undefined);
-  } catch (error) {
-    focus.value = [];
-    focusError.value = errorMessage(error, "加载风险关注失败");
-  }
-}
-
-async function loadQueryExamples() {
-  try {
-    queryExamples.value = await listRiskQueryExamples();
-  } catch {
-    // 示例加载失败不阻塞提问主流程。
-    queryExamples.value = [];
-  }
-}
-
-async function toggleRule(rule: RiskRule, enabled: boolean) {
-  ruleError.value = "";
-  try {
-    const updated = await setRiskRuleEnabled(rule.id, enabled);
-    rules.value = rules.value.map((item) => (item.id === updated.id ? updated : item));
-  } catch (error) {
-    ruleError.value = errorMessage(error, "切换规则启停失败");
-    await loadRules();
-  }
-}
-
-function onRuleToggle(rule: RiskRule, value: unknown) {
-  void toggleRule(rule, Boolean(value));
-}
-
-function openAlert(alertId: number) {
-  router.push({ name: "risk-alert-detail", params: { alertId: String(alertId) } });
-}
-
-function openWorkOrder(workOrderId: number) {
-  router.push({
-    name: "risk-work-order-detail",
-    params: { workOrderId: String(workOrderId) },
-  });
-}
-
-watch([levelFilter, statusFilter, dateRange], loadAlerts);
-watch(workOrderStatusFilter, loadWorkOrders);
-watch(focusTypeFilter, loadFocus);
-
-onMounted(() => {
-  void loadAlerts();
-  void loadWorkOrders();
-  void loadFocus();
-  void loadRules();
-  void loadQueryExamples();
+// 每个页签把「筛了什么、剩几条」写回自己那一格，检查器只读当前页签那一格。
+const summaries = reactive<Record<TabKey, TabSummary>>({
+  alerts: { headline: "全部预警", count: null },
+  focus: { headline: "全部风险关注", count: null },
+  rules: { headline: "规则加载中", count: null },
+  query: { headline: "尚未提问", count: null },
 });
+
+const activeSummary = computed(() => summaries[activeTab.value]);
+
+function setSummary(tab: TabKey, value: TabSummary): void {
+  summaries[tab] = value;
+}
+
+// 注入模块自己的筛选摘要（右侧检查器）：当前页签 + 筛了什么 + 剩几条。
+useInspector(() => ({
+  component: SummaryCard,
+  props: {
+    title: "风控监测",
+    rows: [
+      { label: "当前页签", value: TAB_LABELS[activeTab.value], testId: "risk-summary-tab" },
+      { label: "筛选摘要", value: activeSummary.value.headline, testId: "risk-summary-filters" },
+      {
+        label: "当前列表",
+        value: activeSummary.value.count === null ? "—" : `${activeSummary.value.count} 条`,
+        testId: "risk-summary-count",
+      },
+    ],
+    note: "处置（排除 / 升级 / 派生工单）只对风控专员开放；客户经理只看得到名下客户。",
+  },
+}));
 </script>
 
 <template>
-  <div class="risk-monitoring">
-    <el-tabs v-model="activeTab">
+  <div class="risk">
+    <PageHeader title="风控监测" :breadcrumb="['风控监测']" />
+
+    <el-tabs v-model="activeTab" class="risk__tabs">
       <el-tab-pane label="预警列表" name="alerts">
-        <div class="risk-monitoring__filters" data-test="alert-filters">
-          <el-select
-            v-model="levelFilter"
-            placeholder="按等级筛选"
-            clearable
-            data-test="alert-level-filter"
-            style="width: 160px"
-          >
-            <el-option v-for="level in ALERT_LEVELS" :key="level" :label="level" :value="level" />
-          </el-select>
-          <el-select
-            v-model="statusFilter"
-            placeholder="按状态筛选"
-            clearable
-            data-test="alert-status-filter"
-            style="width: 160px"
-          >
-            <el-option
-              v-for="status in ALERT_STATUSES"
-              :key="status"
-              :label="status"
-              :value="status"
-            />
-          </el-select>
-          <span data-test="alert-date-range">
-            <el-date-picker
-              v-model="dateRange"
-              type="daterange"
-              start-placeholder="开始日期"
-              end-placeholder="结束日期"
-              style="width: 260px"
-            />
-          </span>
-          <el-select v-model="sortBy" data-test="alert-sort" style="width: 220px">
-            <el-option
-              v-for="option in ALERT_SORT_OPTIONS"
-              :key="option.value"
-              :label="option.label"
-              :value="option.value"
-            />
-          </el-select>
-        </div>
-
-        <p v-if="alertError" role="alert" class="risk-monitoring__error" data-test="alert-error">
-          {{ alertError }}
-        </p>
-
-        <el-empty
-          v-if="!loadingAlerts && !alerts.length"
-          description="暂无预警"
-          data-test="alerts-empty"
-        />
-        <el-table v-else :data="visibleAlerts" data-test="alerts-table">
-          <el-table-column label="产生时间" width="180">
-            <template #default="{ row }: { row: AlertSummary }">
-              {{ formatDateTime(row.created_at) }}
-            </template>
-          </el-table-column>
-          <el-table-column prop="customer_name" label="客户" width="110" />
-          <el-table-column prop="alert_type" label="预警类型" width="120" />
-          <el-table-column label="等级" width="90">
-            <template #default="{ row }: { row: AlertSummary }">
-              <el-tag :type="levelTagType(row.alert_level)" data-test="alert-level">
-                {{ row.alert_level }}
-              </el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column label="置信度" width="100">
-            <template #default="{ row }: { row: AlertSummary }">
-              <span data-test="alert-confidence">{{ confidenceText(row.confidence) }}</span>
-            </template>
-          </el-table-column>
-          <el-table-column label="命中规则" min-width="160">
-            <template #default="{ row }: { row: AlertSummary }">
-              {{ row.rule_count }} 条 · {{ row.rule_codes.join("、") }}
-            </template>
-          </el-table-column>
-          <el-table-column label="状态" width="100">
-            <template #default="{ row }: { row: AlertSummary }">
-              <el-tag :type="statusTagType(row.status)">{{ row.status }}</el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column label="工单" width="110">
-            <template #default="{ row }: { row: AlertSummary }">
-              <el-tag v-if="row.work_order_status" :type="workOrderTagType(row.work_order_status)">
-                {{ row.work_order_status }}
-              </el-tag>
-              <span v-else>—</span>
-            </template>
-          </el-table-column>
-          <el-table-column label="操作" width="90">
-            <template #default="{ row }: { row: AlertSummary }">
-              <el-button
-                link
-                type="primary"
-                data-test="open-alert"
-                @click="openAlert(row.id)"
-              >
-                查看
-              </el-button>
-            </template>
-          </el-table-column>
-        </el-table>
+        <AlertsTab @summary="setSummary('alerts', $event)" />
       </el-tab-pane>
-
-      <el-tab-pane label="工单列表" name="work-orders">
-        <div class="risk-monitoring__filters" data-test="work-order-filters">
-          <el-select
-            v-model="workOrderStatusFilter"
-            placeholder="按状态筛选"
-            clearable
-            data-test="work-order-status-filter"
-            style="width: 160px"
-          >
-            <el-option
-              v-for="status in WORK_ORDER_STATUSES"
-              :key="status"
-              :label="status"
-              :value="status"
-            />
-          </el-select>
-        </div>
-
-        <p
-          v-if="workOrderError"
-          role="alert"
-          class="risk-monitoring__error"
-          data-test="work-order-error"
-        >
-          {{ workOrderError }}
-        </p>
-
-        <el-empty
-          v-if="!workOrders.length"
-          description="暂无工单"
-          data-test="work-orders-empty"
-        />
-        <el-table v-else :data="workOrders" data-test="work-orders-table">
-          <el-table-column prop="work_order_no" label="工单编号" width="200" />
-          <el-table-column label="来源" width="110">
-            <template #default="{ row }: { row: WorkOrder }">
-              {{ row.order_type }}
-            </template>
-          </el-table-column>
-          <el-table-column prop="priority" label="优先级" width="90" />
-          <el-table-column label="状态" width="110">
-            <template #default="{ row }: { row: WorkOrder }">
-              <el-tag :type="workOrderTagType(row.status)" data-test="work-order-status">
-                {{ row.status }}
-              </el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column prop="handler_name" label="受理人" width="110" />
-          <el-table-column label="最近理由" min-width="200">
-            <template #default="{ row }: { row: WorkOrder }">
-              {{ row.handle_reason ?? "—" }}
-            </template>
-          </el-table-column>
-          <el-table-column label="操作" width="90">
-            <template #default="{ row }: { row: WorkOrder }">
-              <el-button
-                link
-                type="primary"
-                data-test="open-work-order"
-                @click="openWorkOrder(row.id)"
-              >
-                处置
-              </el-button>
-            </template>
-          </el-table-column>
-        </el-table>
+      <el-tab-pane label="风险关注" name="focus" lazy>
+        <RiskFocusTab @summary="setSummary('focus', $event)" />
       </el-tab-pane>
-
-      <el-tab-pane label="风险关注" name="focus">
-        <div class="risk-monitoring__filters" data-test="focus-filters">
-          <el-select
-            v-model="focusTypeFilter"
-            placeholder="按类型筛选"
-            clearable
-            data-test="focus-type-filter"
-            style="width: 160px"
-          >
-            <el-option
-              v-for="focusType in FOCUS_TYPES"
-              :key="focusType"
-              :label="focusType"
-              :value="focusType"
-            />
-          </el-select>
-        </div>
-
-        <p v-if="focusError" role="alert" class="risk-monitoring__error" data-test="focus-error">
-          {{ focusError }}
-        </p>
-
-        <el-empty
-          v-if="!focus.length"
-          description="暂无风险关注"
-          data-test="focus-empty"
-        />
-        <el-table v-else :data="focus" data-test="focus-table">
-          <el-table-column label="时间" width="180">
-            <template #default="{ row }: { row: RiskFocus }">
-              {{ formatDateTime(row.occurred_at) }}
-            </template>
-          </el-table-column>
-          <el-table-column prop="customer_name" label="客户" width="110" />
-          <el-table-column label="类型" width="120">
-            <template #default="{ row }: { row: RiskFocus }">
-              <el-tag data-test="focus-type">{{ row.focus_type }}</el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column label="等级" width="90">
-            <template #default="{ row }: { row: RiskFocus }">
-              {{ row.severity ?? "—" }}
-            </template>
-          </el-table-column>
-          <el-table-column prop="reason" label="理由" min-width="240" />
-          <el-table-column label="来源" width="160">
-            <template #default="{ row }: { row: RiskFocus }">
-              <span data-test="focus-source">{{ focusSourceLabel(row.source) }}</span>
-            </template>
-          </el-table-column>
-        </el-table>
+      <el-tab-pane label="规则管理" name="rules" lazy>
+        <RiskRulesTab @summary="setSummary('rules', $event)" />
       </el-tab-pane>
-
-      <el-tab-pane label="规则管理" name="rules">
-        <p v-if="ruleError" role="alert" class="risk-monitoring__error" data-test="rule-error">
-          {{ ruleError }}
-        </p>
-
-        <el-table :data="rules" data-test="rules-table">
-          <el-table-column prop="rule_code" label="编号" width="80" />
-          <el-table-column prop="rule_name" label="规则" min-width="200" />
-          <el-table-column prop="field_label" label="判定字段" width="200" />
-          <el-table-column prop="operator_label" label="算子" width="120" />
-          <el-table-column prop="threshold_text" label="阈值" width="120" />
-          <el-table-column label="启停" width="90">
-            <template #default="{ row }: { row: RiskRule }">
-              <el-switch
-                :model-value="row.enabled"
-                :disabled="!isRiskOfficer"
-                data-test="rule-enabled"
-                @change="onRuleToggle(row, $event)"
-              />
-            </template>
-          </el-table-column>
-        </el-table>
-      </el-tab-pane>
-
-      <el-tab-pane label="自然语言查询" name="query">
-        <PanelCard title="提问">
-          <div class="risk-monitoring__query-composer">
-            <el-input
-              v-model="queryQuestion"
-              type="textarea"
-              :rows="2"
-              name="risk-question"
-              placeholder="用日常语言提问，例如：今天有哪些高风险预警"
-              @keydown.ctrl.enter="askQuery"
-            />
-            <el-button
-              type="primary"
-              :loading="askingQuery"
-              data-test="ask-risk-query"
-              @click="askQuery"
-            >
-              {{ askingQuery ? "正在查询…" : "提问" }}
-            </el-button>
-          </div>
-          <div v-if="queryExamples.length" class="risk-monitoring__examples">
-            <span class="risk-monitoring__hint">试试这样问：</span>
-            <button
-              v-for="example in queryExamples"
-              :key="example.question"
-              type="button"
-              class="risk-monitoring__example"
-              data-test="risk-query-example"
-              @click="reuseQueryQuestion(example.question)"
-            >
-              {{ example.question }}
-            </button>
-          </div>
-        </PanelCard>
-
-        <el-alert
-          v-if="queryFailure"
-          type="info"
-          :closable="false"
-          data-test="risk-query-failure"
-          :title="queryFailure"
-        />
-
-        <AnalyticsResultView v-if="queryResult" :result="queryResult" />
+      <el-tab-pane label="自然语言查询" name="query" lazy>
+        <RiskQueryTab @summary="setSummary('query', $event)" />
       </el-tab-pane>
     </el-tabs>
   </div>
 </template>
 
 <style scoped>
-.risk-monitoring {
+.risk {
   display: flex;
   flex-direction: column;
   gap: var(--wm-space-4);
 }
 
-.risk-monitoring__filters {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--wm-space-3);
-  margin-bottom: var(--wm-space-3);
-}
-
-.risk-monitoring__error {
-  color: var(--wm-color-danger);
-}
-
-.risk-monitoring__query-composer {
-  display: flex;
-  gap: var(--wm-space-3);
-  align-items: flex-start;
-}
-
-.risk-monitoring__examples {
-  display: flex;
-  align-items: center;
-  gap: var(--wm-space-2);
-  flex-wrap: wrap;
-  margin-top: var(--wm-space-3);
-}
-
-.risk-monitoring__example {
-  cursor: pointer;
-  /* 示例问题做成药丸按钮：1px 边线（令牌纪律声明的极少数例外） */
-  border: 1px solid var(--wm-border);
-  border-radius: var(--wm-radius-lg);
-  background: var(--wm-bg-page);
-  padding: var(--wm-space-1) var(--wm-space-3);
-  font-size: 12px;
-  color: var(--wm-text-secondary);
-}
-
-.risk-monitoring__example:hover {
-  /* 中性面没有比 bg-page 深一档的专用令牌，以边框令牌作最深的悬停底色（不引入新色值） */
-  background: var(--wm-border);
-  color: var(--wm-text-primary);
-}
-
-.risk-monitoring__hint {
-  color: var(--wm-text-muted);
-  font-size: 12px;
+.risk__tabs :deep(.el-tabs__header) {
+  margin-bottom: var(--wm-space-4);
 }
 </style>

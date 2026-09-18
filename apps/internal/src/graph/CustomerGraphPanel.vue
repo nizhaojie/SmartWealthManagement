@@ -1,16 +1,20 @@
 <script setup lang="ts">
+import { computed, ref, watch } from "vue";
 import { ChartFrame, toGraphOption } from "@wealth/shared";
-import { computed, onMounted, ref, watch } from "vue";
+import { errorMessage, formatDateTime, formatValue } from "../format";
 import { getCustomerGraph } from "./api";
-import { EDGE_TYPE_LABELS, NODE_TYPE_LABELS, filterAndPrune, toChartInput } from "./graphView";
+import {
+  EDGE_TYPE_LABELS,
+  NODE_TYPE_LABELS,
+  filterAndPrune,
+  toChartInput,
+} from "./graphView";
 import type { CustomerGraphView, GraphEdgeType, GraphNode } from "./types";
 
 const EMPTY_HINT = "该客户暂无可展示的持仓关系。";
 const ALL_EDGE_TYPES: GraphEdgeType[] = ["HOLDS", "BELONGS_TO_INDUSTRY", "MANAGED_BY"];
 
-const props = defineProps<{
-  customerId: number;
-}>();
+const props = defineProps<{ customerId: number }>();
 
 const loading = ref(true);
 const loadError = ref("");
@@ -19,208 +23,214 @@ const activeEdgeTypes = ref<GraphEdgeType[]>([...ALL_EDGE_TYPES]);
 const fundManagerExpanded = ref(false);
 const selectedNode = ref<GraphNode | null>(null);
 
-async function load(expandFundManager: boolean) {
+async function load(expandFundManager: boolean): Promise<void> {
   loading.value = true;
   loadError.value = "";
+  selectedNode.value = null;
   try {
     view.value = await getCustomerGraph(props.customerId, { expandFundManager });
-  } catch {
-    loadError.value = "图谱数据加载失败，请稍后重试";
+    fundManagerExpanded.value = expandFundManager;
+  } catch (error) {
+    view.value = null;
+    loadError.value = errorMessage(error, "图谱加载失败");
   } finally {
     loading.value = false;
   }
 }
 
-onMounted(() => load(fundManagerExpanded.value));
-
+// 换客户就从头开始：重置筛选与展开状态，别把上一位客户的选择带过来。
 watch(
   () => props.customerId,
   () => {
-    fundManagerExpanded.value = false;
-    selectedNode.value = null;
+    activeEdgeTypes.value = [...ALL_EDGE_TYPES];
     void load(false);
   },
+  { immediate: true },
 );
 
-function toggleFundManagers() {
-  fundManagerExpanded.value = !fundManagerExpanded.value;
-  selectedNode.value = null;
-  void load(fundManagerExpanded.value);
-}
-
-function toggleEdgeType(type: GraphEdgeType) {
-  activeEdgeTypes.value = activeEdgeTypes.value.includes(type)
-    ? activeEdgeTypes.value.filter((item) => item !== type)
-    : [...activeEdgeTypes.value, type];
-}
-
-const filtered = computed(() => {
-  if (!view.value) return { nodes: [], edges: [] };
-  return filterAndPrune(view.value.nodes, view.value.edges, activeEdgeTypes.value);
-});
-
 const option = computed(() => {
-  const input = toChartInput(filtered.value.nodes, filtered.value.edges);
+  if (!view.value) return null;
+  const pruned = filterAndPrune(view.value.nodes, view.value.edges, activeEdgeTypes.value);
+  const input = toChartInput(pruned.nodes, pruned.edges);
   return toGraphOption(input.nodes, input.edges, input.categories);
 });
 
-const syncedAtLabel = computed(() => {
-  const value = view.value?.synced_at;
-  return value ? `图谱同步于 ${value.slice(0, 16).replace("T", " ")}` : "图谱尚未同步";
+const nodesById = computed(() => {
+  const map = new Map<string, GraphNode>();
+  for (const node of view.value?.nodes ?? []) {
+    map.set(node.id, node);
+  }
+  return map;
 });
 
-function onElementClick(params: unknown) {
-  const clicked = params as { dataType?: string; data?: { id?: string } } | null;
-  if (clicked?.dataType !== "node" || !clicked.data?.id || !view.value) return;
-  selectedNode.value = view.value.nodes.find((node) => node.id === clicked.data?.id) ?? null;
+function onElementClick(params: unknown): void {
+  const id = (params as { data?: { id?: string } }).data?.id;
+  selectedNode.value = (id && nodesById.value.get(id)) || null;
 }
 
-function attrEntries(node: GraphNode): [string, string][] {
-  return Object.entries(node.attrs).map(([key, value]) => [key, String(value)]);
+function toggleFundManager(): void {
+  void load(!fundManagerExpanded.value);
 }
 </script>
 
 <template>
-  <section class="customer-graph" data-test="customer-graph-panel">
-    <header class="customer-graph__head">
-      <h3>持仓关系网络</h3>
-      <p class="customer-graph__synced" data-test="graph-synced-at">{{ syncedAtLabel }}</p>
-    </header>
+  <div class="graph">
+    <div class="graph__controls">
+      <span class="graph__label">关系类型</span>
+      <el-checkbox
+        v-for="type in ALL_EDGE_TYPES"
+        :key="type"
+        v-model="activeEdgeTypes"
+        :value="type"
+        :data-testid="`graph-filter-${type}`"
+      >
+        {{ EDGE_TYPE_LABELS[type] }}
+      </el-checkbox>
 
-    <p v-if="loadError" class="customer-graph__error" data-test="graph-error">{{ loadError }}</p>
+      <el-button
+        size="small"
+        name="toggle-fund-manager"
+        data-testid="graph-expand-fund-manager"
+        class="graph__expand"
+        @click="toggleFundManager"
+      >
+        {{ fundManagerExpanded ? "收起基金经理" : "展开基金经理" }}
+      </el-button>
+    </div>
 
-    <template v-else>
-      <div class="customer-graph__controls">
-        <label
-          v-for="type in ALL_EDGE_TYPES"
-          :key="type"
-          class="customer-graph__filter"
-        >
-          <input
-            type="checkbox"
-            :checked="activeEdgeTypes.includes(type)"
-            :data-test="`graph-filter-${type}`"
-            @change="toggleEdgeType(type)"
-          />
-          {{ EDGE_TYPE_LABELS[type] }}
-        </label>
-        <button type="button" data-test="graph-expand-fund-manager" @click="toggleFundManagers">
-          {{ fundManagerExpanded ? "收起基金经理" : "展开基金经理" }}
+    <p v-if="loadError" class="graph__error" role="alert" data-testid="graph-error">
+      {{ loadError }}
+    </p>
+
+    <ChartFrame
+      title="持仓关系图"
+      hint="默认展开到产品与行业两跳，基金经理按需展开；点击节点查看要素。"
+      :option="option"
+      :loading="loading"
+      :height="360"
+      :empty-text="EMPTY_HINT"
+      @element-click="onElementClick"
+    />
+
+    <div class="graph__meta">
+      <span data-testid="graph-synced-at">
+        {{
+          view?.synced_at
+            ? `图谱同步于 ${formatDateTime(view.synced_at)}`
+            : "图谱尚未同步"
+        }}
+      </span>
+    </div>
+
+    <div v-if="selectedNode" class="graph__detail" data-testid="graph-node-detail">
+      <header class="graph__detail-head">
+        <strong>{{ selectedNode.label }}</strong>
+        <span class="graph__detail-type">{{ NODE_TYPE_LABELS[selectedNode.type] }}</span>
+        <button type="button" class="graph__close" name="close-node" @click="selectedNode = null">
+          关闭
         </button>
-      </div>
-
-      <ChartFrame
-        title="客户持仓关系图"
-        hint="默认展开到产品与行业两跳，基金经理按需展开；点击节点查看要素。"
-        :option="option"
-        :loading="loading"
-        :empty-text="EMPTY_HINT"
-        :height="360"
-        @element-click="onElementClick"
-      />
-
-      <aside v-if="selectedNode" class="customer-graph__detail" data-test="graph-node-detail">
-        <div class="customer-graph__detail-head">
-          <h4>{{ selectedNode.label }}</h4>
-          <span>{{ NODE_TYPE_LABELS[selectedNode.type] }}</span>
-          <button type="button" @click="selectedNode = null">关闭</button>
+      </header>
+      <p v-if="selectedNode.marked" class="graph__marked">集中度超阈值</p>
+      <dl class="graph__attrs">
+        <div v-for="(value, key) in selectedNode.attrs" :key="key" class="graph__attr">
+          <dt>{{ key }}</dt>
+          <dd>{{ formatValue(value) }}</dd>
         </div>
-        <p v-if="selectedNode.marked" class="customer-graph__marked">集中度超阈值</p>
-        <dl>
-          <template v-for="[key, value] in attrEntries(selectedNode)" :key="key">
-            <dt>{{ key }}</dt>
-            <dd>{{ value }}</dd>
-          </template>
-        </dl>
-      </aside>
-    </template>
-  </section>
+      </dl>
+    </div>
+  </div>
 </template>
 
 <style scoped>
-.customer-graph {
-  margin-bottom: var(--wm-space-4);
-}
-
-.customer-graph__head {
+.graph {
   display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  margin-bottom: var(--wm-space-2);
+  flex-direction: column;
+  gap: var(--wm-space-3);
 }
 
-.customer-graph__head h3 {
-  margin: 0;
-  font-size: 1rem;
-  color: var(--wm-text-primary);
-}
-
-.customer-graph__synced {
-  margin: 0;
-  font-size: 0.8rem;
-  color: var(--wm-text-muted);
-}
-
-.customer-graph__error {
-  color: var(--wm-color-danger);
-}
-
-.customer-graph__controls {
+.graph__controls {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: var(--wm-space-3);
-  align-items: center;
-  margin-bottom: var(--wm-space-2);
+}
+
+.graph__label {
+  color: var(--wm-text-muted);
+  font-size: 0.8rem;
+}
+
+.graph__expand {
+  margin-left: auto;
+}
+
+.graph__error {
+  margin: 0;
+  color: var(--wm-color-danger);
   font-size: 0.85rem;
-  color: var(--wm-text-secondary);
 }
 
-.customer-graph__filter {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--wm-space-1);
+.graph__meta {
+  color: var(--wm-text-muted);
+  font-size: 0.78rem;
 }
 
-.customer-graph__detail {
-  margin-top: var(--wm-space-3);
-  padding: var(--wm-space-3) var(--wm-space-4);
-  /* 节点要素浮层的 1px 边线（令牌纪律声明的极少数例外） */
+.graph__detail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wm-space-2);
+  padding: var(--wm-space-3);
+  /* 细边框属令牌纪律声明的极少数 1px 例外 */
   border: 1px solid var(--wm-border);
-  border-radius: var(--wm-radius-md);
-  background: var(--wm-bg-page);
+  border-radius: var(--wm-radius-sm);
+  background-color: var(--wm-bg-subtle);
 }
 
-.customer-graph__detail-head {
+.graph__detail-head {
   display: flex;
   align-items: center;
   gap: var(--wm-space-2);
 }
 
-.customer-graph__detail-head h4 {
-  margin: 0;
-  color: var(--wm-text-primary);
-}
-
-.customer-graph__marked {
-  color: var(--wm-color-danger);
-  font-size: 0.85rem;
-}
-
-.customer-graph__detail dl {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: var(--wm-space-1) var(--wm-space-3);
-  margin: var(--wm-space-2) 0 0;
-}
-
-.customer-graph__detail dt {
+.graph__detail-type {
   color: var(--wm-text-muted);
-  font-size: 0.8rem;
+  font-size: 0.78rem;
 }
 
-.customer-graph__detail dd {
+.graph__close {
+  margin-left: auto;
+  padding: var(--wm-space-1) var(--wm-space-2);
+  /* 细边框属令牌纪律声明的极少数 1px 例外 */
+  border: 1px solid var(--wm-border);
+  border-radius: var(--wm-radius-sm);
+  background-color: var(--wm-bg-card);
+  color: var(--wm-text-muted);
+  font-family: inherit;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.graph__marked {
   margin: 0;
-  font-size: 0.85rem;
+  color: var(--wm-color-danger);
+  font-size: 0.78rem;
+}
+
+.graph__attrs {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(calc(var(--wm-space-6) * 5), 1fr));
+  gap: var(--wm-space-2);
+  margin: 0;
+}
+
+.graph__attr dt {
+  color: var(--wm-text-muted);
+  font-size: 0.75rem;
+}
+
+.graph__attr dd {
+  margin: 0;
   color: var(--wm-text-primary);
+  font-size: 0.82rem;
 }
 </style>

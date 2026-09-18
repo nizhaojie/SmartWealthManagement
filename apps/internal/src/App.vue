@@ -1,19 +1,22 @@
 <script setup lang="ts">
 import { watch } from "vue";
-import { useRouter } from "vue-router";
-import { currentEmployee, isAuthenticated } from "./auth/store";
+import { useRoute, useRouter } from "vue-router";
+import { useAuthStore } from "./stores/auth";
 
+const auth = useAuthStore();
+const route = useRoute();
 const router = useRouter();
 
-// A passive 401 from any API call clears tokens via the http client directly
-// (see api/http.ts's onUnauthorized), bypassing auth/store.ts's own session
-// helpers — so this is the one place that always resets identity + redirects.
-watch(isAuthenticated, (authenticated) => {
-  if (!authenticated) {
-    currentEmployee.value = null;
-    router.push("/login");
-  }
-});
+// 会话在页面停留期间失效（任一接口回 401，令牌被清掉）时，不把人留在必然报错的页面上。
+// 导航时的门控在 router 守卫里，这一条补的是「人已经进来了」之后的那半程。
+watch(
+  () => auth.isAuthenticated,
+  (authenticated) => {
+    if (!authenticated && !route.meta.public) {
+      void router.push({ name: "login" });
+    }
+  },
+);
 </script>
 
 <template>

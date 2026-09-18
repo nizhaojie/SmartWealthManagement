@@ -1,7 +1,25 @@
 import { ACCOUNT_MANAGER, ADVISOR, RISK_OFFICER, type EmployeeRole } from "../auth/identity";
 
+/**
+ * 七个一级模块。顺序即侧栏顺序与落地页入口顺序。
+ *
+ * 角色可见性留在应用内（**不进 shared**）：壳层的「谁能看见什么」是内部工作台的
+ * 组织事实，不是两端共用的展示件能力。
+ */
+export const MODULE_IDS = [
+  "knowledge",
+  "data-analysis",
+  "profile",
+  "advisory",
+  "risk-monitoring",
+  "work-orders",
+  "customer-relations",
+] as const;
+
+export type ModuleId = (typeof MODULE_IDS)[number];
+
 export type ModuleDefinition = {
-  id: string;
+  id: ModuleId;
   path: string;
   label: string;
   description: string;
@@ -10,7 +28,7 @@ export type ModuleDefinition = {
 
 const ALL_ROLES: EmployeeRole[] = [ADVISOR, RISK_OFFICER, ACCOUNT_MANAGER];
 
-export const MODULES = [
+export const MODULES: ModuleDefinition[] = [
   {
     id: "knowledge",
     path: "/knowledge",
@@ -44,35 +62,35 @@ export const MODULES = [
     path: "/risk-monitoring",
     label: "风控监测",
     // 三个角色都能进：理财顾问与客户经理要看得见自己客户的预警状态，而处置
-    // （排除、升级、工单流转）只放开给风控专员——后端按角色再挡一次，界面把
-    // 处置表单换成一句说明。客户经理的可见范围收紧到名下客户，与工单、审核一致。
-    description: "查看风控预警与工单；风控专员在此处置。",
+    // （排除、升级、派生工单）只放开给风控专员——后端按角色再挡一次，界面把处置
+    // 表单换成一句说明。客户经理的可见范围收紧到名下客户，与工单、审核一致。
+    description: "查看风控预警与风险关注；风控专员在此处置。",
+    roles: ALL_ROLES,
+  },
+  {
+    id: "work-orders",
+    path: "/work-orders",
+    label: "工单管理",
+    // 工单从风控监测的 tab 里拆出来成为一级模块：它可以来自预警，也可以来自客户投诉
+    // 与转人工，从来不是预警的附属物。
+    description: "查看与流转工单；工单可来自预警处置，也可来自客户投诉与转人工。",
     roles: ALL_ROLES,
   },
   {
     id: "customer-relations",
     path: "/customer-relations",
     label: "客户关系",
-    description: "查看归属客户的基本信息与服务记录。",
+    // 「服务记录」在后端不存在（没有对应接口），模块描述不承诺它。
+    description: "查看名下客户的基本信息与分层，并为新客户开户。",
     roles: [ACCOUNT_MANAGER],
   },
-] satisfies ModuleDefinition[];
-
-export type ModuleId = (typeof MODULES)[number]["id"];
+];
 
 export function getModule(id: string | undefined): ModuleDefinition | undefined {
   return MODULES.find((module) => module.id === id);
 }
 
-export function visibleModules(role: EmployeeRole): ModuleDefinition[] {
+export function visibleModules(role: EmployeeRole | null | undefined): ModuleDefinition[] {
+  if (!role) return [];
   return MODULES.filter((module) => module.roles.includes(role));
-}
-
-export function defaultPathFor(role: EmployeeRole | null | undefined): string {
-  if (!role) {
-    return "/login";
-  }
-  // 登录后落到静态模块导航落地页（先看到全貌），不再直接进第一个可见模块。
-  // 无可见模块的角色由落地页自己的空态说明承接。
-  return "/";
 }

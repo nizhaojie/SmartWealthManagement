@@ -15,6 +15,7 @@ export type ChunkHit = {
 
 export type SearchResult = {
   hits: ChunkHit[];
+  /** 兜底阈值：得分过线的片段才算依据。 */
   score_threshold: number;
 };
 

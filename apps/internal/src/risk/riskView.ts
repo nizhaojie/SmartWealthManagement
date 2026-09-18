@@ -1,6 +1,5 @@
-import { ApiError } from "@wealth/shared";
 import { RISK_OFFICER, type EmployeeRole } from "../auth/identity";
-import type { AlertLevel, AlertStatus, AlertSummary, WorkOrderStatus } from "./types";
+import type { AlertLevel, AlertStatus, AlertSummary } from "./types";
 
 export type AlertSort = "created_desc" | "confidence_desc" | "confidence_asc";
 
@@ -9,6 +8,12 @@ export const ALERT_SORT_OPTIONS: { value: AlertSort; label: string }[] = [
   { value: "confidence_desc", label: "按置信度（高到低）" },
   { value: "confidence_asc", label: "按置信度（低到高）" },
 ];
+
+/** 检查器里的模块筛选摘要由各页签写回来。 */
+export type TabSummary = {
+  headline: string;
+  count: number | null;
+};
 
 export function levelTagType(level: AlertLevel): "danger" | "warning" | "info" {
   if (level === "重度") return "danger";
@@ -19,15 +24,6 @@ export function levelTagType(level: AlertLevel): "danger" | "warning" | "info" {
 export function statusTagType(status: AlertStatus): "warning" | "success" | "info" {
   if (status === "已排除") return "info";
   if (status === "已升级") return "success";
-  return "warning";
-}
-
-export function workOrderTagType(
-  status: WorkOrderStatus,
-): "warning" | "primary" | "success" | "info" {
-  if (status === "处理中") return "primary";
-  if (status === "已完成") return "success";
-  if (status === "已关闭") return "info";
   return "warning";
 }
 
@@ -49,6 +45,11 @@ export function sortAlerts(alerts: AlertSummary[], sortBy: AlertSort): AlertSumm
   });
 }
 
+/** 风控规则是风控专员的口径，启停与阈值调整都只放开给他。 */
+export function canManageRiskRules(employeeRole: EmployeeRole | undefined): boolean {
+  return employeeRole === RISK_OFFICER;
+}
+
 /** 只有风控专员能处置，且只能处置还没被判定过的预警。 */
 export function canDispose(employeeRole: EmployeeRole | undefined, status: AlertStatus): boolean {
   return employeeRole === RISK_OFFICER && status === "未处理";
@@ -62,34 +63,8 @@ export function canDeriveWorkOrder(
   return canDispose(employeeRole, alert.status) && alert.work_order_id === null;
 }
 
-/**
- * 工单能流转的两个状态，以及唯一能流转它的角色。
- *
- * 终态（已完成 / 已关闭）没有下一步——这与后端 `NEXT_STATUSES` 是同一张表，
- * 界面据此把处置表单换成一句说明，而不是让按钮点下去才报 409。
- */
-export function canHandleWorkOrder(
-  employeeRole: EmployeeRole | undefined,
-  status: WorkOrderStatus,
-): boolean {
-  return employeeRole === RISK_OFFICER && (status === "待处理" || status === "处理中");
-}
-
 export function confidenceText(confidence: number): string {
   return confidence.toFixed(2);
-}
-
-/**
- * 后端给的是它自己写下的那句话，直接透传；只有拿不到消息时（网络断了）才用兜底
- * 文案——用一句写死的话盖过后端的具体原因，等于把可诊断的信息丢掉。
- */
-export function errorMessage(error: unknown, fallback: string): string {
-  if (error instanceof ApiError) return error.message;
-  return error instanceof Error ? error.message : fallback;
-}
-
-export function formatDateTime(value: string): string {
-  return new Date(value).toLocaleString();
 }
 
 /**

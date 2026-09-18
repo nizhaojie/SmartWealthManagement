@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { ChunkHit } from "./types";
 
+// 命中卡片：分数与阈值的相对位置决定它的标签与左侧色条，卡片本身不做判断。
 defineProps<{
   hit: ChunkHit;
   label: string;
@@ -12,52 +13,62 @@ defineProps<{
 </script>
 
 <template>
-  <article class="retrieval-hit" :class="`retrieval-hit--${band}`">
-    <div class="retrieval-hit__meta">
+  <article class="hit" :class="`hit--${band}`" data-testid="retrieval-hit">
+    <header class="hit__head">
       <el-tag :type="tagType" size="small">{{ label }}</el-tag>
-      <span class="retrieval-hit__score">相似度 {{ scoreText }}</span>
-      <span>{{ hit.source_file }}<template v-if="sourceLocation"> · {{ sourceLocation }}</template></span>
-    </div>
-    <p class="retrieval-hit__content">{{ hit.content }}</p>
+      <span class="hit__score">相似度 {{ scoreText }}</span>
+      <span class="hit__source">
+        {{ hit.source_file }}
+        <template v-if="sourceLocation"> · {{ sourceLocation }}</template>
+      </span>
+    </header>
+    <p class="hit__content">{{ hit.content }}</p>
   </article>
 </template>
 
 <style scoped>
-.retrieval-hit {
-  margin-bottom: var(--wm-space-2);
+.hit {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wm-space-2);
   padding: var(--wm-space-3);
-  /* 命中卡片的 1px 边线（令牌纪律声明的极少数例外） */
-  border: 1px solid var(--wm-border);
+  /* 3px 左侧强调条由 band 决定（规格定死，不在间距刻度内） */
+  border-left: 3px solid var(--wm-border);
   border-radius: var(--wm-radius-sm);
+  background-color: var(--wm-bg-subtle);
 }
 
-.retrieval-hit--above {
-  border-left: 4px solid var(--wm-color-success);
+.hit--above {
+  border-left-color: var(--wm-color-success);
 }
 
-/* 未过线的命中弱化呈现：muted 左条 + 页面底色，不引入新的灰色 */
-.retrieval-hit--below {
-  border-left: 4px solid var(--wm-text-muted);
-  background: var(--wm-bg-page);
+.hit--below {
+  border-left-color: var(--wm-color-danger);
 }
 
-.retrieval-hit__meta {
+.hit__head {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: var(--wm-space-2);
-  margin-bottom: var(--wm-space-2);
-  color: var(--wm-text-secondary);
-  font-size: 13px;
 }
 
-.retrieval-hit__score {
+.hit__score {
+  color: var(--wm-text-primary);
+  font-size: 0.8rem;
   font-variant-numeric: tabular-nums;
 }
 
-.retrieval-hit__content {
+.hit__source {
+  color: var(--wm-text-muted);
+  font-size: 0.78rem;
+}
+
+.hit__content {
   margin: 0;
   color: var(--wm-text-primary);
+  font-size: 0.85rem;
+  line-height: 1.75;
   white-space: pre-wrap;
 }
 </style>

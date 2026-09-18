@@ -56,14 +56,6 @@ export type RiskAssessmentRecord = {
   valid_until: string;
 };
 
-export type CustomerListItem = {
-  id: number;
-  username: string;
-  real_name: string;
-  customer_level: string;
-  risk_level: string | null;
-};
-
 export type Holding = {
   product_code: string;
   product_name: string;

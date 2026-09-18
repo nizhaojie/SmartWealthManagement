@@ -6,17 +6,10 @@ import type {
   AdvisoryHistoryEntry,
   AdvisoryQueue,
   AdvisoryReviewStatus,
-  CustomerOption,
 } from "./types";
 
 export function getQueue(): Promise<AdvisoryQueue> {
   return http.get<AdvisoryQueue>("/api/internal/advisory/queue");
-}
-
-// 顾问也能在没有客户方案请求的情况下主动为一位客户发起生成（spec story
-// 「对一位客户发起方案生成」），不是只能从待生成队列里的请求进入。
-export function listCustomersForPlan(): Promise<CustomerOption[]> {
-  return http.get<CustomerOption[]>("/api/internal/customers");
 }
 
 export function getMyHistory(): Promise<AdvisoryHistoryEntry[]> {

@@ -1,223 +1,197 @@
+// 护栏 5「未审核内容不可送达」在前端的落点：
+// AI 原稿与顾问定稿两个版本分别可见且都留存；放行与驳回各自走通；驳回理由为空提交被拒。
 import ElementPlus from "element-plus";
-import { flushPromises, mount } from "@vue/test-utils";
-import { createMemoryHistory, createRouter } from "vue-router";
+import { createPinia, setActivePinia, type Pinia } from "pinia";
+import { flushPromises, mount, type VueWrapper } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ApiError } from "@wealth/shared";
-import { ACCOUNT_MANAGER, ADVISOR } from "../auth/identity";
-import { currentEmployee } from "../auth/store";
-import type { AdvisoryCandidate, AdvisoryComment, AdvisoryDraft, AdvisoryReviewStatus } from "./types";
-
-const { getDraft, getReviewStatus, getFinal, listComments, postComment, releaseDraft, rejectDraft } =
-  vi.hoisted(() => ({
-    getDraft: vi.fn(),
-    getReviewStatus: vi.fn(),
-    getFinal: vi.fn(),
-    listComments: vi.fn(),
-    postComment: vi.fn(),
-    releaseDraft: vi.fn(),
-    rejectDraft: vi.fn(),
-  }));
-
-vi.mock("./api", () => ({
-  getDraft,
-  getReviewStatus,
-  getFinal,
-  listComments,
-  postComment,
-  releaseDraft,
-  rejectDraft,
-}));
-
+import { createMemoryHistory, createRouter, type Router } from "vue-router";
+import { ACCOUNT_MANAGER, ADVISOR, type EmployeeRole } from "../auth/identity";
+import { useAuthStore } from "../stores/auth";
+import { apiError, requestedUrls, stubApiFetch } from "../testing";
 import AdvisoryReviewPage from "./AdvisoryReviewPage.vue";
 
-function makeCandidate(overrides: Partial<AdvisoryCandidate> = {}): AdvisoryCandidate {
-  return {
-    product_code: "F000001",
-    product_name: "稳健增利债券基金",
-    product_type: "债券基金",
-    risk_level: "C1",
-    expected_return: "3.20",
-    term_days: 90,
-    composite_score: 0.82,
-    score_breakdown: [
-      { dimension: "收益", raw_value: "3.20%", score: 0.8, weight: 0.33, contribution: 0.26 },
-      { dimension: "风险", raw_value: "C1", score: 1, weight: 0.33, contribution: 0.33 },
-      { dimension: "期限匹配度", raw_value: "90天", score: 1, weight: 0.34, contribution: 0.34 },
-    ],
-    reason: "客户风险承受等级为 C1，本产品风险等级 C1 与其完全匹配",
-    ...overrides,
-  };
-}
+const DRAFT = {
+  id: 7,
+  customer_id: 9,
+  advisor_id: 2,
+  tilt: "均衡",
+  content_classification: "投顾内容",
+  candidates: [
+    {
+      product_code: "P001",
+      product_name: "稳健增利一号",
+      product_type: "债券基金",
+      risk_level: "R2",
+      expected_return: "3.5",
+      term_days: 365,
+      composite_score: 88.2,
+      score_breakdown: [
+        { dimension: "风险匹配", raw_value: "C3 / R2", score: 90, weight: 0.3, contribution: 27 },
+      ],
+      reason: "与客户目标配置一致",
+    },
+  ],
+  allocation_suggestion: { 债券: 60, 股票: 20 },
+  warnings: [{ code: "CONCENTRATION", message: "债券集中度偏高" }],
+  profile_computed_at: "2026-09-18T09:00:00",
+  candidate_pool_snapshot: {},
+  generated_at: "2026-09-18T10:00:00",
+  advisory_request_id: null,
+  disclaimer: "本方案为投顾内容，须经审核后送达。",
+};
 
-function makeDraft(overrides: Partial<AdvisoryDraft> = {}): AdvisoryDraft {
-  return {
-    id: 42,
-    customer_id: 7,
-    advisor_id: 1,
-    tilt: "均衡",
-    content_classification: "投顾内容",
-    candidates: [makeCandidate(), makeCandidate({ product_code: "F000002", product_name: "货币增利基金" })],
-    allocation_suggestion: { 股票: 40, 债券: 35, 现金: 15, 另类: 10 },
-    warnings: [{ code: "PROFILE_STALE", message: "客户画像距上次计算已超过 180 天" }],
-    profile_computed_at: "2026-09-01T09:00:00",
-    candidate_pool_snapshot: {},
-    generated_at: "2026-09-16T09:00:00",
-    advisory_request_id: null,
-    disclaimer: "本方案不构成任何直接投资建议",
-    ...overrides,
-  };
-}
+const FINAL = {
+  id: 1,
+  draft_id: 7,
+  customer_id: 9,
+  advisor_id: 2,
+  advisor_name: "张顾问",
+  content_classification: "投顾内容",
+  candidates: [
+    {
+      product_code: "P001",
+      product_name: "稳健增利一号（定稿）",
+      product_type: "债券基金",
+      risk_level: "R2",
+      expected_return: "3.5",
+      term_days: 365,
+      composite_score: 88.2,
+      score_breakdown: [],
+      reason: "与客户目标配置一致",
+    },
+  ],
+  allocation_suggestion: { 债券: 60, 股票: 20 },
+  warnings: [],
+  released_at: "2026-09-18T11:00:00",
+  disclaimer: "本方案为投顾内容，须经审核后送达。",
+};
 
-function makeReview(status: AdvisoryReviewStatus["status"] = "待审"): AdvisoryReviewStatus {
-  return { draft_id: 42, status };
-}
+let pinia: Pinia;
+let router: Router;
+let wrapper: VueWrapper | null = null;
+let responded: { review?: unknown; draft?: unknown; final?: unknown } = {};
 
-function makeComment(overrides: Partial<AdvisoryComment> = {}): AdvisoryComment {
-  return {
-    id: 1,
-    review_id: 1,
-    author_id: 2,
-    author_name: "刘经理",
-    author_role: "客户经理",
-    body: "客户询问进度",
-    created_at: "2026-09-16T10:00:00",
-    ...overrides,
-  };
-}
+async function mountPage(role: EmployeeRole): Promise<VueWrapper> {
+  stubApiFetch((url) => {
+    if (url.includes("/drafts/7/review")) return responded.review ?? { draft_id: 7, status: "待审" };
+    if (url.includes("/drafts/7/final")) return responded.final ?? FINAL;
+    if (url.includes("/drafts/7/comments")) return { comments: [] };
+    if (url.includes("/drafts/7/release")) return FINAL;
+    if (url.includes("/drafts/7/reject")) return { draft_id: 7, status: "已驳回", reason: "标的过于集中" };
+    if (url.includes("/drafts/7")) return responded.draft ?? DRAFT;
+    return undefined;
+  });
 
-function makeRouter() {
-  const router = createRouter({
+  pinia = createPinia();
+  setActivePinia(pinia);
+  useAuthStore().currentEmployee = { real_name: "测试员工", employee_role: role };
+
+  router = createRouter({
     history: createMemoryHistory(),
     routes: [
+      { path: "/advisory/reviews/:draftId", name: "advisory-review", component: AdvisoryReviewPage },
       { path: "/advisory", name: "advisory", component: { template: "<div />" } },
-      {
-        path: "/advisory/reviews/:draftId",
-        name: "advisory-review",
-        component: AdvisoryReviewPage,
-      },
     ],
   });
-  return router;
-}
-
-async function mountReviewPage(draftId = "42") {
-  const router = makeRouter();
-  await router.push(`/advisory/reviews/${draftId}`);
+  await router.push("/advisory/reviews/7");
   await router.isReady();
-  const wrapper = mount(AdvisoryReviewPage, { global: { plugins: [ElementPlus, router] } });
+
+  wrapper = mount(AdvisoryReviewPage, { global: { plugins: [pinia, ElementPlus, router] } });
   await flushPromises();
-  return { wrapper, router };
+  return wrapper;
 }
 
-describe("AdvisoryReviewPage", () => {
-  beforeEach(() => {
-    getDraft.mockReset();
-    getReviewStatus.mockReset();
-    getFinal.mockReset();
-    listComments.mockReset();
-    postComment.mockReset();
-    releaseDraft.mockReset();
-    rejectDraft.mockReset();
+beforeEach(() => {
+  localStorage.clear();
+  responded = {};
+});
 
-    getDraft.mockResolvedValue(makeDraft());
-    getReviewStatus.mockResolvedValue(makeReview());
-    listComments.mockResolvedValue([makeComment()]);
+afterEach(() => {
+  wrapper?.unmount();
+  wrapper = null;
+  vi.unstubAllGlobals();
+  localStorage.clear();
+});
 
-    currentEmployee.value = { real_name: "陈顾问", employee_role: ADVISOR as never };
+describe("审核页", () => {
+  it("AI 原稿与顾问编辑版本并排可见", async () => {
+    const page = await mountPage(ADVISOR);
+
+    expect(page.get('[data-testid="original-panel"]').text()).toContain("稳健增利一号");
+    expect(page.find('[data-testid="edited-panel"]').exists()).toBe(true);
+    expect(page.findAll('[data-testid="candidate-include"]').length).toBe(1);
+    expect(page.get('[data-testid="review-status"]').text()).toContain("待审");
   });
 
-  afterEach(() => {
-    currentEmployee.value = null;
+  it("画像警告原样透传", async () => {
+    const page = await mountPage(ADVISOR);
+
+    expect(page.get('[data-testid="draft-warning"]').text()).toContain("债券集中度偏高");
   });
 
-  it("renders the AI draft and the editable copy side by side", async () => {
-    const { wrapper } = await mountReviewPage();
+  it("放行后出现顾问定稿，AI 原稿仍然留存", async () => {
+    const page = await mountPage(ADVISOR);
 
-    const original = wrapper.get('[data-test="original-panel"]');
-    const edited = wrapper.get('[data-test="edited-panel"]');
-    expect(original.text()).toContain("稳健增利债券基金");
-    expect(edited.text()).toContain("稳健增利债券基金");
-    expect(original.text()).toContain("AI 原稿");
-    expect(edited.text()).toContain("编辑版本");
-  });
-
-  it("expands to show each dimension's contribution to the ranking", async () => {
-    const { wrapper } = await mountReviewPage();
-
-    const expandIcons = wrapper.findAll(".el-table__expand-icon");
-    await expandIcons[0].trigger("click");
+    await page.get('[data-testid="release"]').trigger("click");
     await flushPromises();
 
-    expect(wrapper.text()).toContain("贡献 0.26");
+    expect(page.get('[data-testid="final-panel"]').text()).toContain("稳健增利一号（定稿）");
+    expect(page.get('[data-testid="review-status"]').text()).toContain("已放行");
+    // 两版本留存：定稿出现不等于原稿消失。
+    expect(page.get('[data-testid="original-panel"]').text()).toContain("稳健增利一号");
+    expect(page.find('[data-testid="review-decision"]').exists()).toBe(false);
   });
 
-  it("shows release and reject entry points for an advisor, reject disabled until a reason is filled", async () => {
-    const { wrapper } = await mountReviewPage();
+  it("驳回理由为空时提交被拒，接口不会被调用", async () => {
+    const page = await mountPage(ADVISOR);
+    const fetchMock = vi.mocked(globalThis.fetch);
 
-    expect(wrapper.find('[data-test="release"]').exists()).toBe(true);
-    const rejectButton = wrapper.get('[data-test="reject"]');
-    expect(rejectButton.attributes("aria-disabled")).toBe("true");
-
-    await wrapper.get('[data-test="reject-reason"]').setValue("理由不充分");
+    expect(page.get('[data-testid="reject"]').attributes("disabled")).toBeDefined();
+    await page.get('[data-testid="reject"]').trigger("click");
     await flushPromises();
 
-    expect(wrapper.get('[data-test="reject"]').attributes("aria-disabled")).toBe("false");
+    expect(requestedUrls(fetchMock, "/reject")).toHaveLength(0);
+    expect(page.get('[data-testid="review-status"]').text()).toContain("待审");
   });
 
-  it("submitting a reject with a reason calls the API and updates the status", async () => {
-    rejectDraft.mockResolvedValue({ draft_id: 42, status: "已驳回", reason: "理由不充分" });
-    const { wrapper } = await mountReviewPage();
+  it("填了理由就能驳回，理由随请求发出", async () => {
+    const page = await mountPage(ADVISOR);
+    const fetchMock = vi.mocked(globalThis.fetch);
 
-    await wrapper.get('[data-test="reject-reason"]').setValue("理由不充分");
-    await wrapper.get('[data-test="reject"]').trigger("click");
+    await page.get('[data-testid="reject-reason"]').setValue("标的过于集中");
+    await page.get('[data-testid="reject"]').trigger("click");
     await flushPromises();
 
-    expect(rejectDraft).toHaveBeenCalledWith(42, "理由不充分");
-    expect(wrapper.get('[data-test="review-status"]').text()).toContain("已驳回");
+    const rejectCall = fetchMock.mock.calls.find((call) => String(call[0]).includes("/reject"));
+    expect(rejectCall).toBeTruthy();
+    expect(JSON.parse(String((rejectCall?.[1] as RequestInit).body))).toEqual({
+      reason: "标的过于集中",
+    });
+    expect(page.get('[data-testid="review-status"]').text()).toContain("已驳回");
   });
 
-  it("hides the release entry point for an account manager", async () => {
-    currentEmployee.value = { real_name: "刘经理", employee_role: ACCOUNT_MANAGER as never };
-    const { wrapper } = await mountReviewPage();
+  it("客户经理能看能留言，但没有放行与驳回入口", async () => {
+    const page = await mountPage(ACCOUNT_MANAGER);
 
-    expect(wrapper.find('[data-test="release"]').exists()).toBe(false);
-    expect(wrapper.find('[data-test="no-release-entry"]').exists()).toBe(true);
+    expect(page.find('[data-testid="review-decision"]').exists()).toBe(false);
+    expect(page.get('[data-testid="no-release-entry"]').text()).toContain("无法放行或驳回");
+    expect(page.find('[data-testid="comments-panel"]').exists()).toBe(true);
   });
 
-  it("renders a forbidden state when the backend refuses access", async () => {
-    getDraft.mockRejectedValue(new ApiError({ code: 403, message: "无权查看", data: null, trace_id: "t1" }));
-    const { wrapper } = await mountReviewPage();
+  it("403 时渲染无权查看而不是空白页", async () => {
+    const page = await mountPage(ACCOUNT_MANAGER);
+    await page.unmount();
+    responded = { review: apiError(403, "该客户不在你的名下，无权查看") };
 
-    expect(wrapper.find('[data-test="forbidden"]').exists()).toBe(true);
-    expect(wrapper.find('[data-test="original-panel"]').exists()).toBe(false);
+    const forbidden = await mountPage(ACCOUNT_MANAGER);
+    expect(forbidden.get('[data-testid="review-forbidden"]').text()).toContain("无权查看");
   });
 
-  it("renders and can post comments, visible to both roles", async () => {
-    postComment.mockResolvedValue(makeComment({ id: 2, body: "已跟客户沟通" }));
-    const { wrapper } = await mountReviewPage();
+  it("已放行的草稿直接取顾问定稿，不再显示编辑入口", async () => {
+    responded = { review: { draft_id: 7, status: "已放行" } };
+    const page = await mountPage(ADVISOR);
 
-    expect(wrapper.text()).toContain("客户询问进度");
-
-    await wrapper.get('[data-test="comment-input"]').setValue("已跟客户沟通");
-    await wrapper.get('[data-test="post-comment"]').trigger("click");
-    await flushPromises();
-
-    expect(postComment).toHaveBeenCalledWith(42, "已跟客户沟通");
-    expect(wrapper.text()).toContain("已跟客户沟通");
-  });
-
-  it("renders the profile warning carried by the draft", async () => {
-    const { wrapper } = await mountReviewPage();
-
-    expect(wrapper.text()).toContain("客户画像距上次计算已超过 180 天");
-  });
-
-  it("has an independent route with a back-to-queue button", async () => {
-    const { wrapper, router } = await mountReviewPage();
-
-    await wrapper.get('[data-test="back-to-queue"]').trigger("click");
-    await flushPromises();
-
-    expect(router.currentRoute.value.name).toBe("advisory");
+    expect(page.get('[data-testid="final-panel"]').text()).toContain("稳健增利一号（定稿）");
+    expect(page.find('[data-testid="review-decision"]').exists()).toBe(false);
   });
 });

@@ -1,31 +1,45 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { ApiError, PanelCard } from "@wealth/shared";
-import { ADVISOR } from "../auth/identity";
-import { currentEmployee } from "../auth/store";
+import { ApiError, PageHeader, PanelCard } from "@wealth/shared";
+import { errorMessage } from "../format";
+import CustomerInspector from "../inspector/CustomerInspector.vue";
+import { useInspector } from "../shell/pageSlots";
+import { useAuthStore } from "../stores/auth";
+import { useCurrentCustomerStore } from "../stores/currentCustomer";
+import AdvisoryCommentsPanel from "./AdvisoryCommentsPanel.vue";
+import DraftVersionsPanels from "./DraftVersionsPanels.vue";
+import ReviewDecisionPanel from "./ReviewDecisionPanel.vue";
 import {
   getDraft,
   getFinal,
   getReviewStatus,
   listComments,
   postComment,
-  rejectDraft,
   releaseDraft,
+  rejectDraft,
 } from "./api";
+import { canReview, isDecided, toCandidatePayload } from "./reviewView";
 import type {
-  AdvisoryCandidate,
   AdvisoryComment,
   AdvisoryDraft,
   AdvisoryFinal,
   AdvisoryReviewStatus,
+  EditableCandidate,
 } from "./types";
 
+/**
+ * 审核页：护栏「未审核内容不可送达」在前端的落点。
+ *
+ * 左列是 AI 原稿（永久留存），右列放行前是顾问编辑版本、放行后换成顾问定稿。
+ * 放行与驳回都只对理财顾问开放；其他角色只能查看与留言（后端也会再挡一次）。
+ */
 const route = useRoute();
 const router = useRouter();
+const auth = useAuthStore();
+const currentCustomer = useCurrentCustomerStore();
 
 const draftId = computed(() => Number(route.params.draftId));
-const isAdvisor = computed(() => currentEmployee.value?.employee_role === ADVISOR);
 
 const draft = ref<AdvisoryDraft | null>(null);
 const review = ref<AdvisoryReviewStatus | null>(null);
@@ -37,135 +51,142 @@ const forbidden = ref(false);
 const forbiddenMessage = ref("");
 const loadError = ref("");
 
-const editedCandidates = ref<(AdvisoryCandidate & { included: boolean })[]>([]);
+const editedCandidates = ref<EditableCandidate[]>([]);
 const editedAllocation = ref<Record<string, number>>({});
 
-const rejectReason = ref("");
 const actionError = ref("");
 const submitting = ref(false);
-
-const newComment = ref("");
 const commentError = ref("");
+const commentSubmitting = ref(false);
 
-const isDecided = computed(
-  () => review.value?.status === "已放行" || review.value?.status === "已驳回",
-);
+const isAdvisor = computed(() => canReview(auth.currentEmployee?.employee_role));
+const decided = computed(() => isDecided(review.value?.status));
+const editable = computed(() => isAdvisor.value && !decided.value);
 
-const removedCount = computed(
-  () => editedCandidates.value.filter((candidate) => !candidate.included).length,
-);
-
-function changedAllocationKeys(): string[] {
-  if (!draft.value) return [];
-  return Object.keys(editedAllocation.value).filter(
-    (key) => editedAllocation.value[key] !== draft.value?.allocation_suggestion[key],
-  );
+async function loadComments(): Promise<void> {
+  try {
+    comments.value = await listComments(draftId.value);
+  } catch {
+    // 留言拉不到不影响审核本身，保留已加载的部分。
+  }
 }
 
-async function load() {
+async function load(): Promise<void> {
   loading.value = true;
-  forbidden.value = false;
   loadError.value = "";
+  forbidden.value = false;
+  final.value = null;
+
+  if (!Number.isFinite(draftId.value)) {
+    loadError.value = "审核单号无效";
+    loading.value = false;
+    return;
+  }
+
   try {
-    const [loadedDraft, loadedReview] = await Promise.all([
+    const [nextDraft, nextReview] = await Promise.all([
       getDraft(draftId.value),
       getReviewStatus(draftId.value),
     ]);
-    draft.value = loadedDraft;
-    review.value = loadedReview;
-    editedCandidates.value = loadedDraft.candidates.map((candidate) => ({
+    draft.value = nextDraft;
+    review.value = nextReview;
+    editedCandidates.value = nextDraft.candidates.map((candidate) => ({
       ...candidate,
       included: true,
     }));
-    editedAllocation.value = { ...loadedDraft.allocation_suggestion };
+    editedAllocation.value = { ...nextDraft.allocation_suggestion };
+    // 审核的是某位客户的方案，检查器跟着显示这位客户。
+    currentCustomer.setCustomer(nextDraft.customer_id);
 
-    if (loadedReview.status === "已放行") {
+    if (nextReview.status === "已放行") {
       final.value = await getFinal(draftId.value);
     }
-    comments.value = await listComments(draftId.value);
+    await loadComments();
   } catch (error) {
     if (error instanceof ApiError && error.code === 403) {
       forbidden.value = true;
-      // 403 有两种成因（角色不对 / 角色对但不是这位客户的经理），后端的
-      // message 已经分得清楚，直接透传，不要用一句写死的话盖过它。
       forbiddenMessage.value = error.message;
     } else {
-      loadError.value = error instanceof ApiError ? error.message : "加载审核内容失败";
+      loadError.value = errorMessage(error, "审核资料加载失败");
     }
   } finally {
     loading.value = false;
   }
 }
 
-function backToQueue() {
-  router.push({ name: "advisory" });
-}
-
-async function submitRelease() {
+async function submitRelease(): Promise<void> {
   actionError.value = "";
   submitting.value = true;
   try {
-    const candidates = editedCandidates.value
-      .filter((candidate) => candidate.included)
-      .map(({ included: _included, ...candidate }) => candidate);
     final.value = await releaseDraft(draftId.value, {
-      candidates,
-      allocationSuggestion: editedAllocation.value,
+      candidates: toCandidatePayload(editedCandidates.value),
+      allocationSuggestion: { ...editedAllocation.value },
     });
     review.value = { draft_id: draftId.value, status: "已放行" };
   } catch (error) {
-    actionError.value = error instanceof ApiError ? error.message : "放行失败";
+    actionError.value = errorMessage(error, "放行失败");
   } finally {
     submitting.value = false;
   }
 }
 
-async function submitReject() {
-  if (!rejectReason.value.trim()) return;
+async function submitReject(reason: string): Promise<void> {
   actionError.value = "";
   submitting.value = true;
   try {
-    await rejectDraft(draftId.value, rejectReason.value.trim());
+    await rejectDraft(draftId.value, reason);
     review.value = { draft_id: draftId.value, status: "已驳回" };
   } catch (error) {
-    actionError.value = error instanceof ApiError ? error.message : "驳回失败";
+    actionError.value = errorMessage(error, "驳回失败");
   } finally {
     submitting.value = false;
   }
 }
 
-async function submitComment() {
-  if (!newComment.value.trim()) return;
+async function submitComment(body: string): Promise<void> {
   commentError.value = "";
+  commentSubmitting.value = true;
   try {
-    const comment = await postComment(draftId.value, newComment.value.trim());
-    comments.value = [...comments.value, comment];
-    newComment.value = "";
+    await postComment(draftId.value, body);
+    await loadComments();
   } catch (error) {
-    commentError.value = error instanceof ApiError ? error.message : "发送留言失败";
+    commentError.value = errorMessage(error, "留言失败");
+  } finally {
+    commentSubmitting.value = false;
   }
 }
 
-function formatDateTime(value: string): string {
-  return new Date(value).toLocaleString();
+function backToQueue(): void {
+  void router.push("/advisory");
 }
 
-onMounted(load);
+useInspector(() => ({ component: CustomerInspector }));
+
+watch(draftId, load, { immediate: true });
 </script>
 
 <template>
-  <div class="advisory-review" data-test="advisory-review-page">
-    <p v-if="loading">加载中…</p>
-    <PanelCard v-else-if="forbidden" title="无权查看" data-test="forbidden">
-      <p role="alert">{{ forbiddenMessage }}</p>
-    </PanelCard>
-    <p v-else-if="loadError" class="advisory-review__error" data-test="load-error">{{ loadError }}</p>
+  <div class="review">
+    <PageHeader title="审核" :breadcrumb="['投顾助手', '审核']">
+      <template #actions>
+        <el-button size="small" name="back-to-queue" data-testid="back-to-queue" @click="backToQueue">
+          返回队列
+        </el-button>
+      </template>
+    </PageHeader>
 
-    <template v-else-if="draft && review">
-      <header class="advisory-review__header">
-        <el-button data-test="back-to-queue" @click="backToQueue">返回队列</el-button>
-        <span data-test="review-status">当前状态：{{ review.status }}</span>
-      </header>
+    <p v-if="forbidden" class="review__forbidden" role="alert" data-testid="review-forbidden">
+      {{ forbiddenMessage || "无权查看这份方案" }}
+    </p>
+    <p v-else-if="loadError" class="review__error" role="alert" data-testid="review-error">
+      {{ loadError }}
+    </p>
+    <p v-else-if="loading" class="review__hint">加载中…</p>
+
+    <template v-else-if="draft">
+      <p class="review__status" data-testid="review-status">
+        当前状态：{{ review?.status ?? "待审" }}
+      </p>
 
       <el-alert
         v-for="warning in draft.warnings"
@@ -173,235 +194,68 @@ onMounted(load);
         type="warning"
         :closable="false"
         :title="warning.message"
-        data-test="draft-warning"
-        class="advisory-review__warning"
+        data-testid="draft-warning"
       />
 
-      <div class="advisory-review__panels">
-        <PanelCard title="AI 原稿" data-test="original-panel">
-          <el-table :data="draft.candidates" row-key="product_code">
-            <el-table-column type="expand">
-              <template #default="{ row }">
-                <ul class="advisory-review__breakdown" data-test="score-breakdown">
-                  <li v-for="item in row.score_breakdown" :key="item.dimension">
-                    {{ item.dimension }}：{{ item.raw_value }}，得分 {{ item.score }} ×
-                    权重 {{ item.weight }} = 贡献 {{ item.contribution }}
-                  </li>
-                </ul>
-              </template>
-            </el-table-column>
-            <el-table-column prop="product_name" label="产品" />
-            <el-table-column prop="risk_level" label="风险等级" />
-            <el-table-column prop="composite_score" label="综合得分" />
-          </el-table>
-          <h3 class="advisory-review__subheading">配置建议</h3>
-          <ul class="advisory-review__allocation">
-            <li v-for="(value, key) in draft.allocation_suggestion" :key="key">
-              {{ key }}：{{ value }}%
-            </li>
-          </ul>
-        </PanelCard>
+      <DraftVersionsPanels
+        :draft="draft"
+        :final="final"
+        :candidates="editedCandidates"
+        :allocation="editedAllocation"
+        :editable="editable"
+      />
 
-        <PanelCard title="编辑版本" data-test="edited-panel">
-          <p v-if="removedCount" class="advisory-review__diff-note" data-test="removed-note">
-            已从原稿移除 {{ removedCount }} 项推荐产品
-          </p>
-          <el-table :data="editedCandidates" row-key="product_code">
-            <el-table-column type="expand">
-              <template #default="{ row }">
-                <ul class="advisory-review__breakdown" data-test="score-breakdown-edited">
-                  <li v-for="item in row.score_breakdown" :key="item.dimension">
-                    {{ item.dimension }}：{{ item.raw_value }}，得分 {{ item.score }} ×
-                    权重 {{ item.weight }} = 贡献 {{ item.contribution }}
-                  </li>
-                </ul>
-              </template>
-            </el-table-column>
-            <el-table-column label="保留">
-              <template #default="{ row }">
-                <el-checkbox v-model="row.included" data-test="candidate-include" :disabled="isDecided || !isAdvisor" />
-              </template>
-            </el-table-column>
-            <el-table-column prop="product_name" label="产品">
-              <template #default="{ row }">
-                <span :class="{ 'is-removed': !row.included }">{{ row.product_name }}</span>
-              </template>
-            </el-table-column>
-            <el-table-column prop="risk_level" label="风险等级" />
-            <el-table-column prop="composite_score" label="综合得分" />
-          </el-table>
-          <h3 class="advisory-review__subheading">配置建议</h3>
-          <ul class="advisory-review__allocation">
-            <li v-for="(_value, key) in editedAllocation" :key="key">
-              {{ key }}：
-              <el-input-number
-                v-model="editedAllocation[key]"
-                :min="0"
-                :max="100"
-                size="small"
-                :disabled="isDecided || !isAdvisor"
-                data-test="allocation-input"
-              />
-              <span v-if="changedAllocationKeys().includes(key)" class="advisory-review__changed" data-test="allocation-changed">
-                （原 {{ draft.allocation_suggestion[key] }}%）
-              </span>
-            </li>
-          </ul>
-        </PanelCard>
-      </div>
-
-      <PanelCard v-if="isAdvisor && !isDecided" title="审核决定" class="advisory-review__actions">
-        <el-button type="primary" data-test="release" :loading="submitting" @click="submitRelease">
-          放行
-        </el-button>
-        <div class="advisory-review__reject">
-          <el-input
-            v-model="rejectReason"
-            type="textarea"
-            :rows="2"
-            placeholder="驳回理由（必填）"
-            data-test="reject-reason"
-          />
-          <el-button
-            type="danger"
-            data-test="reject"
-            :disabled="!rejectReason.trim()"
-            :loading="submitting"
-            @click="submitReject"
-          >
-            驳回
-          </el-button>
-        </div>
-        <p v-if="actionError" class="advisory-review__error" data-test="action-error">{{ actionError }}</p>
-      </PanelCard>
-      <p v-else-if="!isAdvisor && !isDecided" class="advisory-review__hint" data-test="no-release-entry">
-        当前角色无法放行或驳回，仅可查看与留言。
-      </p>
-
-      <PanelCard v-if="final" title="顾问定稿" data-test="final-panel">
-        <p>放行人：{{ final.advisor_name }} · {{ formatDateTime(final.released_at) }}</p>
+      <ReviewDecisionPanel
+        v-if="isAdvisor && !decided"
+        :submitting="submitting"
+        :error="actionError"
+        @release="submitRelease"
+        @reject="submitReject"
+      />
+      <PanelCard v-else-if="!decided" title="审核决定">
+        <p class="review__hint" data-testid="no-release-entry">
+          当前角色无法放行或驳回，仅可查看与留言。
+        </p>
       </PanelCard>
 
-      <PanelCard title="留言" data-test="comments-panel">
-        <ul class="advisory-review__comments">
-          <li v-for="comment in comments" :key="comment.id">
-            <strong>{{ comment.author_name }}（{{ comment.author_role }}）</strong>
-            <span>{{ formatDateTime(comment.created_at) }}</span>
-            <p>{{ comment.body }}</p>
-          </li>
-        </ul>
-        <div class="advisory-review__comment-form">
-          <el-input
-            v-model="newComment"
-            type="textarea"
-            :rows="2"
-            placeholder="写一条留言"
-            data-test="comment-input"
-          />
-          <el-button data-test="post-comment" :disabled="!newComment.trim()" @click="submitComment">
-            发送
-          </el-button>
-        </div>
-        <p v-if="commentError" class="advisory-review__error">{{ commentError }}</p>
-      </PanelCard>
+      <AdvisoryCommentsPanel
+        :comments="comments"
+        :submitting="commentSubmitting"
+        :error="commentError"
+        @post="submitComment"
+      />
     </template>
   </div>
 </template>
 
 <style scoped>
-.advisory-review {
+.review {
   display: flex;
   flex-direction: column;
   gap: var(--wm-space-4);
 }
 
-.advisory-review__header {
-  display: flex;
-  align-items: center;
-  gap: var(--wm-space-4);
-}
-
-.advisory-review__panels {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: var(--wm-space-4);
-}
-
-.advisory-review__subheading {
-  margin: var(--wm-space-3) 0;
-  color: var(--wm-text-primary);
-}
-
-.advisory-review__breakdown {
+.review__status {
   margin: 0;
-  padding-left: var(--wm-space-5);
-}
-
-.advisory-review__allocation {
-  list-style: none;
-  padding: 0;
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--wm-space-3);
-  color: var(--wm-text-primary);
-}
-
-.is-removed {
-  text-decoration: line-through;
   color: var(--wm-text-muted);
+  font-size: 0.85rem;
 }
 
-.advisory-review__changed {
-  color: var(--wm-color-warning);
-  font-size: 12px;
+.review__hint {
+  margin: 0;
+  color: var(--wm-text-muted);
+  font-size: 0.85rem;
 }
 
-.advisory-review__diff-note {
-  color: var(--wm-color-warning);
-}
-
-.advisory-review__reject {
-  display: flex;
-  gap: var(--wm-space-2);
-  align-items: flex-start;
-  margin-top: var(--wm-space-3);
-}
-
-.advisory-review__error {
+.review__error,
+.review__forbidden {
+  margin: 0;
+  padding: var(--wm-space-4);
+  /* 细边框属令牌纪律声明的极少数 1px 例外 */
+  border: 1px solid var(--wm-color-danger);
+  border-radius: var(--wm-radius-md);
+  background-color: var(--wm-bg-card);
   color: var(--wm-color-danger);
-}
-
-.advisory-review__hint {
-  color: var(--wm-text-muted);
-}
-
-.advisory-review__comments {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-}
-
-.advisory-review__comments li {
-  /* 留言间的 1px 虚线分隔（令牌纪律声明的极少数例外） */
-  border-bottom: 1px dashed var(--wm-border-hairline);
-  padding: var(--wm-space-2) 0;
-}
-
-.advisory-review__comments span {
-  margin-left: var(--wm-space-2);
-  color: var(--wm-text-muted);
-  font-size: 12px;
-}
-
-.advisory-review__comment-form {
-  display: flex;
-  gap: var(--wm-space-2);
-  margin-top: var(--wm-space-3);
-}
-
-@media (max-width: 900px) {
-  .advisory-review__panels {
-    grid-template-columns: 1fr;
-  }
+  font-size: 0.85rem;
 }
 </style>

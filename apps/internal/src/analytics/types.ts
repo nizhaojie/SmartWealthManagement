@@ -15,6 +15,7 @@ export type AnalyticsQueryResponse = {
   views: string[];
   interpretation: string;
   content_classification: string;
+  /** 只在投顾内容时非空：事实性内容不带免责声明。 */
   disclaimer: string | null;
 };
 

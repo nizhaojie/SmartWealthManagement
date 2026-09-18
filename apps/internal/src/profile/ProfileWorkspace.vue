@@ -1,38 +1,54 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
-import { PanelCard } from "@wealth/shared";
-import {
-  getCustomerAssets,
-  getCustomerProfile,
-  listCustomers,
-  listRiskAssessments,
-  writeProfileTag,
-} from "./api";
-import ProfilePanel from "./ProfilePanel.vue";
-import type { CustomerListItem, CustomerProfileView, Holding, RiskAssessmentRecord } from "./types";
+import { ElMessage } from "element-plus";
+import { PageHeader } from "@wealth/shared";
+import { errorMessage } from "../format";
+import CustomerInspector from "../inspector/CustomerInspector.vue";
+import { actionButton } from "../shell/actionButton";
+import { useInspector, useTopbarActions } from "../shell/pageSlots";
+import { useCurrentCustomerStore } from "../stores/currentCustomer";
+import { listCustomers } from "../customers/api";
+import type { CustomerListItem } from "../customers/types";
+import { getCustomerAssets, getCustomerProfile, listRiskAssessments, writeProfileTag } from "./api";
+import CustomerListPanel from "./CustomerListPanel.vue";
+import ProfileMain from "./ProfileMain.vue";
+import type { CustomerAssets, CustomerProfileView, RiskAssessmentRecord } from "./types";
+
+/**
+ * 客户画像：左侧客户列表 + 右侧画像主体。第三栏常驻客户检查器，
+ * 选人即把「当前客户」写进全局 store，检查器跟着换。
+ */
+const currentCustomer = useCurrentCustomerStore();
 
 const customers = ref<CustomerListItem[]>([]);
-const selectedId = ref<number | null>(null);
+const customersLoading = ref(true);
+const customersError = ref("");
+
 const profile = ref<CustomerProfileView | null>(null);
 const assessments = ref<RiskAssessmentRecord[]>([]);
-const holdings = ref<Holding[]>([]);
-const loadError = ref("");
+const assets = ref<CustomerAssets | null>(null);
+const profileLoading = ref(false);
+const profileError = ref("");
 
-async function loadCustomers() {
-  loadError.value = "";
+const selectedId = ref<number | null>(null);
+
+async function loadCustomers(): Promise<void> {
+  customersLoading.value = true;
+  customersError.value = "";
   try {
     customers.value = await listCustomers();
-    if (customers.value.length && selectedId.value === null) {
-      await selectCustomer(customers.value[0].id);
-    }
   } catch (error) {
-    loadError.value = error instanceof Error ? error.message : "加载客户列表失败";
+    customersError.value = errorMessage(error, "客户列表加载失败");
+  } finally {
+    customersLoading.value = false;
   }
 }
 
-async function selectCustomer(customerId: number) {
+async function selectCustomer(customerId: number): Promise<void> {
   selectedId.value = customerId;
-  loadError.value = "";
+  currentCustomer.setCustomer(customerId);
+  profileLoading.value = true;
+  profileError.value = "";
   try {
     const [nextProfile, nextAssessments, nextAssets] = await Promise.all([
       getCustomerProfile(customerId),
@@ -41,19 +57,33 @@ async function selectCustomer(customerId: number) {
     ]);
     profile.value = nextProfile;
     assessments.value = nextAssessments;
-    holdings.value = nextAssets.holdings;
+    assets.value = nextAssets;
   } catch (error) {
     profile.value = null;
     assessments.value = [];
-    holdings.value = [];
-    loadError.value = error instanceof Error ? error.message : "加载客户画像失败";
+    assets.value = null;
+    profileError.value = errorMessage(error, "画像加载失败");
+  } finally {
+    profileLoading.value = false;
   }
 }
 
-async function correctTag(payload: { tagKey: string; value: unknown; reason: string }) {
+async function refresh(): Promise<void> {
+  if (selectedId.value === null) {
+    await loadCustomers();
+    return;
+  }
+  await selectCustomer(selectedId.value);
+}
+
+async function correctTag(payload: {
+  tagKey: string;
+  value: unknown;
+  reason: string;
+}): Promise<void> {
   if (selectedId.value === null) return;
-  loadError.value = "";
   try {
+    // 后端返回刷新后的完整画像，直接替换，不本地改一份可能不一致的副本。
     profile.value = await writeProfileTag({
       customerId: selectedId.value,
       tagKey: payload.tagKey,
@@ -61,87 +91,101 @@ async function correctTag(payload: { tagKey: string; value: unknown; reason: str
       source: "理财顾问手工修正",
       reason: payload.reason,
     });
+    ElMessage.success("已保存修正");
   } catch (error) {
-    loadError.value = error instanceof Error ? error.message : "保存修正失败";
+    ElMessage.error(errorMessage(error, "修正失败"));
   }
 }
+
+// 页面往壳里注入自己的检查器与顶栏操作；离开这个页面时自动收回。
+useInspector(() => ({ component: CustomerInspector }));
+useTopbarActions(() => ({
+  component: actionButton({ label: "刷新", name: "refresh-profile", onClick: () => void refresh() }),
+}));
 
 onMounted(loadCustomers);
 </script>
 
 <template>
-  <div class="profile-workspace">
-    <PanelCard title="客户" class="profile-workspace__list">
-      <p v-if="loadError" class="profile-workspace__error">{{ loadError }}</p>
-      <button
-        v-for="customer in customers"
-        :key="customer.id"
-        type="button"
-        :class="{ 'is-active': customer.id === selectedId }"
-        @click="selectCustomer(customer.id)"
-      >
-        <strong>{{ customer.real_name }}</strong>
-        <span>{{ customer.risk_level ?? "未评测" }} · {{ customer.customer_level }}</span>
-      </button>
-    </PanelCard>
-    <ProfilePanel
-      v-if="profile"
-      :profile="profile"
-      :assessments="assessments"
-      :holdings="holdings"
-      @correct="correctTag"
-    />
-    <p v-else-if="!loadError" class="profile-workspace__empty">选择一位客户查看画像</p>
+  <div class="profile">
+    <PageHeader title="客户画像" :breadcrumb="['客户画像']" />
+
+    <div class="profile__grid">
+      <CustomerListPanel
+        :customers="customers"
+        :selected-id="selectedId"
+        :loading="customersLoading"
+        :error="customersError"
+        @select="selectCustomer"
+      />
+
+      <div class="profile__main">
+        <p v-if="profileError" class="profile__error" role="alert" data-testid="profile-error">
+          {{ profileError }}
+        </p>
+        <p v-else-if="!profile" class="profile__empty" data-testid="profile-empty">
+          选择一位客户查看画像
+        </p>
+        <ProfileMain
+          v-else
+          :profile="profile"
+          :assessments="assessments"
+          :holdings="assets?.holdings ?? []"
+          :loading="profileLoading"
+          @correct="correctTag"
+        />
+      </div>
+    </div>
   </div>
 </template>
 
 <style scoped>
-.profile-workspace {
-  display: grid;
-  grid-template-columns: 240px minmax(0, 1fr);
-  gap: var(--wm-space-5);
-  min-height: 70vh;
-}
-
-.profile-workspace__list button {
+.profile {
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
-  width: 100%;
-  margin-bottom: var(--wm-space-2);
-  padding: var(--wm-space-2);
-  background: none;
-  border: 0;
-  /* 3px 左指示条：激活态标记，同 AppShell 导航与 StatCard 左条规格 */
-  border-left: 3px solid transparent;
-  border-radius: var(--wm-radius-sm);
-  cursor: pointer;
-  text-align: left;
-  color: var(--wm-text-primary);
+  gap: var(--wm-space-4);
 }
 
-.profile-workspace__list button.is-active {
-  border-left-color: var(--wm-color-primary);
-  background: var(--wm-color-primary-tint);
+.profile__grid {
+  display: grid;
+  grid-template-columns: calc(var(--wm-space-6) * 8) minmax(0, 1fr);
+  gap: var(--wm-space-4);
+  align-items: start;
 }
 
-.profile-workspace__list span {
-  color: var(--wm-text-muted);
-  font-size: 12px;
-}
-
-.profile-workspace__error {
-  color: var(--wm-color-danger);
-}
-
-.profile-workspace__empty {
-  align-self: center;
-  color: var(--wm-text-muted);
-}
-
-@media (max-width: 720px) {
-  .profile-workspace {
-    grid-template-columns: 1fr;
+@media (max-width: 1280px) {
+  .profile__grid {
+    grid-template-columns: minmax(0, 1fr);
   }
+}
+
+.profile__main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wm-space-4);
+  min-width: 0;
+}
+
+.profile__empty {
+  margin: 0;
+  padding: var(--wm-space-6);
+  /* 细边框属令牌纪律声明的极少数 1px 例外 */
+  border: 1px dashed var(--wm-border);
+  border-radius: var(--wm-radius-md);
+  background-color: var(--wm-bg-card);
+  color: var(--wm-text-muted);
+  font-size: 0.9rem;
+  text-align: center;
+}
+
+.profile__error {
+  margin: 0;
+  padding: var(--wm-space-4);
+  /* 细边框属令牌纪律声明的极少数 1px 例外 */
+  border: 1px solid var(--wm-color-danger);
+  border-radius: var(--wm-radius-md);
+  background-color: var(--wm-bg-card);
+  color: var(--wm-color-danger);
+  font-size: 0.85rem;
 }
 </style>

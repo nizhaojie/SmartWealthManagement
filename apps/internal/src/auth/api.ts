@@ -9,6 +9,6 @@ export function login(username: string, password: string): Promise<LoginResult> 
   return http.post<LoginResult>("/api/internal/auth/login", { username, password });
 }
 
-export function requestLogout(): Promise<null> {
+export function logout(): Promise<null> {
   return http.post<null>("/api/internal/auth/logout");
 }

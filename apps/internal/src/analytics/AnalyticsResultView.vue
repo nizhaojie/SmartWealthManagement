@@ -1,26 +1,29 @@
-\ufeff<script setup lang="ts">
+<script setup lang="ts">
 import { computed, ref } from "vue";
 import { PanelCard } from "@wealth/shared";
 import { toCsv } from "./csv";
 import type { AnalyticsQueryResponse } from "./types";
 
+// 受限查询的结果呈现：解读 + 表格 + 折叠的 SQL + CSV 导出 + 截断提示。
+// 截断提示常写常显（截断时），不让「只看到前 N 行」这件事藏在表格滚动里。
 const props = defineProps<{ result: AnalyticsQueryResponse }>();
 
-// 生成的查询默认折叠：员工需要时能展开判断系统有没有理解自己的问题，
-// 但多数时候不想看 SQL。
 const showSql = ref(false);
 
 const tableData = computed(() =>
-  props.result.rows.map((row) =>
-    Object.fromEntries(props.result.columns.map((column, index) => [column, row[index]])),
-  ),
+  props.result.rows.map((row) => {
+    const item: Record<string, unknown> = {};
+    props.result.columns.forEach((column, index) => {
+      item[column] = row[index];
+    });
+    return item;
+  }),
 );
 
-function exportCsv() {
-  // BOM 让 Excel 正确识别 UTF-8 中文。
-  const blob = new Blob(["\uFEFF" + toCsv(props.result.columns, props.result.rows)], {
-    type: "text/csv;charset=utf-8",
-  });
+function exportCsv(): void {
+  const csv = toCsv(props.result.columns, props.result.rows);
+  // BOM 让 Excel 认出 UTF-8，不然中文列名会乱码。
+  const blob = new Blob([`\ufeff${csv}`], { type: "text/csv;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
@@ -31,83 +34,93 @@ function exportCsv() {
 </script>
 
 <template>
-  <PanelCard title="查询结果" class="analytics-result">
-    <p class="analytics-result__interpretation" data-test="interpretation">
+  <PanelCard title="查询结果">
+    <template #actions>
+      <el-button size="small" name="toggle-sql" data-testid="toggle-sql" @click="showSql = !showSql">
+        {{ showSql ? "收起生成的查询" : "查看生成的查询" }}
+      </el-button>
+      <el-button size="small" name="export-csv" data-testid="export-csv" @click="exportCsv">
+        导出 CSV
+      </el-button>
+    </template>
+
+    <p class="result__interpretation" data-testid="interpretation">
       {{ result.interpretation }}
-    </p>
-    <p v-if="result.disclaimer" class="analytics-result__disclaimer" data-test="disclaimer">
-      {{ result.disclaimer }}
     </p>
 
     <el-alert
-      v-if="result.truncated"
+      v-if="result.disclaimer"
+      class="result__disclaimer"
       type="warning"
       :closable="false"
-      class="analytics-result__truncated"
-      data-test="truncation-notice"
-      :title="`结果超过行数上限，已截断：仅显示前 ${result.row_count} 行，并非全量。`"
+      :title="result.disclaimer"
+      data-testid="disclaimer"
     />
 
-    <div class="analytics-result__toolbar">
-      <el-button size="small" data-test="toggle-sql" @click="showSql = !showSql">
-        {{ showSql ? "收起生成的查询" : "查看生成的查询" }}
-      </el-button>
-      <el-button size="small" data-test="export-csv" @click="exportCsv">导出 CSV</el-button>
-      <span class="analytics-result__meta">
-        共 {{ result.row_count }} 行 · 涉及 {{ result.views.join("、") }}
-      </span>
-    </div>
-    <pre v-if="showSql" class="analytics-result__sql" data-test="sql-block">{{ result.sql }}</pre>
+    <p v-if="result.truncated" class="result__truncation" data-testid="truncation-notice">
+      结果超过行数上限，已截断：仅显示前 {{ result.row_count }} 行，并非全量。
+    </p>
 
-    <el-table :data="tableData" data-test="result-table" border>
-      <el-table-column
-        v-for="column in result.columns"
-        :key="column"
-        :prop="column"
-        :label="column"
-      />
-    </el-table>
+    <p class="result__meta">
+      共 {{ result.row_count }} 行 · 涉及 {{ result.views.join("、") }}
+    </p>
+
+    <pre v-if="showSql" class="result__sql" data-testid="sql-block">{{ result.sql }}</pre>
+
+    <div class="result__table">
+      <el-table :data="tableData" data-testid="result-table">
+        <el-table-column
+          v-for="column in result.columns"
+          :key="column"
+          :label="column"
+          :prop="column"
+          min-width="120"
+        />
+      </el-table>
+    </div>
   </PanelCard>
 </template>
 
 <style scoped>
-.analytics-result__interpretation {
-  margin-top: 0;
-  line-height: 1.7;
+.result__interpretation {
+  margin: 0 0 var(--wm-space-3);
   color: var(--wm-text-primary);
+  font-size: 0.9rem;
+  line-height: 1.8;
 }
 
-/* 免责声明用 warning 淡染底：底色由令牌现场混白派生，不存裸色值 */
-.analytics-result__disclaimer {
-  padding: var(--wm-space-2) var(--wm-space-3);
-  background: color-mix(in srgb, var(--wm-color-warning) 8%, var(--wm-bg-card));
-  /* 3px warning 左条：提示条规格，同 StatCard 左条（非 1px 细线例外） */
-  border-left: 3px solid var(--wm-color-warning);
-  color: var(--wm-color-warning);
-  font-size: 13px;
-}
-
-.analytics-result__toolbar {
-  display: flex;
-  align-items: center;
-  gap: var(--wm-space-3);
-  margin: var(--wm-space-3) 0;
-}
-
-.analytics-result__meta {
-  color: var(--wm-text-muted);
-  font-size: 12px;
-}
-
-.analytics-result__sql {
-  background: var(--wm-bg-page);
-  padding: var(--wm-space-3);
-  overflow-x: auto;
-  font-size: 13px;
-  color: var(--wm-text-secondary);
-}
-
-.analytics-result__truncated {
+.result__disclaimer {
   margin-bottom: var(--wm-space-3);
+}
+
+.result__truncation {
+  margin: 0 0 var(--wm-space-2);
+  color: var(--wm-color-warning);
+  font-size: 0.82rem;
+  line-height: 1.7;
+}
+
+.result__meta {
+  margin: 0 0 var(--wm-space-3);
+  color: var(--wm-text-muted);
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.result__sql {
+  margin: 0 0 var(--wm-space-3);
+  padding: var(--wm-space-3);
+  border-radius: var(--wm-radius-sm);
+  background-color: var(--wm-bg-subtle);
+  color: var(--wm-text-primary);
+  font-family: var(--wm-font-mono);
+  font-size: 0.78rem;
+  line-height: 1.7;
+  overflow-x: auto;
+  white-space: pre-wrap;
+}
+
+.result__table {
+  overflow-x: auto;
 }
 </style>

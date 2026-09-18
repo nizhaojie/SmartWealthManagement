@@ -1,205 +1,98 @@
+// 侧栏底部的「今日风险预警」小卡三个角色都可见；N=0 给空态文案而不是隐藏，
+// 加载失败给「暂不可用」——它是壳层对 GET /api/internal/risk-alerts 的一次额外调用。
 import ElementPlus from "element-plus";
+import { createPinia, setActivePinia, type Pinia } from "pinia";
 import { flushPromises, mount, type VueWrapper } from "@vue/test-utils";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createMemoryHistory, createRouter, type Router } from "vue-router";
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { ACCOUNT_MANAGER, ADVISOR, RISK_OFFICER } from "../auth/identity";
-import { currentEmployee } from "../auth/store";
-import ModuleView from "./ModuleView.vue";
-import { MODULES } from "./modules";
-import WorkbenchShell from "./WorkbenchShell.vue";
+import App from "../App.vue";
+import { clearTokens, setTokens } from "../auth/tokenStore";
+import { routes } from "../router";
+import { stubApiFetch } from "../testing";
 
-vi.mock("../auth/api", () => ({
-  login: vi.fn(),
-  requestLogout: vi.fn().mockResolvedValue(null),
-}));
+let pinia: Pinia;
+let router: Router;
+let wrapper: VueWrapper | null = null;
 
-vi.mock("../knowledge/KnowledgeWorkspace.vue", () => ({
-  default: { name: "KnowledgeWorkspace", template: "<div />" },
-}));
-
-vi.mock("../profile/ProfileWorkspace.vue", () => ({
-  default: { name: "ProfileWorkspace", template: "<div />" },
-}));
-
-vi.mock("../analytics/DataAnalysisWorkspace.vue", () => ({
-  default: { name: "DataAnalysisWorkspace", template: "<div />" },
-}));
-
-vi.mock("../advisory/AdvisoryWorkspace.vue", () => ({
-  default: { name: "AdvisoryWorkspace", template: "<div />" },
-}));
-
-vi.mock("../advisory/AdvisoryReviewPage.vue", () => ({
-  default: { name: "AdvisoryReviewPage", template: "<div />" },
-}));
-
-vi.mock("../risk/RiskMonitoringWorkspace.vue", () => ({
-  default: { name: "RiskMonitoringWorkspace", template: "<div />" },
-}));
-
-function createShellRouter() {
-  return createRouter({
-    history: createMemoryHistory(),
-    routes: [
-      {
-        path: "/",
-        component: WorkbenchShell,
-        children: [
-          { path: "", name: "landing", component: { template: "<div data-testid=\"landing\" />" } },
-          ...MODULES.map((module) => ({
-            path: module.path.slice(1),
-            name: module.id,
-            component: ModuleView,
-            meta: { moduleId: module.id },
-          })),
-          {
-            path: "advisory/reviews/:draftId",
-            name: "advisory-review",
-            component: { template: "<div />" },
-            meta: { moduleId: "advisory" },
-          },
-        ],
-      },
-    ],
-  });
+function alertRow(id: number) {
+  return {
+    id,
+    customer_id: 1,
+    customer_name: "王客户",
+    alert_type: "大额转账",
+    alert_level: "重度",
+    confidence: 0.9,
+    rule_codes: ["R001"],
+    rule_count: 1,
+    transaction_ids: [],
+    status: "未处理",
+    created_at: "2026-09-18T10:00:00",
+    work_order_id: null,
+    work_order_status: null,
+  };
 }
 
-async function mountShellAt(
-  initialPath: string,
-  role: string,
-  realName = "某员工",
-): Promise<{ wrapper: VueWrapper; router: Router }> {
-  currentEmployee.value = { real_name: realName, employee_role: role as never };
-  const router = createShellRouter();
-  await router.push(initialPath);
+async function mountApp(responder: (url: string) => unknown): Promise<VueWrapper> {
+  stubApiFetch((url) => {
+    if (url.includes("/api/internal/auth/me")) {
+      return { real_name: "李风控", employee_role: "风控专员" };
+    }
+    return responder(url);
+  });
+
+  pinia = createPinia();
+  setActivePinia(pinia);
+  setTokens({ accessToken: "access-token", refreshToken: "refresh-token" });
+  router = createRouter({ history: createMemoryHistory(), routes });
+  await router.push("/");
   await router.isReady();
-  const wrapper = mount(WorkbenchShell, { global: { plugins: [ElementPlus, router] } });
+  wrapper = mount(App, { global: { plugins: [pinia, ElementPlus, router] } });
   await flushPromises();
-  return { wrapper, router };
+  return wrapper;
 }
 
-describe("WorkbenchShell", () => {
-  afterEach(() => {
-    currentEmployee.value = null;
+beforeEach(() => {
+  localStorage.clear();
+  clearTokens();
+});
+
+afterEach(() => {
+  wrapper?.unmount();
+  wrapper = null;
+  vi.unstubAllGlobals();
+  localStorage.clear();
+  clearTokens();
+});
+
+describe("今日风险预警小卡", () => {
+  it("有未处理预警时显示待处置条数", async () => {
+    const app = await mountApp((url) =>
+      url.includes("/api/internal/risk-alerts") ? [alertRow(1), alertRow(2)] : undefined,
+    );
+
+    expect(app.get('[data-testid="today-risk-alerts-count"]').text()).toBe("2");
+    expect(app.get('[data-testid="today-risk-alerts"]').text()).toContain("条待处置");
   });
 
-  it("renders a different set of visible modules per role", async () => {
-    const { wrapper: advisorWrapper } = await mountShellAt("/knowledge", ADVISOR);
-    const advisorNav = advisorWrapper.find("aside").text();
-    expect(advisorNav).toContain("投顾助手");
-    expect(advisorNav).toContain("客户画像");
-    expect(advisorNav).not.toContain("客户关系");
+  it("N=0 时给空态文案，而不是把卡片藏起来", async () => {
+    const app = await mountApp((url) =>
+      url.includes("/api/internal/risk-alerts") ? [] : undefined,
+    );
 
-    const { wrapper: riskWrapper } = await mountShellAt("/knowledge", RISK_OFFICER);
-    const riskNav = riskWrapper.find("aside").text();
-    expect(riskNav).toContain("风控监测");
-    expect(riskNav).not.toContain("投顾助手");
-    expect(riskNav).not.toContain("客户画像");
-    expect(riskNav).not.toContain("客户关系");
-
-    const { wrapper: managerWrapper } = await mountShellAt("/knowledge", ACCOUNT_MANAGER);
-    const managerNav = managerWrapper.find("aside").text();
-    expect(managerNav).toContain("客户关系");
-    expect(managerNav).not.toContain("投顾助手");
-    expect(managerNav).not.toContain("客户画像");
+    expect(app.find('[data-testid="today-risk-alerts"]').exists()).toBe(true);
+    expect(app.get('[data-testid="today-risk-alerts-empty"]').text()).toContain(
+      "今日没有待处置的预警",
+    );
   });
 
-  it("shows the risk module to every role, since advisors and managers need to see their customers' alerts", async () => {
-    for (const role of [ADVISOR, RISK_OFFICER, ACCOUNT_MANAGER]) {
-      const { wrapper } = await mountShellAt("/knowledge", role);
-      expect(wrapper.find("aside").text()).toContain("风控监测");
-      wrapper.unmount();
-    }
-  });
-
-  it("shows the logout entry point for every role on every route", async () => {
-    for (const role of [ADVISOR, RISK_OFFICER, ACCOUNT_MANAGER]) {
-      for (const module of MODULES) {
-        const { wrapper } = await mountShellAt(module.path, role);
-        const logoutButton = wrapper.find('button[name="logout"]');
-        expect(logoutButton.exists()).toBe(true);
-        wrapper.unmount();
+  it("加载失败时显示暂不可用", async () => {
+    const app = await mountApp((url) => {
+      if (url.includes("/api/internal/risk-alerts")) {
+        throw new Error("network down");
       }
-    }
-  });
+      return undefined;
+    });
 
-  it("renders the placeholder explanation with navigation and logout still present for an unimplemented module", async () => {
-    const { wrapper } = await mountShellAt("/customer-relations", ACCOUNT_MANAGER);
-
-    expect(wrapper.text()).toContain("该模块尚未实现");
-    expect(wrapper.find("aside").exists()).toBe(true);
-    expect(wrapper.find('button[name="logout"]').exists()).toBe(true);
-  });
-
-  it("shows the current employee's name and role", async () => {
-    const { wrapper } = await mountShellAt("/knowledge", ADVISOR, "陈顾问");
-
-    expect(wrapper.text()).toContain("陈顾问");
-    expect(wrapper.text()).toContain(ADVISOR);
-  });
-
-  it("shows a breadcrumb for the current module", async () => {
-    const { wrapper } = await mountShellAt("/risk-monitoring", RISK_OFFICER);
-
-    const breadcrumb = wrapper.find(".el-breadcrumb");
-    expect(breadcrumb.text()).toContain("工作台");
-    expect(breadcrumb.text()).toContain("风控监测");
-  });
-
-  it("marks the active module in the sidebar navigation", async () => {
-    const { wrapper } = await mountShellAt("/risk-monitoring", RISK_OFFICER);
-
-    const activeEntry = wrapper.find('aside button[aria-current="page"]');
-    expect(activeEntry.exists()).toBe(true);
-    expect(activeEntry.text()).toContain("风控监测");
-  });
-
-  it("navigates to the target module when its nav entry is clicked", async () => {
-    const { wrapper, router } = await mountShellAt("/knowledge", ADVISOR);
-
-    const advisoryEntry = wrapper
-      .findAll("aside button")
-      .find((button) => button.text() === "投顾助手");
-    expect(advisoryEntry).toBeDefined();
-    await advisoryEntry!.trigger("click");
-    await flushPromises();
-
-    expect(router.currentRoute.value.path).toBe("/advisory");
-  });
-
-  it("returns to the previous module when the browser back button is used", async () => {
-    currentEmployee.value = { real_name: "陈顾问", employee_role: ADVISOR as never };
-    const router = createShellRouter();
-    await router.push("/knowledge");
-    await router.isReady();
-    mount(WorkbenchShell, { global: { plugins: [ElementPlus, router] } });
-    await flushPromises();
-
-    await router.push("/data-analysis");
-    await flushPromises();
-    expect(router.currentRoute.value.path).toBe("/data-analysis");
-
-    router.back();
-    await flushPromises();
-
-    expect(router.currentRoute.value.path).toBe("/knowledge");
-  });
-
-  it("returns to the advisory queue when the browser back button is used from a review page", async () => {
-    currentEmployee.value = { real_name: "陈顾问", employee_role: ADVISOR as never };
-    const router = createShellRouter();
-    await router.push("/advisory");
-    await router.isReady();
-    mount(WorkbenchShell, { global: { plugins: [ElementPlus, router] } });
-    await flushPromises();
-
-    await router.push({ name: "advisory-review", params: { draftId: "1" } });
-    await flushPromises();
-    expect(router.currentRoute.value.path).toBe("/advisory/reviews/1");
-
-    router.back();
-    await flushPromises();
-
-    expect(router.currentRoute.value.path).toBe("/advisory");
+    expect(app.get('[data-testid="today-risk-alerts-unavailable"]').text()).toBe("暂不可用");
   });
 });

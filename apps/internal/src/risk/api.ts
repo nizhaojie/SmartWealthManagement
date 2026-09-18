@@ -1,5 +1,7 @@
 import { http } from "../api/http";
+import { queryString } from "../api/query";
 import type { AnalyticsQueryInput, AnalyticsQueryResponse } from "../analytics/types";
+import type { WorkOrder } from "../work-orders/types";
 import type {
   AlertDetail,
   AlertLevel,
@@ -8,9 +10,6 @@ import type {
   FocusType,
   RiskFocus,
   RiskRule,
-  WorkOrder,
-  WorkOrderDetail,
-  WorkOrderStatus,
 } from "./types";
 
 export type AlertFilters = {
@@ -20,20 +19,9 @@ export type AlertFilters = {
   createdTo?: string;
 };
 
-function query(params: Record<string, string | number | undefined>): string {
-  const search = new URLSearchParams();
-  for (const [key, value] of Object.entries(params)) {
-    if (value !== undefined && value !== "") {
-      search.set(key, String(value));
-    }
-  }
-  const result = search.toString();
-  return result ? `?${result}` : "";
-}
-
 export function listAlerts(filters: AlertFilters = {}): Promise<AlertSummary[]> {
   return http.get<AlertSummary[]>(
-    `/api/internal/risk-alerts${query({
+    `/api/internal/risk-alerts${queryString({
       alert_level: filters.alertLevel,
       status: filters.status,
       created_from: filters.createdFrom,
@@ -46,6 +34,7 @@ export function getAlert(alertId: number): Promise<AlertDetail> {
   return http.get<AlertDetail>(`/api/internal/risk-alerts/${alertId}`);
 }
 
+/** 三个处置动作共用同一个「理由必填」的约定，后端逐条再挡一次。 */
 export function excludeAlert(alertId: number, reason: string): Promise<AlertDetail> {
   return http.post<AlertDetail>(`/api/internal/risk-alerts/${alertId}/exclude`, { reason });
 }
@@ -58,34 +47,8 @@ export function deriveWorkOrder(alertId: number, reason: string): Promise<WorkOr
   return http.post<WorkOrder>(`/api/internal/risk-alerts/${alertId}/work-orders`, { reason });
 }
 
-export function listWorkOrders(filters: { status?: WorkOrderStatus } = {}): Promise<WorkOrder[]> {
-  return http.get<WorkOrder[]>(`/api/internal/work-orders${query({ status: filters.status })}`);
-}
-
-export function getWorkOrder(workOrderId: number): Promise<WorkOrderDetail> {
-  return http.get<WorkOrderDetail>(`/api/internal/work-orders/${workOrderId}`);
-}
-
-export function acceptWorkOrder(workOrderId: number, reason: string): Promise<WorkOrder> {
-  return http.post<WorkOrder>(`/api/internal/work-orders/${workOrderId}/accept`, { reason });
-}
-
-export function completeWorkOrder(
-  workOrderId: number,
-  input: { reason: string; conclusion: string },
-): Promise<WorkOrder> {
-  return http.post<WorkOrder>(`/api/internal/work-orders/${workOrderId}/complete`, input);
-}
-
-export function closeWorkOrder(
-  workOrderId: number,
-  input: { reason: string; conclusion: string },
-): Promise<WorkOrder> {
-  return http.post<WorkOrder>(`/api/internal/work-orders/${workOrderId}/close`, input);
-}
-
 export function listRiskFocus(focusType?: FocusType): Promise<RiskFocus[]> {
-  return http.get<RiskFocus[]>(`/api/internal/risk-focus${query({ focus_type: focusType })}`);
+  return http.get<RiskFocus[]>(`/api/internal/risk-focus${queryString({ focus_type: focusType })}`);
 }
 
 export function listRiskRules(): Promise<RiskRule[]> {
@@ -98,6 +61,15 @@ export function setRiskRuleEnabled(ruleId: number, enabled: boolean): Promise<Ri
     // 启停不强制理由（阈值调整才强制）：这里没有要解释的口径变化，只记谁改的。
     reason: "",
   });
+}
+
+/** 阈值调整必须带理由：后端要求非空，且阈值形状要与算子匹配。 */
+export function setRiskRuleThreshold(
+  ruleId: number,
+  threshold: Record<string, string>,
+  reason: string,
+): Promise<RiskRule> {
+  return http.patch<RiskRule>(`/api/internal/risk-rules/${ruleId}/threshold`, { threshold, reason });
 }
 
 export function askRiskQuestion(

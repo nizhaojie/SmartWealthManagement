@@ -20,10 +20,18 @@ export function listDocuments(filters: DocumentFilters = {}): Promise<KnowledgeD
   );
 }
 
-export function uploadDocument(file: File, knowledgeType: KnowledgeType): Promise<KnowledgeDocument> {
+/** 上传走 multipart：`knowledge_type` 必填，`title` 可选（缺省时后端取文件名）。 */
+export function uploadDocument(
+  file: File,
+  knowledgeType: KnowledgeType,
+  title?: string,
+): Promise<KnowledgeDocument> {
   const form = new FormData();
   form.append("file", file);
   form.append("knowledge_type", knowledgeType);
+  if (title) {
+    form.append("title", title);
+  }
   return http.postForm<KnowledgeDocument>("/api/internal/knowledge/documents", form);
 }
 

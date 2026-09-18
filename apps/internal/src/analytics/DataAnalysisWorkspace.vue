@@ -101,8 +101,6 @@ onMounted(async () => {
         <el-input
           v-model="question"
           name="question"
-          type="textarea"
-          :rows="3"
           placeholder="用一句自然语言描述你要看的数据（Ctrl + Enter 提交）"
           @keydown.ctrl.enter="ask"
         />

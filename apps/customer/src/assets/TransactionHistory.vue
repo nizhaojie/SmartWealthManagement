@@ -14,8 +14,8 @@ const loading = ref(true);
 const errorMessage = ref("");
 
 const filters = reactive<TransactionFilters>({
-  start_date: "",
-  end_date: "",
+  start_date: null,
+  end_date: null,
   transaction_type: "",
 });
 
@@ -41,18 +41,30 @@ onMounted(load);
     <form class="filters" @submit.prevent="load">
       <label class="filters__field">
         <span class="filters__label">起始日期</span>
-        <input class="filters__control" name="start_date" type="date" v-model="filters.start_date" />
+        <el-date-picker
+          v-model="filters.start_date"
+          type="date"
+          value-format="YYYY-MM-DD"
+          placeholder="选择起始日期"
+          clearable
+        />
       </label>
       <label class="filters__field">
         <span class="filters__label">截止日期</span>
-        <input class="filters__control" name="end_date" type="date" v-model="filters.end_date" />
+        <el-date-picker
+          v-model="filters.end_date"
+          type="date"
+          value-format="YYYY-MM-DD"
+          placeholder="选择截止日期"
+          clearable
+        />
       </label>
       <label class="filters__field">
         <span class="filters__label">交易类型</span>
-        <select class="filters__control" name="transaction_type" v-model="filters.transaction_type">
-          <option value="">全部</option>
-          <option v-for="type in TRANSACTION_TYPES" :key="type" :value="type">{{ type }}</option>
-        </select>
+        <el-select v-model="filters.transaction_type" name="transaction_type" placeholder="全部">
+          <el-option label="全部" value="" />
+          <el-option v-for="type in TRANSACTION_TYPES" :key="type" :label="type" :value="type" />
+        </el-select>
       </label>
       <el-button name="apply-transaction-filters" native-type="submit" :loading="loading">
         筛选
@@ -118,6 +130,7 @@ onMounted(load);
   display: flex;
   flex-direction: column;
   gap: var(--wm-space-1);
+  min-width: calc(var(--wm-space-6) * 5);
 }
 
 .filters__label {
@@ -125,17 +138,13 @@ onMounted(load);
   font-size: 0.8rem;
 }
 
-/* 日期与枚举筛选用原生控件：类型固定的日期选择器不值得为此引入一层组件 */
-.filters__control {
-  min-width: calc(var(--wm-space-6) * 5);
-  padding: var(--wm-space-1) var(--wm-space-2);
-  /* 控件描边的 1px（令牌纪律声明的极少数例外） */
-  border: 1px solid var(--wm-border);
-  border-radius: var(--wm-radius-sm);
-  background-color: var(--wm-bg-card);
-  color: var(--wm-text-primary);
-  font-family: inherit;
-  font-size: 0.85rem;
+/* 日期与类型筛选用组件库控件，统一描边与触发方式 */
+.filters :deep(.el-date-editor) {
+  width: calc(var(--wm-space-6) * 5);
+}
+
+.filters :deep(.el-select) {
+  width: calc(var(--wm-space-6) * 5);
 }
 
 .history__status {

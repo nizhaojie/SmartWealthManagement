@@ -69,7 +69,7 @@ export type TransactionList = {
 };
 
 export type TransactionFilters = {
-  start_date?: string;
-  end_date?: string;
+  start_date?: string | null;
+  end_date?: string | null;
   transaction_type?: string;
 };

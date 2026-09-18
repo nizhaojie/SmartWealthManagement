@@ -12,12 +12,13 @@ import type {
 import type { ComposeOption } from "echarts/core";
 import {
   CATEGORICAL_PALETTE,
+  CHART_EDGE_COLOR,
   CHART_LABEL_COLOR,
   CHART_MARK_BORDER_COLOR,
   CHART_MUTED_LABEL_COLOR,
   CHART_SPLIT_LINE_COLOR,
-  CHART_SURFACE_COLOR,
   categoricalColorAt,
+  categoricalOutlineColorAt,
 } from "./palette";
 
 export type ChartOption = ComposeOption<
@@ -37,6 +38,8 @@ function hasDrawableValues(data: readonly CategoryValue[]): boolean {
 
 /**
  * 环图：类别少、只读占比时用它。
+ * 扇区填充分类色板的亮色，描边取同色相的深色——描边兼作扇区之间的分隔，
+ * 亮色底上再压白色缝会看不出边界。
  * 返回 null 表示没有可画的东西，调用方应改渲染空状态，而不是画一个空图。
  */
 export function toDonutOption(data: readonly CategoryValue[]): ChartOption | null {
@@ -60,10 +63,14 @@ export function toDonutOption(data: readonly CategoryValue[]): ChartOption | nul
         center: ["50%", "44%"],
         minAngle: 2,
         avoidLabelOverlap: true,
-        itemStyle: { borderColor: CHART_SURFACE_COLOR, borderWidth: 2 },
+        itemStyle: { borderWidth: 2 },
         label: { color: CHART_LABEL_COLOR, fontSize: 12, formatter: "{b} {d}%" },
         labelLine: { length: 8, length2: 8 },
-        data: data.map((item) => ({ name: item.name, value: item.value })),
+        data: data.map((item, index) => ({
+          name: item.name,
+          value: item.value,
+          itemStyle: { borderColor: categoricalOutlineColorAt(index) },
+        })),
       },
     ],
   };
@@ -71,7 +78,12 @@ export function toDonutOption(data: readonly CategoryValue[]): ChartOption | nul
 
 export type NamedSeries = { name: string; data: readonly CategoryValue[] };
 
-type ComparisonDatum = { name: string; value: number; diff: number; itemStyle: { color: string } };
+type ComparisonDatum = {
+  name: string;
+  value: number;
+  diff: number;
+  itemStyle: { color: string; borderColor: string; borderWidth: number };
+};
 
 /**
  * 成对横向条形：两组系列沿同一类别轴、同一基线并排，用于直读两组数值的差值。
@@ -87,11 +99,16 @@ export function toComparisonBarOption(series: readonly [NamedSeries, NamedSeries
   const categories = first.data.map((item) => item.name);
   const baselineValues = first.data.map((item) => item.value);
 
-  const toDatum = (item: CategoryValue, index: number, color: string): ComparisonDatum => ({
+  // 两组系列各占色板的一个下标，填充与描边都跟着系列走，不跟着类别走。
+  const toDatum = (item: CategoryValue, index: number, paletteIndex: number): ComparisonDatum => ({
     name: item.name,
     value: item.value,
     diff: item.value - (baselineValues[index] ?? 0),
-    itemStyle: { color },
+    itemStyle: {
+      color: categoricalColorAt(paletteIndex),
+      borderColor: categoricalOutlineColorAt(paletteIndex),
+      borderWidth: 1,
+    },
   });
 
   return {
@@ -127,7 +144,7 @@ export function toComparisonBarOption(series: readonly [NamedSeries, NamedSeries
         type: "bar",
         barMaxWidth: 18,
         itemStyle: { borderRadius: [0, 4, 4, 0] },
-        data: first.data.map((item, index) => toDatum(item, index, categoricalColorAt(0))),
+        data: first.data.map((item, index) => toDatum(item, index, 0)),
       },
       {
         name: second.name,
@@ -146,7 +163,7 @@ export function toComparisonBarOption(series: readonly [NamedSeries, NamedSeries
             return `${datum.value}（${sign}${datum.diff}）`;
           },
         },
-        data: second.data.map((item, index) => toDatum(item, index, categoricalColorAt(1))),
+        data: second.data.map((item, index) => toDatum(item, index, 1)),
       },
     ],
   };
@@ -158,8 +175,10 @@ export type GraphCategoryDatum = { name: string };
 
 /**
  * 力导向关系图：节点数量与连线在运行前不固定，用它铺开一张网络而不预设坐标。
- * 类别顺序决定取色顺序，供调用方区分不同种类的节点；`marked` 的节点额外描边，
- * 供调用方标出需要着重提示的数据点，标记的判断本身不在这里做。
+ * 类别顺序决定取色顺序，供调用方区分不同种类的节点；节点用高饱和亮色填充，
+ * 轮廓另取同色相的深描边（亮色与 3:1 的边界要求各由一半承担），
+ * `marked` 的节点则改用它自己的强调色描边并加粗，供调用方标出需要着重提示的数据点，
+ * 标记的判断本身不在这里做。
  *
  * 没有连线的图看不出关系，和没有节点一样视为没有可画的东西。
  */
@@ -190,7 +209,7 @@ export function toGraphOption(
         roam: true,
         draggable: true,
         label: { show: true, position: "right", color: CHART_LABEL_COLOR, fontSize: 12 },
-        lineStyle: { color: CHART_SPLIT_LINE_COLOR, curveness: 0.1 },
+        lineStyle: { color: CHART_EDGE_COLOR, width: 1.2, curveness: 0.1 },
         force: { repulsion: 140, edgeLength: 80 },
         categories: categories.map((category, index) => ({
           name: category.name,
@@ -201,7 +220,13 @@ export function toGraphOption(
           name: node.name,
           category: node.category,
           symbolSize: node.marked ? 42 : 30,
-          ...(node.marked ? { itemStyle: { borderColor: CHART_MARK_BORDER_COLOR, borderWidth: 3 } } : {}),
+          itemStyle: {
+            color: categoricalColorAt(node.category),
+            borderColor: node.marked
+              ? CHART_MARK_BORDER_COLOR
+              : categoricalOutlineColorAt(node.category),
+            borderWidth: node.marked ? 3 : 2,
+          },
         })),
         links: edges.map((edge) => ({ source: edge.source, target: edge.target })),
       },
@@ -244,7 +269,11 @@ export function toBarOption(data: readonly CategoryValue[]): ChartOption | null 
         data: data.map((item, index) => ({
           name: item.name,
           value: item.value,
-          itemStyle: { color: categoricalColorAt(index) },
+          itemStyle: {
+            color: categoricalColorAt(index),
+            borderColor: categoricalOutlineColorAt(index),
+            borderWidth: 1,
+          },
         })),
       },
     ],

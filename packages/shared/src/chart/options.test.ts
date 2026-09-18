@@ -5,7 +5,13 @@
 // （ADR-0003），连测试夹具里的「R1」「债券」也算是把业务词带进了这个包。
 
 import { describe, expect, it } from "vitest";
-import { CATEGORICAL_PALETTE, CHART_MARK_BORDER_COLOR, categoricalColorAt } from "./palette";
+import {
+  CATEGORICAL_PALETTE,
+  CHART_EDGE_COLOR,
+  CHART_MARK_BORDER_COLOR,
+  categoricalColorAt,
+  categoricalOutlineColorAt,
+} from "./palette";
 import { toBarOption, toComparisonBarOption, toDonutOption, toGraphOption } from "./options";
 import type { CategoryValue, GraphCategoryDatum, GraphEdgeDatum, GraphNodeDatum, NamedSeries } from "./options";
 
@@ -37,6 +43,14 @@ describe("环图配置", () => {
   it("系列颜色取自分类色板，不取自 UI 主色", () => {
     const option = toDonutOption(FIVE_CATEGORIES);
     expect(option?.color).toEqual([...CATEGORICAL_PALETTE]);
+  });
+
+  it("扇区描边取同色相的深色，兼作扇区之间的分隔", () => {
+    const option = toDonutOption(FIVE_CATEGORIES);
+    const series = option?.series as { data: { itemStyle: { borderColor: string } }[] }[];
+    expect(series[0].data.map((item) => item.itemStyle.borderColor)).toEqual(
+      FIVE_CATEGORIES.map((_, index) => categoricalOutlineColorAt(index)),
+    );
   });
 
   it("没有可画的数值时返回 null，交给调用方渲染空状态", () => {
@@ -82,6 +96,14 @@ describe("横向条形图配置", () => {
 
     expect(colors).toEqual(FIVE_CATEGORIES.map((_, index) => categoricalColorAt(index)));
     expect(new Set(colors).size).toBe(colors.length);
+  });
+
+  it("条形同样配同色相的深描边，亮色条在白底上也有边界", () => {
+    const option = toBarOption(FIVE_CATEGORIES);
+    const series = option?.series as { data: { itemStyle: { borderColor: string } }[] }[];
+    expect(series[0].data.map((item) => item.itemStyle.borderColor)).toEqual(
+      FIVE_CATEGORIES.map((_, index) => categoricalOutlineColorAt(index)),
+    );
   });
 
   it("没有可画的数值时返回 null", () => {
@@ -142,6 +164,18 @@ describe("成对横向条形图配置", () => {
     expect(secondColor).toBe(categoricalColorAt(1));
   });
 
+  it("两组条形的描边跟着系列走，与各自的填充配对", () => {
+    const option = toComparisonBarOption([FIRST, SECOND]);
+    const series = option?.series as {
+      data: { itemStyle: { color: string; borderColor: string } }[];
+    }[];
+    expect(series[0].data[0].itemStyle.color).toBe(categoricalColorAt(0));
+    expect(series[0].data[0].itemStyle.borderColor).toBe(categoricalOutlineColorAt(0));
+    expect(series[1].data[0].itemStyle.borderColor).toBe(categoricalOutlineColorAt(1));
+    // 同一系列内所有类别共用一条描边，不跟着类别下标跑。
+    expect(series[1].data[2].itemStyle.borderColor).toBe(series[1].data[0].itemStyle.borderColor);
+  });
+
   it("两组数值都是零时返回 null", () => {
     const empty: NamedSeries = { name: "空", data: [{ name: "A", value: 0 }] };
     expect(toComparisonBarOption([empty, empty])).toBeNull();
@@ -181,7 +215,7 @@ describe("关系图配置", () => {
     ]);
   });
 
-  it("类别按传入顺序取分类色板颜色，用于四类节点的视觉区分", () => {
+  it("类别按传入顺序取分类色板的亮色，用于四类节点的视觉区分", () => {
     const option = toGraphOption(NODES, EDGES, CATEGORIES);
     const series = option?.series as { categories: { name: string; itemStyle: { color: string } }[] }[];
     expect(series[0].categories.map((item) => item.name)).toEqual(["甲", "乙"]);
@@ -191,15 +225,32 @@ describe("关系图配置", () => {
     ]);
   });
 
-  it("标记的节点用强调色描边，未标记的节点没有描边", () => {
+  it("节点按类别取亮色填充与同色相深描边成对出现", () => {
     const option = toGraphOption(NODES, EDGES, CATEGORIES);
     const series = option?.series as {
-      data: { id: string; itemStyle?: { borderColor: string } }[];
+      data: { id: string; itemStyle?: { color: string; borderColor: string } }[];
+    }[];
+    const node = series[0].data.find((item) => item.id === "n2");
+    expect(node?.itemStyle?.color).toBe(categoricalColorAt(1));
+    expect(node?.itemStyle?.borderColor).toBe(categoricalOutlineColorAt(1));
+  });
+
+  it("标记的节点改用强调色描边并加粗，压过自带的同色深描边", () => {
+    const option = toGraphOption(NODES, EDGES, CATEGORIES);
+    const series = option?.series as {
+      data: { id: string; itemStyle?: { borderColor: string; borderWidth: number } }[];
     }[];
     const marked = series[0].data.find((item) => item.id === "n3");
     const unmarked = series[0].data.find((item) => item.id === "n1");
     expect(marked?.itemStyle?.borderColor).toBe(CHART_MARK_BORDER_COLOR);
-    expect(unmarked?.itemStyle).toBeUndefined();
+    expect(unmarked?.itemStyle?.borderColor).toBe(categoricalOutlineColorAt(0));
+    expect(marked?.itemStyle?.borderWidth).toBeGreaterThan(unmarked?.itemStyle?.borderWidth ?? 0);
+  });
+
+  it("连线用压过底色的中性色，不取网格分隔线那条淡线", () => {
+    const option = toGraphOption(NODES, EDGES, CATEGORIES);
+    const series = option?.series as { lineStyle: { color: string } }[];
+    expect(series[0].lineStyle.color).toBe(CHART_EDGE_COLOR);
   });
 
   it("没有节点或没有连线时返回 null，交给调用方渲染空状态", () => {

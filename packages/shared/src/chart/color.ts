@@ -58,6 +58,22 @@ export function hueDegrees(hex: string): number {
   return hue < 0 ? hue + 360 : hue;
 }
 
+/**
+ * HSL 饱和度，取值 0（灰）到 1（纯色）。
+ * 「颜色够不够艳」用它判定，省得每次改色都靠肉眼吵一轮。
+ */
+export function hslSaturation(hex: string): number {
+  const { red, green, blue } = parseHexColor(hex);
+  const [r, g, b] = [red / 255, green / 255, blue / 255];
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const delta = max - min;
+  if (delta === 0) return 0;
+
+  const lightness = (max + min) / 2;
+  return delta / (1 - Math.abs(2 * lightness - 1));
+}
+
 /** 两个色相角在色环上的最短夹角，取值 0 到 180。 */
 export function hueDistance(firstDegrees: number, secondDegrees: number): number {
   const raw = Math.abs(firstDegrees - secondDegrees) % 360;

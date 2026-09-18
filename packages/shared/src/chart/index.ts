@@ -9,7 +9,9 @@ export type {
   NamedSeries,
 } from "./options";
 export {
+  CATEGORICAL_OUTLINE_PALETTE,
   CATEGORICAL_PALETTE,
+  CHART_EDGE_COLOR,
   CHART_LABEL_COLOR,
   CHART_MARK_BORDER_COLOR,
   CHART_MUTED_LABEL_COLOR,
@@ -19,10 +21,13 @@ export {
   MIN_PALETTE_HUE_SPREAD_DEGREES,
   MIN_SERIES_CONTRAST_RATIO,
   MIN_SERIES_HUE_DISTANCE_DEGREES,
+  MIN_SERIES_SATURATION,
   UI_PRIMARY_COLOR,
   categoricalColorAt,
-  minSeriesContrastRatio,
+  categoricalOutlineColorAt,
   minSeriesHueDistanceDegrees,
+  minSeriesOutlineContrastRatio,
+  minSeriesSaturation,
   paletteHueSpreadDegrees,
 } from "./palette";
-export { contrastRatio, hueDegrees, hueDistance } from "./color";
+export { contrastRatio, hslSaturation, hueDegrees, hueDistance } from "./color";

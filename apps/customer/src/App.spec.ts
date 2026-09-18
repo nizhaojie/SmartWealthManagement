@@ -1,65 +1,84 @@
+// 路由守卫与登出的门控测试：未登录重定向、深链、后退键、登出清 store。
+// 逐页「挂载后断言文案出现」的用例不再复制（Q8）。
 import ElementPlus from "element-plus";
+import { createPinia, setActivePinia, type Pinia } from "pinia";
 import { flushPromises, mount, type VueWrapper } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createMemoryHistory, createRouter } from "vue-router";
+import { listAdvisoryRequests } from "./advisory/api";
 import App from "./App.vue";
-import { login as loginRequest, logout as logoutRequest } from "./auth/api";
-import { clearTokens } from "./auth/tokenStore";
 import { getAssets, listTransactions } from "./assets/api";
+import { login as loginRequest, logout as logoutRequest } from "./auth/api";
+import { clearTokens, getAccessToken } from "./auth/tokenStore";
+import { getCandidatePool, listProducts } from "./products/api";
 import { getCurrentAssessment } from "./risk-assessment/api";
 import { router, routes } from "./router";
+import { useAuthStore } from "./stores/auth";
+import { useChatStore } from "./stores/chat";
 
-vi.mock("./auth/api", () => ({
-  login: vi.fn(),
-  logout: vi.fn(),
-}));
-
+vi.mock("./auth/api", () => ({ login: vi.fn(), logout: vi.fn() }));
 vi.mock("./assets/api", () => ({
   getAssets: vi.fn(),
   listTransactions: vi.fn(),
+  getHoldingLookThrough: vi.fn(),
 }));
-
 vi.mock("./risk-assessment/api", () => ({
   getCurrentAssessment: vi.fn(),
   getQuestionnaire: vi.fn(),
   saveDraft: vi.fn(),
   submitAssessment: vi.fn(),
 }));
-
-vi.mock("./products/api", () => ({
-  listProducts: vi.fn().mockResolvedValue({ products: [] }),
+vi.mock("./products/api", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./products/api")>()),
+  listProducts: vi.fn(),
   getProduct: vi.fn(),
+  getCandidatePool: vi.fn(),
+}));
+vi.mock("./advisory/api", () => ({
+  listAdvisoryRequests: vi.fn(),
+  submitAdvisoryRequest: vi.fn(),
 }));
 
-async function submitLogin(wrapper: VueWrapper, username: string, password: string) {
+let pinia: Pinia;
+let activeWrapper: VueWrapper | null = null;
+
+function mountApp(): VueWrapper {
+  activeWrapper = mount(App, {
+    global: { plugins: [pinia, ElementPlus, router] },
+  }) as VueWrapper;
+  return activeWrapper;
+}
+
+async function submitLogin(wrapper: VueWrapper, username: string, password: string): Promise<void> {
   await wrapper.find('input[name="username"]').setValue(username);
   await wrapper.find('input[name="password"]').setValue(password);
   await wrapper.find("form").trigger("submit.prevent");
   await flushPromises();
 }
 
-function mockSuccessfulLogin() {
+function mockSuccessfulLogin(): void {
   vi.mocked(loginRequest).mockResolvedValue({
     access_token: "access-token",
     refresh_token: "refresh-token",
   });
 }
 
-let activeWrapper: VueWrapper | null = null;
-
-function mountApp(): VueWrapper {
-  activeWrapper = mount(App, { global: { plugins: [ElementPlus, router] } }) as VueWrapper;
-  return activeWrapper;
-}
-
-describe("App", () => {
+describe("客户应用·门控与路由", () => {
   beforeEach(async () => {
     clearTokens();
+    pinia = createPinia();
+    setActivePinia(pinia);
+
     vi.mocked(loginRequest).mockReset();
     vi.mocked(logoutRequest).mockReset();
     vi.mocked(getCurrentAssessment).mockReset();
     vi.mocked(getAssets).mockReset();
     vi.mocked(listTransactions).mockReset();
+    vi.mocked(listProducts).mockReset();
+    vi.mocked(getCandidatePool).mockReset();
+    vi.mocked(listAdvisoryRequests).mockReset();
+
+    vi.mocked(getCurrentAssessment).mockResolvedValue({ risk_level: "C1", valid_until: "2027-03-15" });
     vi.mocked(getAssets).mockResolvedValue({
       risk_level: "C1",
       risk_level_valid_until: "2027-03-15",
@@ -68,6 +87,15 @@ describe("App", () => {
       holdings: [],
     });
     vi.mocked(listTransactions).mockResolvedValue({ transactions: [] });
+    vi.mocked(listProducts).mockResolvedValue({ products: [] });
+    vi.mocked(getCandidatePool).mockResolvedValue({
+      assessment_id: 1,
+      customer_risk_level: "C4",
+      allowed_product_risk_levels: ["R1", "R2", "R3", "R4"],
+      products: [],
+    });
+    vi.mocked(listAdvisoryRequests).mockResolvedValue({ requests: [] });
+
     await router.push("/login");
     await router.isReady();
   });
@@ -77,7 +105,7 @@ describe("App", () => {
     activeWrapper = null;
   });
 
-  it("directs to the login page when not authenticated, even for a deep link", async () => {
+  it("redirects a deep link to the login page when not authenticated", async () => {
     await router.push("/products");
     const wrapper = mountApp();
     await flushPromises();
@@ -87,7 +115,7 @@ describe("App", () => {
     expect(wrapper.find('input[name="chat-message"]').exists()).toBe(false);
   });
 
-  it("shows the chat view at /chat after a successful login", async () => {
+  it("enters the chat view after a successful login", async () => {
     mockSuccessfulLogin();
     const wrapper = mountApp();
 
@@ -97,58 +125,15 @@ describe("App", () => {
     expect(wrapper.find('input[name="chat-message"]').exists()).toBe(true);
   });
 
-  it("shows an inline error instead of throwing when login fails", async () => {
-    vi.mocked(loginRequest).mockRejectedValue(new Error("invalid credentials"));
-    const wrapper = mountApp();
-
-    await submitLogin(wrapper, "wangc1", "wrong-password");
-
-    expect(wrapper.text()).toContain("账号或密码错误");
-    expect(wrapper.text()).toContain("客户登录");
-  });
-
-  it("returns to the login page after logging out", async () => {
+  it("sends an already authenticated visitor from /login to /chat", async () => {
     mockSuccessfulLogin();
-    vi.mocked(logoutRequest).mockResolvedValue(null);
     const wrapper = mountApp();
     await submitLogin(wrapper, "wangc1", "Test@1234");
 
-    await wrapper.get('button[name="logout"]').trigger("click");
+    await router.push("/login");
     await flushPromises();
 
-    expect(logoutRequest).toHaveBeenCalled();
-    expect(router.currentRoute.value.path).toBe("/login");
-    expect(wrapper.text()).toContain("客户登录");
-  });
-
-  it("renders each view at its own URL", async () => {
-    mockSuccessfulLogin();
-    vi.mocked(getCurrentAssessment).mockResolvedValue({
-      risk_level: "C1",
-      valid_until: "2027-03-15",
-    });
-    const wrapper = mountApp();
-    await submitLogin(wrapper, "wangc1", "Test@1234");
-
-    await router.push("/risk-assessment");
-    await flushPromises();
-    expect(router.currentRoute.value.path).toBe("/risk-assessment");
-    expect(wrapper.text()).toContain("保守型");
-
-    await router.push("/products");
-    await flushPromises();
-    expect(router.currentRoute.value.path).toBe("/products");
-    expect(wrapper.text()).toContain("这是符合条件的产品清单，不是推荐");
-
-    await router.push("/assets");
-    await flushPromises();
-    expect(router.currentRoute.value.path).toBe("/assets");
-    expect(wrapper.get('[data-testid="total-market-value"]').text()).toBe("20420.00");
-
-    await router.push("/chat");
-    await flushPromises();
     expect(router.currentRoute.value.path).toBe("/chat");
-    expect(wrapper.find('input[name="chat-message"]').exists()).toBe(true);
   });
 
   it("keeps the view after a refresh-style remount at the same URL", async () => {
@@ -166,12 +151,42 @@ describe("App", () => {
     expect(remounted.text()).toContain("这是符合条件的产品清单，不是推荐");
   });
 
-  it("navigates to each view URL from the shell nav", async () => {
+  it("leaves the session and the conversation behind on logout", async () => {
     mockSuccessfulLogin();
-    vi.mocked(getCurrentAssessment).mockResolvedValue({
-      risk_level: "C1",
-      valid_until: "2027-03-15",
-    });
+    vi.mocked(logoutRequest).mockResolvedValue(null);
+    const wrapper = mountApp();
+    await submitLogin(wrapper, "wangc1", "Test@1234");
+
+    const chat = useChatStore();
+    chat.beginTurn("上一场会话里的一句话");
+    expect(chat.messages).toHaveLength(2);
+
+    await wrapper.get('button[name="logout"]').trigger("click");
+    await flushPromises();
+
+    expect(logoutRequest).toHaveBeenCalled();
+    expect(router.currentRoute.value.path).toBe("/login");
+    expect(getAccessToken()).toBeNull();
+    expect(useAuthStore().isAuthenticated).toBe(false);
+    // 会话不跨登录延续：重新登录看到的是新会话。
+    expect(chat.messages).toHaveLength(0);
+  });
+
+  it("sends the customer back to login when the session expires mid-session", async () => {
+    mockSuccessfulLogin();
+    const wrapper = mountApp();
+    await submitLogin(wrapper, "wangc1", "Test@1234");
+    expect(router.currentRoute.value.path).toBe("/chat");
+
+    // 任一接口回 401 时 http 客户端会清掉令牌；人不该被留在必然报错的页面上。
+    clearTokens();
+    await flushPromises();
+
+    expect(router.currentRoute.value.path).toBe("/login");
+  });
+
+  it("renders each view at its own URL and navigates from the shell nav", async () => {
+    mockSuccessfulLogin();
     const wrapper = mountApp();
     await submitLogin(wrapper, "wangc1", "Test@1234");
 
@@ -180,6 +195,18 @@ describe("App", () => {
       await flushPromises();
       expect(router.currentRoute.value.path).toBe(`/${name}`);
     }
+
+    await router.push("/risk-assessment");
+    await flushPromises();
+    expect(wrapper.text()).toContain("保守型");
+
+    await router.push("/products");
+    await flushPromises();
+    expect(wrapper.text()).toContain("这是符合条件的产品清单，不是推荐");
+
+    await router.push("/assets");
+    await flushPromises();
+    expect(wrapper.get('[data-testid="asset-summary"]').text()).toContain("20420.00");
   });
 
   it("returns to the previous view with the browser back button", async () => {
@@ -189,7 +216,7 @@ describe("App", () => {
     const testRouter = createRouter({ history: createMemoryHistory(), routes });
     await testRouter.push("/login");
     await testRouter.isReady();
-    const wrapper = mount(App, { global: { plugins: [ElementPlus, testRouter] } });
+    const wrapper = mount(App, { global: { plugins: [pinia, ElementPlus, testRouter] } });
     await submitLogin(wrapper, "wangc1", "Test@1234");
     expect(testRouter.currentRoute.value.path).toBe("/chat");
 

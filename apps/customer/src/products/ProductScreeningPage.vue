@@ -1,17 +1,25 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from "vue";
-import { ApiError, PanelCard } from "@wealth/shared";
+import { onMounted, reactive, ref } from "vue";
+import { ApiError, PageHeader, PanelCard } from "@wealth/shared";
 import { listAdvisoryRequests, submitAdvisoryRequest } from "../advisory/api";
 import type { AdvisoryRequest } from "../advisory/types";
-import { getProduct, listProducts } from "./api";
-import type { Product, ProductFilters } from "./types";
+import AdvisoryRequestList from "./AdvisoryRequestList.vue";
+import ProductDetailPanel from "./ProductDetailPanel.vue";
+import { compactFilters, getCandidatePool, getProduct, listProducts } from "./api";
+import {
+  SUITABILITY_EXPIRED,
+  SUITABILITY_UNAVAILABLE,
+  SUITABILITY_UNKNOWN,
+  describeSuitability,
+} from "./suitability";
+import { PRODUCT_RISK_LEVELS, type Product, type ProductFilters } from "./types";
 
+// 「这是符合条件的产品清单，不是推荐」常驻，不因结果条数变化而隐藏（ADR-0005）。
 const DISCLAIMER = "这是符合条件的产品清单，不是推荐";
 const EMPTY_HINT =
   "没有符合条件的产品。条件可能过严，可放宽产品类型、提高可接受的起投金额，或下调业绩基准后再筛选。";
 
 const PRODUCT_TYPES = ["货币基金", "债券基金", "混合基金", "股票基金"] as const;
-const PRODUCT_RISK_LEVELS = ["R1", "R2", "R3", "R4", "R5"] as const;
 
 const filters = reactive<ProductFilters>({
   product_type: "",
@@ -21,67 +29,63 @@ const filters = reactive<ProductFilters>({
   max_term_days: "",
 });
 
-const STATUS_HINTS: Record<string, string> = {
-  待处理: "顾问尚未开始处理",
-  处理中: "顾问正在处理",
-  已完成: "顾问已出具方案",
-  已关闭: "该请求已关闭",
-};
-
-const FILTER_LABELS: Record<string, string> = {
-  product_type: "产品类型",
-  risk_level: "产品风险等级",
-  min_amount: "起投金额（上限）",
-  min_expected_return: "业绩基准（下限）",
-  max_term_days: "期限（天，上限）",
-};
-
 const products = ref<Product[]>([]);
 const loading = ref(true);
 const errorMessage = ref("");
+
 const selected = ref<Product | null>(null);
 const detailError = ref("");
+
+// 适当性说明：可购范围只能由后端给出，前端不自行推断。
+const suitabilityNote = ref("");
+
 const advisoryRequests = ref<AdvisoryRequest[]>([]);
 const advisoryError = ref("");
+const advisorySubmitting = ref(false);
 
-const latestAdvisoryRequest = computed<AdvisoryRequest | null>(
-  () => advisoryRequests.value[0] ?? null,
-);
-
-const advisoryCondition = computed<string>(() => {
-  const request = latestAdvisoryRequest.value;
-  if (!request) return "";
-  return Object.entries(request.filters)
-    .map(([key, value]) => `${FILTER_LABELS[key] ?? key}：${value}`)
-    .join("；");
-});
-
-function filledFilters(): ProductFilters {
-  const next: ProductFilters = {};
-  if (filters.product_type) next.product_type = filters.product_type;
-  if (filters.risk_level) next.risk_level = filters.risk_level;
-  if (filters.min_amount) next.min_amount = filters.min_amount;
-  if (filters.min_expected_return) next.min_expected_return = filters.min_expected_return;
-  if (filters.max_term_days) next.max_term_days = filters.max_term_days;
-  return next;
-}
-
-async function loadProducts() {
+async function loadProducts(): Promise<void> {
   loading.value = true;
   errorMessage.value = "";
   selected.value = null;
   try {
-    const payload = await listProducts(filledFilters());
+    const payload = await listProducts(filters);
     products.value = payload.products;
   } catch (error) {
-    errorMessage.value = error instanceof ApiError ? error.message : "产品清单加载失败";
     products.value = [];
+    errorMessage.value =
+      error instanceof ApiError && error.code === 404
+        ? SUITABILITY_UNAVAILABLE
+        : error instanceof ApiError
+          ? error.message
+          : "产品清单加载失败";
   } finally {
     loading.value = false;
   }
 }
 
-async function openDetail(product: Product) {
+async function loadSuitability(): Promise<void> {
+  try {
+    suitabilityNote.value = describeSuitability(await getCandidatePool());
+  } catch (error) {
+    if (error instanceof ApiError && error.code === 403) {
+      suitabilityNote.value = SUITABILITY_EXPIRED;
+    } else if (error instanceof ApiError && error.code === 404) {
+      suitabilityNote.value = SUITABILITY_UNAVAILABLE;
+    } else {
+      suitabilityNote.value = SUITABILITY_UNKNOWN;
+    }
+  }
+}
+
+async function loadAdvisoryRequests(): Promise<void> {
+  try {
+    advisoryRequests.value = (await listAdvisoryRequests()).requests;
+  } catch {
+    // 拉不到列表时保留已有内容：刚提交的请求不能因为一次 GET 失败就从页面上消失。
+  }
+}
+
+async function openDetail(product: Product): Promise<void> {
   detailError.value = "";
   try {
     selected.value = await getProduct(product.product_code);
@@ -91,77 +95,85 @@ async function openDetail(product: Product) {
   }
 }
 
-async function loadAdvisoryRequests() {
-  try {
-    const payload = await listAdvisoryRequests();
-    advisoryRequests.value = payload.requests;
-  } catch {
-    advisoryRequests.value = [];
-  }
-}
-
-async function requestAdvisory() {
+async function requestAdvisory(): Promise<void> {
   advisoryError.value = "";
+  advisorySubmitting.value = true;
   try {
-    const request = await submitAdvisoryRequest(filledFilters());
-    advisoryRequests.value = [
-      request,
-      ...advisoryRequests.value.filter((row) => row.request_no !== request.request_no),
-    ];
+    await submitAdvisoryRequest(compactFilters(filters));
+    // 列表以服务端为准：提交成功后再拉一次，避免与页面初次加载的响应抢写同一份状态。
+    await loadAdvisoryRequests();
   } catch (error) {
     advisoryError.value = error instanceof ApiError ? error.message : "方案请求提交失败";
+  } finally {
+    advisorySubmitting.value = false;
   }
 }
 
 onMounted(async () => {
-  await loadProducts();
-  await loadAdvisoryRequests();
+  await Promise.all([loadProducts(), loadSuitability(), loadAdvisoryRequests()]);
 });
 </script>
 
 <template>
-  <div class="product-screening">
-    <h1 class="page-title">产品筛选</h1>
-    <PanelCard title="筛选条件">
-      <p data-testid="not-recommendation" class="disclaimer">{{ DISCLAIMER }}</p>
+  <div class="screening">
+    <PageHeader title="产品筛选" :breadcrumb="['客户视图', '产品筛选']" />
 
-      <form @submit.prevent="loadProducts">
-        <label>
-          产品类型
-          <select name="product_type" v-model="filters.product_type">
-            <option value="">全部</option>
-            <option v-for="type in PRODUCT_TYPES" :key="type" :value="type">{{ type }}</option>
-          </select>
+    <PanelCard title="筛选条件">
+      <p class="screening__disclaimer" data-testid="not-recommendation">{{ DISCLAIMER }}</p>
+
+      <form class="filters" @submit.prevent="loadProducts">
+        <label class="filters__field">
+          <span class="filters__label">产品类型</span>
+          <el-select v-model="filters.product_type" name="product_type" placeholder="全部">
+            <el-option label="全部" value="" />
+            <el-option v-for="type in PRODUCT_TYPES" :key="type" :label="type" :value="type" />
+          </el-select>
         </label>
-        <label>
-          产品风险等级
-          <select name="risk_level" v-model="filters.risk_level">
-            <option value="">全部</option>
-            <option v-for="level in PRODUCT_RISK_LEVELS" :key="level" :value="level">{{ level }}</option>
-          </select>
+
+        <label class="filters__field">
+          <span class="filters__label">产品风险等级</span>
+          <el-select v-model="filters.risk_level" name="risk_level" placeholder="全部">
+            <el-option label="全部" value="" />
+            <el-option v-for="level in PRODUCT_RISK_LEVELS" :key="level" :label="level" :value="level" />
+          </el-select>
         </label>
-        <label>
-          期限（天，上限）
-          <input name="max_term_days" v-model="filters.max_term_days" inputmode="numeric" />
+
+        <label class="filters__field">
+          <span class="filters__label">期限（天，上限）</span>
+          <el-input v-model="filters.max_term_days" name="max_term_days" inputmode="numeric" placeholder="不限" />
         </label>
-        <label>
-          起投金额（上限）
-          <input name="min_amount" v-model="filters.min_amount" inputmode="decimal" />
+
+        <label class="filters__field">
+          <span class="filters__label">起投金额（上限）</span>
+          <el-input v-model="filters.min_amount" name="min_amount" inputmode="decimal" placeholder="不限" />
         </label>
-        <label>
-          业绩基准（下限）
-          <input name="min_expected_return" v-model="filters.min_expected_return" inputmode="decimal" />
+
+        <label class="filters__field">
+          <span class="filters__label">业绩基准（下限）</span>
+          <el-input
+            v-model="filters.min_expected_return"
+            name="min_expected_return"
+            inputmode="decimal"
+            placeholder="不限"
+          />
         </label>
+
         <el-button name="apply-filters" native-type="submit" :loading="loading">筛选</el-button>
       </form>
     </PanelCard>
 
     <PanelCard title="符合条件的产品">
-      <p v-if="errorMessage" role="alert">{{ errorMessage }}</p>
-      <p v-else-if="!loading && products.length === 0" data-testid="empty-hint">{{ EMPTY_HINT }}</p>
+      <p class="screening__suitability" data-testid="suitability-note">{{ suitabilityNote }}</p>
+
+      <p v-if="errorMessage" class="screening__error" role="alert" data-testid="products-error">
+        {{ errorMessage }}
+      </p>
+      <p v-else-if="!loading && products.length === 0" class="screening__empty" data-testid="empty-hint">
+        {{ EMPTY_HINT }}
+      </p>
 
       <div v-if="products.length" class="table-wrap">
-        <table>
+        <table data-testid="products-table">
           <thead>
             <tr>
               <th>代码</th>
@@ -169,9 +181,9 @@ onMounted(async () => {
               <th>类型</th>
               <th>产品风险等级</th>
               <th>业绩基准</th>
-              <th>期限</th>
-              <th>起投金额</th>
-              <th>费率</th>
+              <th>期限（天）</th>
+              <th>起投金额（元）</th>
+              <th>费率（%）</th>
               <th>详情</th>
             </tr>
           </thead>
@@ -190,79 +202,104 @@ onMounted(async () => {
               <td>{{ product.min_amount }}</td>
               <td>{{ product.fee_rate }}</td>
               <td>
-                <button type="button" :name="`detail-${product.product_code}`" @click="openDetail(product)">
+                <el-button
+                  size="small"
+                  data-testid="product-detail-entry"
+                  :name="`detail-${product.product_code}`"
+                  @click="openDetail(product)"
+                >
                   查看
-                </button>
+                </el-button>
               </td>
             </tr>
           </tbody>
         </table>
       </div>
 
-      <el-button name="request-advisory" @click="requestAdvisory">请顾问出具方案</el-button>
+      <div class="screening__actions">
+        <el-button name="request-advisory" :loading="advisorySubmitting" @click="requestAdvisory">
+          请顾问出具方案
+        </el-button>
+      </div>
 
-      <p v-if="advisoryError" role="alert" data-testid="advisory-error">{{ advisoryError }}</p>
+      <p v-if="advisoryError" class="screening__error" role="alert" data-testid="advisory-error">
+        {{ advisoryError }}
+      </p>
     </PanelCard>
 
-    <PanelCard v-if="latestAdvisoryRequest" title="我的方案请求">
-      <section data-testid="advisory-request">
-        <p>
-          状态：<strong data-testid="advisory-status">{{ latestAdvisoryRequest.status }}</strong>
-          <span class="status-hint">{{ STATUS_HINTS[latestAdvisoryRequest.status] }}</span>
-        </p>
-        <p>请求编号：{{ latestAdvisoryRequest.request_no }}</p>
-        <p>提交时间：{{ latestAdvisoryRequest.submitted_at }}</p>
-        <p v-if="advisoryCondition">触发条件：{{ advisoryCondition }}</p>
-      </section>
-    </PanelCard>
+    <ProductDetailPanel v-if="selected" :product="selected" :error="detailError" />
 
-    <PanelCard v-if="selected" title="产品详情">
-      <section data-testid="product-detail">
-        <p v-if="detailError" role="alert">{{ detailError }}</p>
-        <dl>
-          <div><dt>代码</dt><dd>{{ selected.product_code }}</dd></div>
-          <div><dt>名称</dt><dd>{{ selected.product_name }}</dd></div>
-          <div><dt>类型</dt><dd>{{ selected.product_type }}</dd></div>
-          <div><dt>产品风险等级</dt><dd>{{ selected.risk_level }}</dd></div>
-          <div><dt>业绩基准</dt><dd>{{ selected.expected_return }}</dd></div>
-          <div><dt>期限</dt><dd>{{ selected.term_days }}</dd></div>
-          <div><dt>起投金额</dt><dd>{{ selected.min_amount }}</dd></div>
-          <div><dt>费率</dt><dd>{{ selected.fee_rate }}</dd></div>
-          <div><dt>基金经理</dt><dd>{{ selected.fund_manager }}</dd></div>
-        </dl>
-      </section>
-    </PanelCard>
+    <AdvisoryRequestList :requests="advisoryRequests" />
   </div>
 </template>
 
 <style scoped>
-.product-screening {
+.screening {
   display: flex;
   flex-direction: column;
   gap: var(--wm-space-4);
 }
 
-.page-title {
-  margin: 0;
-  font-size: 1.25rem;
-  color: var(--wm-text-primary);
-}
-
-.disclaimer {
+.screening__disclaimer {
   margin: 0 0 var(--wm-space-4);
-  color: var(--wm-text-secondary);
+  padding: var(--wm-space-2) var(--wm-space-3);
+  /* 说明块左侧 3px 强调条（02 的 .note），颜色走令牌 */
+  border-left: 3px solid var(--wm-color-primary);
+  border-radius: var(--wm-radius-sm);
+  background-color: var(--wm-bg-subtle);
+  color: var(--wm-text-primary);
+  font-size: 0.85rem;
 }
 
-form {
+.screening__suitability {
+  margin: 0 0 var(--wm-space-4);
+  color: var(--wm-text-muted);
+  font-size: 0.85rem;
+  line-height: 1.75;
+}
+
+.screening__error {
+  margin: var(--wm-space-3) 0 0;
+  color: var(--wm-color-danger);
+  font-size: 0.85rem;
+}
+
+.screening__empty {
+  margin: 0;
+  color: var(--wm-text-muted);
+  font-size: 0.85rem;
+  line-height: 1.75;
+}
+
+.filters {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--wm-space-3) var(--wm-space-4);
   align-items: flex-end;
+  gap: var(--wm-space-3) var(--wm-space-4);
+}
+
+.filters__field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wm-space-1);
+  min-width: calc(var(--wm-space-6) * 5);
+}
+
+.filters__label {
+  color: var(--wm-text-muted);
+  font-size: 0.8rem;
+}
+
+.filters :deep(.el-select) {
+  width: 100%;
+}
+
+.screening__actions {
+  margin-top: var(--wm-space-4);
 }
 
 .table-wrap {
   overflow-x: auto;
-  margin-bottom: var(--wm-space-4);
 }
 
 table {
@@ -272,15 +309,21 @@ table {
 
 th,
 td {
-  text-align: left;
   padding: var(--wm-space-2) var(--wm-space-3);
   /* 表格行的 1px 分隔细线（令牌纪律声明的极少数例外） */
   border-bottom: 1px solid var(--wm-border-hairline);
+  text-align: left;
+  font-size: 0.85rem;
   white-space: nowrap;
 }
 
-.status-hint {
-  margin-left: var(--wm-space-2);
+th {
   color: var(--wm-text-muted);
+  font-weight: 600;
+}
+
+td {
+  color: var(--wm-text-primary);
+  font-variant-numeric: tabular-nums;
 }
 </style>

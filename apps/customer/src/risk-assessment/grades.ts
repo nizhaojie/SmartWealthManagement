@@ -1,5 +1,6 @@
 import type { RiskLevel } from "./types";
 
+/** C1 到 C5 是唯一的规范写法；下面两个映射只是它在界面上的呈现文案与说明。 */
 export const RISK_LEVEL_LABELS: Record<RiskLevel, string> = {
   C1: "保守型",
   C2: "稳健型",

@@ -1,10 +1,10 @@
 // 当前会话的消息列表。
 //
-// 会话不跨登录延续：重新登录即新会话，登录 / 登出时调用 reset()。
+// 会话不跨登录延续：重新登录即新会话，登录与登出都会调用 reset()。
 // 这里只存消息本身与它的增删改，不发起请求——SSE 的收发留在页面与 chat/api。
 import { ref } from "vue";
 import { defineStore } from "pinia";
-import type { Citation, ChatStreamDone } from "../chat/api";
+import type { ChatStreamDone, Citation } from "../chat/api";
 
 export type ChatMessage = {
   id: number;

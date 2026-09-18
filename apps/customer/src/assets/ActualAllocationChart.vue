@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { ChartFrame, toDonutOption } from "@wealth/shared";
 import { computed } from "vue";
+import { ChartFrame, toDonutOption } from "@wealth/shared";
 import { buildActualAllocation } from "./allocation";
 import type { Holding } from "./types";
 

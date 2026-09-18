@@ -1,3 +1,5 @@
+// SSE 帧解析是客服链路的传输面：`event: done` 携带定案答案与引用，其余帧携带 delta，
+// 异常必须走 onError 而不是抛出去。这里只测这三件事，不测页面渲染。
 import { describe, expect, it, vi } from "vitest";
 import { clearTokens, getAccessToken, setTokens } from "../auth/tokenStore";
 import { streamChatMessage } from "./api";
@@ -39,7 +41,11 @@ describe("streamChatMessage", () => {
 
     const deltas: string[] = [];
     const done = vi.fn();
-    await streamChatMessage("你好", { onDelta: (d) => deltas.push(d), onDone: done, onError: vi.fn() }, fetchImpl);
+    await streamChatMessage(
+      "你好",
+      { onDelta: (delta) => deltas.push(delta), onDone: done, onError: vi.fn() },
+      fetchImpl,
+    );
 
     expect(deltas).toEqual(["你", "好"]);
     expect(done).toHaveBeenCalledWith({
@@ -58,9 +64,24 @@ describe("streamChatMessage", () => {
     ]);
 
     const deltas: string[] = [];
-    await streamChatMessage("问题", { onDelta: (d) => deltas.push(d), onDone: vi.fn(), onError: vi.fn() }, fetchImpl);
+    await streamChatMessage(
+      "问题",
+      { onDelta: (delta) => deltas.push(delta), onDone: vi.fn(), onError: vi.fn() },
+      fetchImpl,
+    );
 
     expect(deltas).toEqual(["字"]);
+  });
+
+  it("carries citations through the done frame", async () => {
+    const fetchImpl = sseResponse([
+      'event: done\ndata: {"answer":"最短持有期为九十天[1]。","citations":[{"knowledge_id":1,"chunk_index":0,"title":"产品说明书","source_file":"product.txt","heading_path":["赎回规则"],"marker":1}],"intent":"产品咨询","content_classification":"事实性内容"}\n\n',
+    ]);
+
+    const done = vi.fn();
+    await streamChatMessage("最短持有期", { onDelta: vi.fn(), onDone: done, onError: vi.fn() }, fetchImpl);
+
+    expect(done.mock.calls[0][0].citations[0].source_file).toBe("product.txt");
   });
 
   it("calls onError instead of throwing when the response has no body", async () => {
@@ -74,7 +95,9 @@ describe("streamChatMessage", () => {
 
   it("attaches the bearer token when one is stored", async () => {
     setTokens({ accessToken: "token-abc", refreshToken: "r" });
-    const fetchImpl = sseResponse(['event: done\ndata: {"answer":"","citations":[],"intent":"FAQ","content_classification":"事实性内容"}\n\n']);
+    const fetchImpl = sseResponse([
+      'event: done\ndata: {"answer":"","citations":[],"intent":"FAQ","content_classification":"事实性内容"}\n\n',
+    ]);
 
     try {
       await streamChatMessage("问题", { onDelta: vi.fn(), onDone: vi.fn(), onError: vi.fn() }, fetchImpl);

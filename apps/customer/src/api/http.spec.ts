@@ -1,93 +1,71 @@
-import { createHttpClient } from "@wealth/shared";
-import { describe, expect, it, vi } from "vitest";
+// 身份域隔离（ADR-0009 护栏 2 在前端的落点）：
+// 客户端的令牌只来自 wealth-customer-auth，不会捡到 internal 身份域的令牌；
+// 401 被当作会话失效，清掉本地令牌。
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-function fakeFetch(body: unknown, status = 200): typeof fetch {
-  return vi.fn().mockResolvedValue({
-    ok: status >= 200 && status < 300,
-    status,
-    json: async () => body,
-  }) as unknown as typeof fetch;
+// fetch 在 createHttpClient 创建实例时就被捕获，因此桩必须在 import 之前装好。
+const fetchMock = vi.hoisted(() => {
+  const fn = vi.fn();
+  globalThis.fetch = fn as unknown as typeof fetch;
+  return fn;
+});
+
+import { clearTokens, getAccessToken, setTokens } from "../auth/tokenStore";
+import { http } from "./http";
+
+function envelope(code: number, message: string) {
+  return { code, message, data: null, trace_id: "trace-1" };
 }
 
-describe("createHttpClient", () => {
-  it("calls onUnauthorized when the envelope reports a 401 business code", async () => {
-    const onUnauthorized = vi.fn();
-    const http = createHttpClient({
-      baseUrl: "",
-      fetchImpl: fakeFetch(
-        { code: 401, message: "凭证无效或已过期", data: null, trace_id: "trace-1" },
-        401,
-      ),
-      onUnauthorized,
+describe("customer http client", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    clearTokens();
+    fetchMock.mockReset();
+    fetchMock.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => envelope(200, "success"),
+    });
+  });
+
+  it("reads its bearer token from the customer key only", async () => {
+    // 另一个身份域的令牌摆在同一个 localStorage 里，客户端必须视而不见。
+    localStorage.setItem(
+      "wealth-internal-auth",
+      JSON.stringify({ accessToken: "employee-token", refreshToken: "r" }),
+    );
+    setTokens({ accessToken: "customer-token", refreshToken: "r" });
+
+    await http.get("/api/customer/assets");
+
+    const [, init] = fetchMock.mock.calls[0];
+    expect((init?.headers as Record<string, string>)["Authorization"]).toBe("Bearer customer-token");
+  });
+
+  it("does not pick up an internal-domain token on a fresh load", async () => {
+    localStorage.setItem(
+      "wealth-internal-auth",
+      JSON.stringify({ accessToken: "employee-token", refreshToken: "r" }),
+    );
+    vi.resetModules();
+
+    const freshStore = await import("../auth/tokenStore");
+
+    expect(freshStore.getAccessToken()).toBeNull();
+  });
+
+  it("treats a 401 as an expired session and clears the stored tokens", async () => {
+    setTokens({ accessToken: "expired-token", refreshToken: "r" });
+    fetchMock.mockResolvedValue({
+      ok: false,
+      status: 401,
+      json: async () => envelope(401, "凭证无效或已过期"),
     });
 
-    await expect(http.get("/api/customer/auth/me")).rejects.toThrow();
+    await expect(http.get("/api/customer/assets")).rejects.toThrow("凭证无效或已过期");
 
-    expect(onUnauthorized).toHaveBeenCalledTimes(1);
-  });
-
-  it("does not call onUnauthorized on a successful response", async () => {
-    const onUnauthorized = vi.fn();
-    const http = createHttpClient({
-      baseUrl: "",
-      fetchImpl: fakeFetch({ code: 200, message: "success", data: { ok: true }, trace_id: "trace-2" }),
-      onUnauthorized,
-    });
-
-    await http.get("/api/health");
-
-    expect(onUnauthorized).not.toHaveBeenCalled();
-  });
-
-  it("attaches a bearer token from getToken when one is present", async () => {
-    const fetchImpl = fakeFetch({ code: 200, message: "success", data: null, trace_id: "t" });
-    const http = createHttpClient({
-      baseUrl: "",
-      fetchImpl,
-      getToken: () => "the-token",
-    });
-
-    await http.get("/api/customer/auth/me");
-
-    const [, init] = vi.mocked(fetchImpl).mock.calls[0];
-    expect((init?.headers as Record<string, string>)["Authorization"]).toBe("Bearer the-token");
-  });
-
-  it("posts a FormData body without setting a Content-Type header", async () => {
-    const fetchImpl = fakeFetch({ code: 200, message: "success", data: { ok: true }, trace_id: "t" });
-    const http = createHttpClient({ baseUrl: "", fetchImpl });
-    const form = new FormData();
-    form.append("file", new Blob(["hello"]), "hello.txt");
-
-    await http.postForm("/api/internal/knowledge/documents", form);
-
-    const [url, init] = vi.mocked(fetchImpl).mock.calls[0];
-    expect(url).toBe("/api/internal/knowledge/documents");
-    expect(init?.method).toBe("POST");
-    expect(init?.body).toBe(form);
-    expect((init?.headers as Record<string, string>)["Content-Type"]).toBeUndefined();
-  });
-
-  it("sends a PUT request with a JSON body", async () => {
-    const fetchImpl = fakeFetch({ code: 200, message: "success", data: { saved: true }, trace_id: "t" });
-    const http = createHttpClient({ baseUrl: "", fetchImpl });
-
-    const result = await http.put("/api/customer/risk-assessment/draft", { answers: { q01: "A" } });
-
-    const [, init] = vi.mocked(fetchImpl).mock.calls[0];
-    expect(init?.method).toBe("PUT");
-    expect(init?.body).toBe(JSON.stringify({ answers: { q01: "A" } }));
-    expect(result).toEqual({ saved: true });
-  });
-
-  it("sends a DELETE request and unwraps the response", async () => {
-    const fetchImpl = fakeFetch({ code: 200, message: "success", data: { deleted: true }, trace_id: "t" });
-    const http = createHttpClient({ baseUrl: "", fetchImpl });
-
-    const result = await http.delete("/api/internal/knowledge/documents/1");
-
-    const [, init] = vi.mocked(fetchImpl).mock.calls[0];
-    expect(init?.method).toBe("DELETE");
-    expect(result).toEqual({ deleted: true });
+    expect(getAccessToken()).toBeNull();
+    expect(localStorage.getItem("wealth-customer-auth")).toBeNull();
   });
 });

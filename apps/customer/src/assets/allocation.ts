@@ -1,4 +1,5 @@
 import type { CategoryValue } from "@wealth/shared";
+import { PRODUCT_RISK_LEVELS, type ProductRiskLevel } from "../products/types";
 import type { Holding } from "./types";
 
 // 资产大类说的是钱压在哪一类资产上；产品类型说的是能申购的东西是什么
@@ -7,8 +8,8 @@ export const ASSET_CLASS_ORDER = ["现金", "债券", "混合", "股票", "另�
 
 export type AssetClass = (typeof ASSET_CLASS_ORDER)[number];
 
-// 持仓穿透（#05）落地之前，资产大类只能由产品类型推导：这一层映射是近似，
-// 类别取需求文档里目标配置所用的那几个（股票 / 债券 / 现金 / 另类）加上混合。
+// 资产大类由产品类型推导：这一层映射是近似，类别取目标配置所用的那几个
+// （股票 / 债券 / 现金 / 另类）加上混合。
 const ASSET_CLASS_BY_PRODUCT_TYPE: Record<string, AssetClass> = {
   货币基金: "现金",
   结构性存款: "现金",
@@ -19,10 +20,6 @@ const ASSET_CLASS_BY_PRODUCT_TYPE: Record<string, AssetClass> = {
   信托产品: "另类",
   保险产品: "另类",
 };
-
-export const PRODUCT_RISK_LEVEL_ORDER = ["R1", "R2", "R3", "R4", "R5"] as const;
-
-export type ProductRiskLevel = (typeof PRODUCT_RISK_LEVEL_ORDER)[number];
 
 export function assetClassOf(productType: string): AssetClass {
   return ASSET_CLASS_BY_PRODUCT_TYPE[productType] ?? "另类";
@@ -65,11 +62,11 @@ export function buildRiskLevelDistribution(holdings: readonly Holding[]): Catego
   for (const holding of holdings) {
     const level = holding.product_risk_level as ProductRiskLevel;
     // 库里 product_risk_level 有 R1 到 R5 的约束，这里的判断是把类型收窄到五个等级。
-    if (!PRODUCT_RISK_LEVEL_ORDER.includes(level)) continue;
+    if (!PRODUCT_RISK_LEVELS.includes(level)) continue;
     totals.set(level, (totals.get(level) ?? 0) + marketValueOf(holding));
   }
 
-  return PRODUCT_RISK_LEVEL_ORDER.map((level) => ({
+  return PRODUCT_RISK_LEVELS.map((level) => ({
     name: level,
     value: roundToCents(totals.get(level) ?? 0),
   }));

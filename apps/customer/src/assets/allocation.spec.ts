@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
+import { PRODUCT_RISK_LEVELS } from "../products/types";
 import {
   ASSET_CLASS_ORDER,
-  PRODUCT_RISK_LEVEL_ORDER,
   assetClassOf,
   buildActualAllocation,
   buildRiskLevelDistribution,
 } from "./allocation";
+import { profitClass } from "./profit";
 import type { Holding } from "./types";
 
 function makeHolding(overrides: Partial<Holding> = {}): Holding {
@@ -44,11 +45,16 @@ describe("实际配置", () => {
       makeHolding({ product_code: "F000003", product_type: "货币基金", market_value: "1000.00" }),
     ];
 
-    expect(buildActualAllocation(holdings).map((slice) => slice.name)).toEqual(["现金", "债券", "股票"]);
+    expect(buildActualAllocation(holdings).map((slice) => slice.name)).toEqual([
+      "现金",
+      "债券",
+      "股票",
+    ]);
   });
 
-  it("由持仓聚合得出，与画像里的目标配置无关", () => {
+  it("由持仓聚合得出，空持仓就是空的", () => {
     expect(buildActualAllocation([])).toEqual([]);
+    expect(ASSET_CLASS_ORDER).toHaveLength(5);
   });
 
   it("认不出的产品类型归入另类，不从图上消失", () => {
@@ -69,7 +75,7 @@ describe("持仓按产品风险等级的分布", () => {
     ];
 
     expect(buildRiskLevelDistribution(holdings).map((slice) => slice.name)).toEqual([
-      ...PRODUCT_RISK_LEVEL_ORDER,
+      ...PRODUCT_RISK_LEVELS,
     ]);
     expect(buildRiskLevelDistribution(holdings).map((slice) => slice.value)).toEqual([
       0, 2000, 0, 80000, 30000,
@@ -85,11 +91,16 @@ describe("持仓按产品风险等级的分布", () => {
 
   it("空持仓得到一组全零的类别，交由图表判断为无数据可画", () => {
     expect(buildRiskLevelDistribution([])).toEqual(
-      PRODUCT_RISK_LEVEL_ORDER.map((level) => ({ name: level, value: 0 })),
+      PRODUCT_RISK_LEVELS.map((level) => ({ name: level, value: 0 })),
     );
   });
+});
 
-  it("资产大类的固定顺序是五个类别", () => {
-    expect(ASSET_CLASS_ORDER).toHaveLength(5);
+describe("涨跌着色", () => {
+  it("只按符号给出类名，颜色由样式表从令牌取", () => {
+    expect(profitClass("420.00")).toBe("profit-up");
+    expect(profitClass("-1.20")).toBe("profit-down");
+    expect(profitClass("0.00")).toBe("");
+    expect(profitClass("")).toBe("");
   });
 });

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+// 持仓穿透：沿产品的底层持有关系逐层展开，让客户看清自己实际间接持有了什么。
+// 同一底层资产的多条路径由后端合并，这里只负责呈现。
 import { computed, ref, watch } from "vue";
 import type { LookThrough, LookThroughNode } from "./types";
 
@@ -52,15 +54,15 @@ function percent(share: string): string {
 </script>
 
 <template>
-  <section data-testid="look-through-panel">
-    <h3>持仓穿透 · {{ lookThrough.product_name }}</h3>
-    <p class="hint">
+  <section class="look-through" data-testid="look-through-panel">
+    <h3 class="look-through__title">持仓穿透 · {{ lookThrough.product_name }}</h3>
+    <p class="look-through__hint">
       持仓市值 {{ lookThrough.market_value }} 元，按产品的底层持有关系逐层展开后分摊到下列底层资产。
       同一底层资产的多条路径已经合并。
     </p>
 
-    <h4>穿透后实际持有的底层资产</h4>
-    <table data-testid="look-through-summary">
+    <h4 class="look-through__subtitle">穿透后实际持有的底层资产</h4>
+    <table class="look-through__table" data-testid="look-through-summary">
       <thead>
         <tr>
           <th>底层资产</th>
@@ -86,18 +88,20 @@ function percent(share: string): string {
       </tbody>
     </table>
 
-    <h4>逐层展开</h4>
-    <ul data-testid="look-through-tree">
+    <h4 class="look-through__subtitle">逐层展开</h4>
+    <ul class="look-through__tree" data-testid="look-through-tree">
       <li
         v-for="row in rows"
         :key="row.key"
+        class="look-through__node"
         data-testid="look-through-node"
         :data-code="row.node.code"
-        :style="{ paddingLeft: `${row.level * 1.25}rem` }"
+        :style="{ paddingLeft: `calc(var(--wm-space-4) * ${row.level})` }"
       >
         <button
           v-if="row.node.children.length > 0"
           type="button"
+          class="look-through__toggle"
           data-testid="look-through-toggle"
           :data-code="row.node.code"
           :aria-expanded="isExpanded(row.key)"
@@ -105,71 +109,100 @@ function percent(share: string): string {
         >
           {{ isExpanded(row.key) ? "收起" : "展开" }}
         </button>
-        <span v-else class="leaf" aria-hidden="true">·</span>
+        <span v-else class="look-through__leaf" aria-hidden="true">·</span>
 
-        <span data-testid="look-through-node-name">{{ row.node.name }}</span>
-        <span>{{ row.node.code }}</span>
-        <span>第 {{ row.node.depth }} 层</span>
-        <span>{{ percent(row.node.share) }}</span>
-        <span>{{ row.node.market_value }} 元</span>
+        <span class="look-through__name" data-testid="look-through-node-name">{{ row.node.name }}</span>
+        <span class="look-through__meta">{{ row.node.code }}</span>
+        <span class="look-through__meta">第 {{ row.node.depth }} 层</span>
+        <span class="look-through__meta">{{ percent(row.node.share) }}</span>
+        <span class="look-through__meta">{{ row.node.market_value }} 元</span>
       </li>
     </ul>
   </section>
 </template>
 
 <style scoped>
-.hint {
-  margin: var(--wm-space-1) 0 var(--wm-space-3);
-  color: var(--wm-text-secondary);
+.look-through {
+  padding: var(--wm-space-4);
+  border: 1px solid var(--wm-border-hairline);
+  border-radius: var(--wm-radius-md);
+  background-color: var(--wm-bg-subtle);
 }
 
-h3 {
+.look-through__title {
   margin: 0;
-  font-size: 1rem;
   color: var(--wm-text-primary);
-}
-
-h4 {
-  margin: var(--wm-space-4) 0 var(--wm-space-2);
   font-size: 0.95rem;
-  color: var(--wm-text-primary);
+  font-weight: 600;
 }
 
-table {
+.look-through__subtitle {
+  margin: var(--wm-space-4) 0 var(--wm-space-2);
+  color: var(--wm-text-primary);
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.look-through__hint {
+  margin: var(--wm-space-1) 0 0;
+  color: var(--wm-text-muted);
+  font-size: 0.85rem;
+  line-height: 1.75;
+}
+
+.look-through__table {
   width: 100%;
   border-collapse: collapse;
 }
 
-th,
-td {
-  text-align: left;
+.look-through__table th,
+.look-through__table td {
   padding: var(--wm-space-1) var(--wm-space-2);
   /* 表格行的 1px 分隔细线（令牌纪律声明的极少数例外） */
   border-bottom: 1px solid var(--wm-border-hairline);
+  text-align: left;
+  font-size: 0.85rem;
   white-space: nowrap;
 }
 
-ul {
-  list-style: none;
+.look-through__table th {
+  color: var(--wm-text-muted);
+  font-weight: 600;
+}
+
+.look-through__tree {
   margin: 0;
   padding: 0;
+  list-style: none;
 }
 
-li {
+.look-through__node {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--wm-space-2);
   align-items: baseline;
+  gap: var(--wm-space-2);
   padding: var(--wm-space-1) 0;
+  font-size: 0.85rem;
 }
 
-button {
-  min-width: 3.25rem;
+.look-through__toggle {
+  min-width: calc(var(--wm-space-6) * 1.5);
 }
 
-.leaf {
+.look-through__leaf {
   display: inline-block;
-  min-width: 3.25rem;
+  min-width: calc(var(--wm-space-6) * 1.5);
+  color: var(--wm-text-placeholder);
   text-align: center;
+}
+
+.look-through__name {
+  color: var(--wm-text-primary);
+  font-weight: 600;
+}
+
+.look-through__meta {
+  color: var(--wm-text-muted);
+  font-variant-numeric: tabular-nums;
 }
 </style>

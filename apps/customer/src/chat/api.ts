@@ -1,4 +1,10 @@
-import { clearTokens, getAccessToken } from "../auth/tokenStore";
+// 智能客服的流式通道。
+//
+// SSE 帧为 `event:` / `data:` 两行，帧之间以空行分隔；`event: done` 携带定案答案与引用，
+// 其余帧携带 `delta`。用 fetch + body.getReader() 手动切帧，不用 EventSource——
+// EventSource 只能发 GET，而这条通道是 POST。
+import { apiBaseUrl, handleExpiredSession } from "../api/http";
+import { getAccessToken } from "../auth/tokenStore";
 
 export type Citation = {
   knowledge_id: number;
@@ -30,8 +36,7 @@ export type ChatStreamHandlers = {
 const STREAM_PATH = "/api/customer/chat/stream";
 
 function streamUrl(): string {
-  const base = (import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/$/, "");
-  return `${base}${STREAM_PATH}`;
+  return `${apiBaseUrl()}${STREAM_PATH}`;
 }
 
 function parseFrame(frame: string): { event: string; data: unknown } | null {
@@ -67,7 +72,7 @@ export async function streamChatMessage(
     });
 
     if (response.status === 401) {
-      clearTokens();
+      handleExpiredSession();
       throw new Error("凭证无效或已过期");
     }
     if (!response.ok || !response.body) {

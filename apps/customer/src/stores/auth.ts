@@ -1,15 +1,13 @@
 // 客户侧登录态。
 //
-// 令牌的事实源仍然是既有的 auth/tokenStore（localStorage key `wealth-customer-auth`，
-// http 客户端与对话流都从它取 Bearer）——Pinia 把「是否已登录 + 登录 / 登出」显式化，
-// 但不另存一份令牌：同一条会话在两处内存态里各自漂移是引入 store 要消除的那类问题。
-//
-// 过渡说明：旧的 auth/store.ts（模块级单例）仍在被尚未重写的页面引用，
-// 由 02 号 issue 的页面重写替换掉。
+// 令牌的事实源仍然是 auth/tokenStore（localStorage key `wealth-customer-auth`），
+// http 客户端与对话流都从它取 Bearer。Pinia 把「是否已登录 + 登录 / 登出」显式化，
+// 但不另存一份令牌：同一条会话在两处内存态里各自漂移，正是引入 store 要消除的问题。
 import { computed } from "vue";
 import { defineStore } from "pinia";
 import { login as loginRequest, logout as logoutRequest } from "../auth/api";
 import { clearTokens, setTokens, tokens as storedTokens } from "../auth/tokenStore";
+import { useChatStore } from "./chat";
 
 export const useAuthStore = defineStore("auth", () => {
   const tokens = storedTokens;
@@ -18,6 +16,8 @@ export const useAuthStore = defineStore("auth", () => {
   async function login(username: string, password: string): Promise<void> {
     const result = await loginRequest(username, password);
     setTokens({ accessToken: result.access_token, refreshToken: result.refresh_token });
+    // 会话不跨登录延续：上一次登录留下的消息不带进新会话。
+    useChatStore().reset();
   }
 
   async function logout(): Promise<void> {
@@ -25,6 +25,7 @@ export const useAuthStore = defineStore("auth", () => {
       await logoutRequest();
     } finally {
       clearTokens();
+      useChatStore().reset();
     }
   }
 

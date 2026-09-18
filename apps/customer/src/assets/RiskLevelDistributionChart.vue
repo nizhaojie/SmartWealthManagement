@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { ChartFrame, toBarOption } from "@wealth/shared";
 import { computed } from "vue";
+import { ChartFrame, toBarOption } from "@wealth/shared";
 import { buildRiskLevelDistribution } from "./allocation";
 import type { Holding } from "./types";
 
@@ -20,6 +20,6 @@ const option = computed(() => toBarOption(buildRiskLevelDistribution(props.holdi
     :option="option"
     :loading="loading"
     :empty-text="EMPTY_HINT"
-    :height="240"
+    :height="280"
   />
 </template>

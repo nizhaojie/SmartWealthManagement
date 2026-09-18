@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ElMessage, ElMessageBox, type UploadFile } from "element-plus";
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
-import { SectionCard } from "@wealth/shared";
+import { PanelCard } from "@wealth/shared";
 import { deleteDocument, listDocuments, uploadDocument } from "./api";
 import {
   DOCUMENT_STATUSES,
@@ -149,7 +149,7 @@ onUnmounted(() => {
 
 <template>
   <div class="knowledge-page">
-    <SectionCard title="上传文档">
+    <PanelCard title="上传文档">
       <div class="knowledge-page__upload-form">
         <el-select v-model="uploadType" placeholder="知识类型" style="width: 140px">
           <el-option v-for="type in KNOWLEDGE_TYPES" :key="type" :label="type" :value="type" />
@@ -166,9 +166,9 @@ onUnmounted(() => {
         <el-button type="primary" :loading="uploading" @click="onUpload">上传</el-button>
       </div>
       <p v-if="uploadError" role="alert" class="knowledge-page__error">{{ uploadError }}</p>
-    </SectionCard>
+    </PanelCard>
 
-    <SectionCard title="文档列表">
+    <PanelCard title="文档列表">
       <div class="knowledge-page__filters">
         <el-select v-model="typeFilter" placeholder="按知识类型筛选" clearable style="width: 160px">
           <el-option v-for="type in KNOWLEDGE_TYPES" :key="type" :label="type" :value="type" />
@@ -216,7 +216,7 @@ onUnmounted(() => {
           </template>
         </el-table-column>
       </el-table>
-    </SectionCard>
+    </PanelCard>
   </div>
 </template>
 

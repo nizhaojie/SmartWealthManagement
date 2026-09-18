@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
-import { ApiError, SectionCard } from "@wealth/shared";
+import { ApiError, PanelCard } from "@wealth/shared";
 import AnalyticsResultView from "../analytics/AnalyticsResultView.vue";
 import type { AnalyticsQueryResponse } from "../analytics/types";
 import { RISK_OFFICER } from "../auth/identity";
@@ -463,7 +463,7 @@ onMounted(() => {
       </el-tab-pane>
 
       <el-tab-pane label="自然语言查询" name="query">
-        <SectionCard title="提问">
+        <PanelCard title="提问">
           <div class="risk-monitoring__query-composer">
             <el-input
               v-model="queryQuestion"
@@ -495,7 +495,7 @@ onMounted(() => {
               {{ example.question }}
             </button>
           </div>
-        </SectionCard>
+        </PanelCard>
 
         <el-alert
           v-if="queryFailure"

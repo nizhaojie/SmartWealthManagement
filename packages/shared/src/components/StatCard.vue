@@ -1,13 +1,16 @@
 <script setup lang="ts">
+// KPI 卡：小字标题 + 大号数字（tabular-nums）+ 左侧 accent 色条（02 的排版层级）。
+// 数字的格式化留给调用方，这里只负责层级与着色。
 import { computed } from "vue";
-import type { StatCardAccent, StatCardTrend } from "./statCard";
+import type { Accent } from "./accent";
+import type { StatCardTrend } from "./statCard";
 
 const props = withDefaults(
   defineProps<{
     title: string;
     value: string | number;
     trend?: StatCardTrend;
-    accent?: StatCardAccent;
+    accent?: Accent;
   }>(),
   {
     accent: "primary",
@@ -45,9 +48,9 @@ const accentClass = computed(() => `stat-card--accent-${props.accent}`);
   gap: var(--wm-space-3);
   padding: var(--wm-space-4) var(--wm-space-5);
   border: 1px solid var(--wm-border);
-  /* 规格定死的 3px 左边条（ticket 03），不在间距刻度内；颜色经下方 accent 枚举映射 */
+  /* 规格定死的 3px 左边条，不在间距刻度内；颜色经下方 accent 枚举映射 */
   border-left: 3px solid var(--stat-card-accent);
-  border-radius: var(--wm-radius-lg);
+  border-radius: var(--wm-radius-md);
   background-color: var(--wm-bg-card);
   box-shadow: var(--wm-shadow-card);
 }
@@ -65,12 +68,14 @@ const accentClass = computed(() => `stat-card--accent-${props.accent}`);
   font-size: 0.85rem;
 }
 
+/* 数字对齐场景统一挂 tabular-nums（02 的 --font-num 意图） */
 .stat-card__value {
   margin: 0;
   color: var(--wm-text-primary);
   font-size: 1.5rem;
   font-weight: 700;
   line-height: 1.2;
+  font-variant-numeric: tabular-nums;
 }
 
 .stat-card__trend {
@@ -79,6 +84,7 @@ const accentClass = computed(() => `stat-card--accent-${props.accent}`);
   gap: var(--wm-space-1);
   margin: 0;
   font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
 }
 
 /* 涨跌着色只有一个实现点：方向在这里翻成令牌色，调用方不传颜色 */
@@ -121,5 +127,11 @@ const accentClass = computed(() => `stat-card--accent-${props.accent}`);
 
 .stat-card--accent-danger {
   --stat-card-accent: var(--wm-color-danger);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .stat-card {
+    animation: wbRise 0.55s var(--wm-ease-rise) backwards;
+  }
 }
 </style>

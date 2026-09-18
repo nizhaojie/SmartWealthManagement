@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
-import { SectionCard } from "@wealth/shared";
+import { PanelCard } from "@wealth/shared";
 import {
   getCustomerAssets,
   getCustomerProfile,
@@ -71,7 +71,7 @@ onMounted(loadCustomers);
 
 <template>
   <div class="profile-workspace">
-    <SectionCard title="客户" class="profile-workspace__list">
+    <PanelCard title="客户" class="profile-workspace__list">
       <p v-if="loadError" class="profile-workspace__error">{{ loadError }}</p>
       <button
         v-for="customer in customers"
@@ -83,7 +83,7 @@ onMounted(loadCustomers);
         <strong>{{ customer.real_name }}</strong>
         <span>{{ customer.risk_level ?? "未评测" }} · {{ customer.customer_level }}</span>
       </button>
-    </SectionCard>
+    </PanelCard>
     <ProfilePanel
       v-if="profile"
       :profile="profile"

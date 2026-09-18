@@ -36,13 +36,13 @@ function onSelect(key: string) {
     @logout="logout"
   >
     <template #brand>内部工作台</template>
-    <template #topbar>
+    <template #topbar-left>
       <el-breadcrumb separator="/">
         <el-breadcrumb-item>工作台</el-breadcrumb-item>
         <el-breadcrumb-item v-if="currentModule">{{ currentModule.label }}</el-breadcrumb-item>
       </el-breadcrumb>
     </template>
-    <template #user>
+    <template #topbar-right>
       <span v-if="currentEmployee" class="workbench-shell__identity">
         {{ currentEmployee.real_name }} · {{ currentEmployee.employee_role }}
       </span>

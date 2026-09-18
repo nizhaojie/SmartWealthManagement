@@ -1,6 +1,6 @@
 \ufeff<script setup lang="ts">
 import { computed, ref } from "vue";
-import { SectionCard } from "@wealth/shared";
+import { PanelCard } from "@wealth/shared";
 import { toCsv } from "./csv";
 import type { AnalyticsQueryResponse } from "./types";
 
@@ -31,7 +31,7 @@ function exportCsv() {
 </script>
 
 <template>
-  <SectionCard title="查询结果" class="analytics-result">
+  <PanelCard title="查询结果" class="analytics-result">
     <p class="analytics-result__interpretation" data-test="interpretation">
       {{ result.interpretation }}
     </p>
@@ -67,7 +67,7 @@ function exportCsv() {
         :label="column"
       />
     </el-table>
-  </SectionCard>
+  </PanelCard>
 </template>
 
 <style scoped>

@@ -2,7 +2,7 @@
 import { mount } from "@vue/test-utils";
 import { describe, expect, it } from "vitest";
 import StatCard from "./StatCard.vue";
-import { STAT_CARD_ACCENTS } from "./statCard";
+import { ACCENTS } from "./accent";
 
 const baseProps = { title: "样本指标", value: "12,800.00" };
 
@@ -59,18 +59,11 @@ describe("StatCard", () => {
   });
 
   it("constrains accent to the semantic enum and maps each value to its modifier class", () => {
-    // 裸色值（如 "#ff0000"）在类型层面就无法通过——StatCardAccent 只收这六个语义名，
+    // 裸色值（如 "#ff0000"）在类型层面就无法通过——Accent 只收这六个语义名，
     // 这里钉住枚举的完整清单，防止静默增删。
-    expect([...STAT_CARD_ACCENTS]).toEqual([
-      "primary",
-      "up",
-      "down",
-      "success",
-      "warning",
-      "danger",
-    ]);
+    expect([...ACCENTS]).toEqual(["primary", "up", "down", "success", "warning", "danger"]);
 
-    for (const accent of STAT_CARD_ACCENTS) {
+    for (const accent of ACCENTS) {
       const wrapper = mount(StatCard, { props: { ...baseProps, accent } });
       expect(wrapper.classes()).toContain(`stat-card--accent-${accent}`);
     }

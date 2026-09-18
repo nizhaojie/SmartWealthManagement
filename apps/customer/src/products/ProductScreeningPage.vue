@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from "vue";
-import { ApiError, SectionCard } from "@wealth/shared";
+import { ApiError, PanelCard } from "@wealth/shared";
 import { listAdvisoryRequests, submitAdvisoryRequest } from "../advisory/api";
 import type { AdvisoryRequest } from "../advisory/types";
 import { getProduct, listProducts } from "./api";
@@ -122,7 +122,7 @@ onMounted(async () => {
 <template>
   <div class="product-screening">
     <h1 class="page-title">产品筛选</h1>
-    <SectionCard title="筛选条件">
+    <PanelCard title="筛选条件">
       <p data-testid="not-recommendation" class="disclaimer">{{ DISCLAIMER }}</p>
 
       <form @submit.prevent="loadProducts">
@@ -154,9 +154,9 @@ onMounted(async () => {
         </label>
         <el-button name="apply-filters" native-type="submit" :loading="loading">筛选</el-button>
       </form>
-    </SectionCard>
+    </PanelCard>
 
-    <SectionCard title="符合条件的产品">
+    <PanelCard title="符合条件的产品">
       <p v-if="errorMessage" role="alert">{{ errorMessage }}</p>
       <p v-else-if="!loading && products.length === 0" data-testid="empty-hint">{{ EMPTY_HINT }}</p>
 
@@ -202,9 +202,9 @@ onMounted(async () => {
       <el-button name="request-advisory" @click="requestAdvisory">请顾问出具方案</el-button>
 
       <p v-if="advisoryError" role="alert" data-testid="advisory-error">{{ advisoryError }}</p>
-    </SectionCard>
+    </PanelCard>
 
-    <SectionCard v-if="latestAdvisoryRequest" title="我的方案请求">
+    <PanelCard v-if="latestAdvisoryRequest" title="我的方案请求">
       <section data-testid="advisory-request">
         <p>
           状态：<strong data-testid="advisory-status">{{ latestAdvisoryRequest.status }}</strong>
@@ -214,9 +214,9 @@ onMounted(async () => {
         <p>提交时间：{{ latestAdvisoryRequest.submitted_at }}</p>
         <p v-if="advisoryCondition">触发条件：{{ advisoryCondition }}</p>
       </section>
-    </SectionCard>
+    </PanelCard>
 
-    <SectionCard v-if="selected" title="产品详情">
+    <PanelCard v-if="selected" title="产品详情">
       <section data-testid="product-detail">
         <p v-if="detailError" role="alert">{{ detailError }}</p>
         <dl>
@@ -231,7 +231,7 @@ onMounted(async () => {
           <div><dt>基金经理</dt><dd>{{ selected.fund_manager }}</dd></div>
         </dl>
       </section>
-    </SectionCard>
+    </PanelCard>
   </div>
 </template>
 

@@ -289,10 +289,10 @@ function submitCorrection() {
  * 全部收敛到 --wm-* 令牌：墨色→text-primary、纸面→bg-card、黄铜→warning、
  * 印章红→danger、来源青→text-muted。构成不变，只换皮。
  *
- * 偏离声明：本页是 04 号 ticket「内容包进 SectionCard」纪律下的唯一例外——
- * 档案头（眉标/姓名/日期戳）与印章/熔断构成不适配 SectionCard 的标题栏插槽，
+ * 偏离声明：本页是 04 号 ticket「内容包进 PanelCard」纪律下的唯一例外——
+ * 档案头（眉标/姓名/日期戳）与印章/熔断构成不适配 PanelCard 的标题栏插槽，
  * 硬套等于重排信息架构；故按 spec「复合组件：页面级独有模式留在各自应用」
- * 在应用内复刻 SectionCard 的容器配方（白面/边线/圆角/阴影/间距），
+ * 在应用内复刻 PanelCard 的容器配方（白面/边线/圆角/阴影/间距），
  * 视觉与其余页面的卡片保持同一语言。
  */
 .customer-file {

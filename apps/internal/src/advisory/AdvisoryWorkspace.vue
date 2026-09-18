@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
-import { ApiError, SectionCard } from "@wealth/shared";
+import { ApiError, PanelCard } from "@wealth/shared";
 import { generatePlan, getMyHistory, getQueue, listCustomersForPlan } from "./api";
 import type { AdvisoryHistoryEntry, AdvisoryQueue, CustomerOption } from "./types";
 
@@ -91,7 +91,7 @@ onMounted(load);
       {{ loadError }}
     </p>
 
-    <SectionCard title="为客户发起生成">
+    <PanelCard title="为客户发起生成">
       <div class="advisory-workspace__direct-generate">
         <el-select v-model="directGenerateCustomerId" placeholder="选择客户" data-test="direct-customer-select">
           <el-option v-for="customer in customers" :key="customer.id" :label="customer.real_name" :value="customer.id" />
@@ -105,9 +105,9 @@ onMounted(load);
           生成方案
         </el-button>
       </div>
-    </SectionCard>
+    </PanelCard>
 
-    <SectionCard title="待生成的方案请求">
+    <PanelCard title="待生成的方案请求">
       <el-table :data="queue.pending_requests" data-test="pending-requests-table">
         <el-table-column prop="customer_name" label="客户" sortable />
         <el-table-column prop="request_no" label="请求编号" />
@@ -132,9 +132,9 @@ onMounted(load);
         </el-table-column>
       </el-table>
       <p v-if="!queue.pending_requests.length" class="advisory-workspace__hint">暂无待生成的方案请求</p>
-    </SectionCard>
+    </PanelCard>
 
-    <SectionCard title="待审核">
+    <PanelCard title="待审核">
       <el-table :data="queue.pending_reviews" data-test="pending-reviews-table">
         <el-table-column prop="customer_name" label="客户" sortable />
         <el-table-column prop="status" label="状态" sortable />
@@ -155,9 +155,9 @@ onMounted(load);
         </el-table-column>
       </el-table>
       <p v-if="!queue.pending_reviews.length" class="advisory-workspace__hint">暂无待审核内容</p>
-    </SectionCard>
+    </PanelCard>
 
-    <SectionCard title="我审核过的记录">
+    <PanelCard title="我审核过的记录">
       <el-table :data="history" data-test="history-table">
         <el-table-column prop="customer_name" label="客户" />
         <el-table-column prop="action" label="操作" />
@@ -167,7 +167,7 @@ onMounted(load);
         </el-table-column>
       </el-table>
       <p v-if="!history.length" class="advisory-workspace__hint">还没有审核过的记录</p>
-    </SectionCard>
+    </PanelCard>
 
     <el-dialog
       :model-value="generating !== null"

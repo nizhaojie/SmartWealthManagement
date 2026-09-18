@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { ApiError, SectionCard } from "@wealth/shared";
+import { ApiError, PanelCard } from "@wealth/shared";
 import { ADVISOR } from "../auth/identity";
 import { currentEmployee } from "../auth/store";
 import {
@@ -156,9 +156,9 @@ onMounted(load);
 <template>
   <div class="advisory-review" data-test="advisory-review-page">
     <p v-if="loading">加载中…</p>
-    <SectionCard v-else-if="forbidden" title="无权查看" data-test="forbidden">
+    <PanelCard v-else-if="forbidden" title="无权查看" data-test="forbidden">
       <p role="alert">{{ forbiddenMessage }}</p>
-    </SectionCard>
+    </PanelCard>
     <p v-else-if="loadError" class="advisory-review__error" data-test="load-error">{{ loadError }}</p>
 
     <template v-else-if="draft && review">
@@ -178,7 +178,7 @@ onMounted(load);
       />
 
       <div class="advisory-review__panels">
-        <SectionCard title="AI 原稿" data-test="original-panel">
+        <PanelCard title="AI 原稿" data-test="original-panel">
           <el-table :data="draft.candidates" row-key="product_code">
             <el-table-column type="expand">
               <template #default="{ row }">
@@ -200,9 +200,9 @@ onMounted(load);
               {{ key }}：{{ value }}%
             </li>
           </ul>
-        </SectionCard>
+        </PanelCard>
 
-        <SectionCard title="编辑版本" data-test="edited-panel">
+        <PanelCard title="编辑版本" data-test="edited-panel">
           <p v-if="removedCount" class="advisory-review__diff-note" data-test="removed-note">
             已从原稿移除 {{ removedCount }} 项推荐产品
           </p>
@@ -247,10 +247,10 @@ onMounted(load);
               </span>
             </li>
           </ul>
-        </SectionCard>
+        </PanelCard>
       </div>
 
-      <SectionCard v-if="isAdvisor && !isDecided" title="审核决定" class="advisory-review__actions">
+      <PanelCard v-if="isAdvisor && !isDecided" title="审核决定" class="advisory-review__actions">
         <el-button type="primary" data-test="release" :loading="submitting" @click="submitRelease">
           放行
         </el-button>
@@ -273,16 +273,16 @@ onMounted(load);
           </el-button>
         </div>
         <p v-if="actionError" class="advisory-review__error" data-test="action-error">{{ actionError }}</p>
-      </SectionCard>
+      </PanelCard>
       <p v-else-if="!isAdvisor && !isDecided" class="advisory-review__hint" data-test="no-release-entry">
         当前角色无法放行或驳回，仅可查看与留言。
       </p>
 
-      <SectionCard v-if="final" title="顾问定稿" data-test="final-panel">
+      <PanelCard v-if="final" title="顾问定稿" data-test="final-panel">
         <p>放行人：{{ final.advisor_name }} · {{ formatDateTime(final.released_at) }}</p>
-      </SectionCard>
+      </PanelCard>
 
-      <SectionCard title="留言" data-test="comments-panel">
+      <PanelCard title="留言" data-test="comments-panel">
         <ul class="advisory-review__comments">
           <li v-for="comment in comments" :key="comment.id">
             <strong>{{ comment.author_name }}（{{ comment.author_role }}）</strong>
@@ -303,7 +303,7 @@ onMounted(load);
           </el-button>
         </div>
         <p v-if="commentError" class="advisory-review__error">{{ commentError }}</p>
-      </SectionCard>
+      </PanelCard>
     </template>
   </div>
 </template>

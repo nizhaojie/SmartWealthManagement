@@ -15,14 +15,18 @@ const navItems: AppShellNavItem[] = [
   { key: "settings", label: "设置" },
 ];
 
-function mountShell(props: { activeKey?: string } = {}) {
+function mountShell(
+  props: { activeKey?: string; brandSubtitle?: string } = {},
+  slots: Record<string, string> = {},
+) {
   return mount(AppShell, {
     props: { navItems, ...props },
     slots: {
-      brand: "测试品牌",
-      topbar: "<div data-testid='topbar-slot' />",
-      user: "<span data-testid='user-slot'>某人</span>",
+      brand: "<b>某系统</b>",
+      "topbar-left": "<div data-testid='topbar-left-slot' />",
+      "topbar-right": "<span data-testid='topbar-right-slot'>某人</span>",
       default: "<div data-testid='content-slot' />",
+      ...slots,
     },
   });
 }
@@ -54,6 +58,16 @@ describe("AppShell", () => {
     expect(wrapper.emitted("select")).toEqual([["home"]]);
   });
 
+  it("renders the badge of a nav entry without interpreting it", () => {
+    const wrapper = mount(AppShell, {
+      props: { navItems: [{ key: "alerts", label: "风控", badge: 3 }, { key: "plain", label: "无徽标" }] },
+    });
+
+    const badges = wrapper.findAll(".app-shell__nav-badge");
+    expect(badges).toHaveLength(1);
+    expect(badges[0].text()).toBe("3");
+  });
+
   it("always renders the logout entry and emits logout on click", async () => {
     const wrapper = mountShell();
 
@@ -69,13 +83,39 @@ describe("AppShell", () => {
     expect(wrapper.find('button[name="logout"]').exists()).toBe(true);
   });
 
-  it("renders brand, topbar, user and default slots", async () => {
-    const wrapper = mountShell();
+  it("renders every named slot, including the optional sidebar footer", async () => {
+    const wrapper = mountShell(
+      { brandSubtitle: "Copilot" },
+      { "sidebar-footer": "<div data-testid='sidebar-footer-slot' />" },
+    );
     await nextTick();
 
-    expect(wrapper.text()).toContain("测试品牌");
-    expect(wrapper.find('[data-testid="topbar-slot"]').exists()).toBe(true);
-    expect(wrapper.find('[data-testid="user-slot"]').exists()).toBe(true);
+    expect(wrapper.text()).toContain("某系统");
+    expect(wrapper.text()).toContain("Copilot");
+    expect(wrapper.find('[data-testid="topbar-left-slot"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="topbar-right-slot"]').exists()).toBe(true);
     expect(wrapper.find('[data-testid="content-slot"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="sidebar-footer-slot"]').exists()).toBe(true);
+  });
+
+  it("omits the sidebar footer container when the slot is not provided", () => {
+    const wrapper = mountShell();
+
+    expect(wrapper.find(".app-shell__sidebar-footer").exists()).toBe(false);
+  });
+
+  it("stays two-column when no inspector slot is provided", () => {
+    const wrapper = mountShell();
+
+    expect(wrapper.classes()).not.toContain("app-shell--with-inspector");
+    expect(wrapper.find(".app-shell__inspector").exists()).toBe(false);
+  });
+
+  it("takes the three-column shape from the inspector slot alone, with no variant prop", () => {
+    const wrapper = mountShell({}, { inspector: "<div data-testid='inspector-slot' />" });
+
+    expect(wrapper.classes()).toContain("app-shell--with-inspector");
+    expect(wrapper.find(".app-shell__inspector").exists()).toBe(true);
+    expect(wrapper.find('[data-testid="inspector-slot"]').exists()).toBe(true);
   });
 });

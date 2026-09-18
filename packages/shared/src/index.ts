@@ -1,10 +1,13 @@
 export * from "./chart";
 export { default as AppShell } from "./shell/AppShell.vue";
 export type { AppShellNavItem } from "./shell/nav";
-export { default as SectionCard } from "./components/SectionCard.vue";
+export { default as PanelCard } from "./components/PanelCard.vue";
 export { default as StatCard } from "./components/StatCard.vue";
-export { STAT_CARD_ACCENTS } from "./components/statCard";
-export type { StatCardAccent, StatCardTrend } from "./components/statCard";
+export { default as MeterBar } from "./components/MeterBar.vue";
+export { default as PageHeader } from "./components/PageHeader.vue";
+export { ACCENTS } from "./components/accent";
+export type { Accent } from "./components/accent";
+export type { StatCardTrend } from "./components/statCard";
 export { MIN_TEXT_CONTRAST_RATIO, THEME_COLORS } from "./theme";
 export { ApiError, createHttpClient, unwrap } from "./http";
 export type { Envelope, HttpClient, HttpClientOptions } from "./http";

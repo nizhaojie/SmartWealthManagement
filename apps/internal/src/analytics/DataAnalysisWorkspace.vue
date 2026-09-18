@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
-import { ApiError, SectionCard } from "@wealth/shared";
+import { ApiError, PanelCard } from "@wealth/shared";
 import { listAnalyticsExamples, listAnalyticsHistory, runAnalyticsQuery } from "./api";
 import AnalyticsResultView from "./AnalyticsResultView.vue";
 import type {
@@ -65,7 +65,7 @@ onMounted(async () => {
 
 <template>
   <div class="analytics-workspace">
-    <SectionCard title="历史查询" class="analytics-workspace__history">
+    <PanelCard title="历史查询" class="analytics-workspace__history">
       <button
         v-for="entry in history"
         :key="entry.id"
@@ -78,10 +78,10 @@ onMounted(async () => {
         <span>{{ entry.status }} · {{ formatDateTime(entry.create_time) }}</span>
       </button>
       <p v-if="!history.length" class="analytics-workspace__hint">还没有历史查询</p>
-    </SectionCard>
+    </PanelCard>
 
     <div class="analytics-workspace__main">
-      <SectionCard title="提问">
+      <PanelCard title="提问">
         <div class="analytics-workspace__composer">
           <el-input
             v-model="question"
@@ -113,7 +113,7 @@ onMounted(async () => {
             {{ example.question }}
           </button>
         </div>
-      </SectionCard>
+      </PanelCard>
 
       <el-alert
         v-if="failureReason"

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { nextTick, reactive, ref } from "vue";
-import { SectionCard } from "@wealth/shared";
+import { PanelCard } from "@wealth/shared";
 import { streamChatMessage, type Citation } from "./api";
 
 type ChatMessage = {
@@ -124,7 +124,7 @@ async function send(): Promise<void> {
 </script>
 
 <template>
-  <SectionCard title="智能客服">
+  <PanelCard title="智能客服">
     <div ref="listEl" class="message-list">
       <div v-for="message in messages" :key="message.id" :class="['message', message.role]">
         <template v-if="message.role === 'assistant' && message.done">
@@ -170,7 +170,7 @@ async function send(): Promise<void> {
       />
       <el-button type="primary" native-type="submit" :loading="sending">发送</el-button>
     </form>
-  </SectionCard>
+  </PanelCard>
 </template>
 
 <style scoped>

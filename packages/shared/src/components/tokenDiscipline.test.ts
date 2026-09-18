@@ -1,16 +1,22 @@
-// 令牌纪律的回归闸门：本 slice 的三个共享组件（StatCard / SectionCard / ChartFrame）
-// 不允许再出现任何裸十六进制色值——着色只能经 --wm-* 令牌。
-// 这是对 review 纪律的机器化：把 03 号 ticket 的「硬编码值全部替换为令牌」钉进测试。
+// 令牌纪律的回归闸门：shared 的展示件（壳、卡片、KPI、进度条、页面头、图表壳）
+// 不允许出现任何裸十六进制色值——着色只能经 --wm-* 令牌。
+// 这是对 review 纪律的机器化：把「硬编码值全部替换为令牌」钉进测试。
 
 import { describe, expect, it } from "vitest";
+import appShellSource from "../shell/AppShell.vue?raw";
 import chartFrameSource from "../chart/ChartFrame.vue?raw";
 import tokensCssSource from "../theme/tokens.css?raw";
-import sectionCardSource from "./SectionCard.vue?raw";
+import meterBarSource from "./MeterBar.vue?raw";
+import pageHeaderSource from "./PageHeader.vue?raw";
+import panelCardSource from "./PanelCard.vue?raw";
 import statCardSource from "./StatCard.vue?raw";
 
 const COMPONENT_SOURCES: Array<[string, string]> = [
+  ["AppShell.vue", appShellSource],
+  ["PanelCard.vue", panelCardSource],
   ["StatCard.vue", statCardSource],
-  ["SectionCard.vue", sectionCardSource],
+  ["MeterBar.vue", meterBarSource],
+  ["PageHeader.vue", pageHeaderSource],
   ["ChartFrame.vue", chartFrameSource],
 ];
 

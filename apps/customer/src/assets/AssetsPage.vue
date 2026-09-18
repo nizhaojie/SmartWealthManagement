@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from "vue";
-import { ApiError, SectionCard } from "@wealth/shared";
+import { ApiError, PanelCard } from "@wealth/shared";
 import { RISK_LEVEL_LABELS } from "../risk-assessment/grades";
 import ActualAllocationChart from "./ActualAllocationChart.vue";
 import HoldingLookThrough from "./HoldingLookThrough.vue";
@@ -120,7 +120,7 @@ onMounted(async () => {
 <template>
   <div class="assets-page">
     <h1 class="page-title">我的资产</h1>
-    <SectionCard title="资产概览">
+    <PanelCard title="资产概览">
       <p v-if="errorMessage" role="alert" data-testid="assets-error">{{ errorMessage }}</p>
 
       <section v-else-if="assets" class="summary" data-testid="asset-summary">
@@ -147,9 +147,9 @@ onMounted(async () => {
         <ActualAllocationChart :holdings="assets?.holdings ?? []" :loading="loading" />
         <RiskLevelDistributionChart :holdings="assets?.holdings ?? []" :loading="loading" />
       </div>
-    </SectionCard>
+    </PanelCard>
 
-    <SectionCard title="持仓明细">
+    <PanelCard title="持仓明细">
       <p v-if="loading">正在加载持仓…</p>
       <p v-else-if="!assets">持仓信息暂不可用</p>
       <p v-else-if="assets.holdings.length === 0" data-testid="holdings-empty">
@@ -206,9 +206,9 @@ onMounted(async () => {
           </tbody>
         </table>
       </div>
-    </SectionCard>
+    </PanelCard>
 
-    <SectionCard title="交易流水">
+    <PanelCard title="交易流水">
       <form @submit.prevent="loadTransactions">
         <label>
           起始日期
@@ -272,7 +272,7 @@ onMounted(async () => {
           </tbody>
         </table>
       </div>
-    </SectionCard>
+    </PanelCard>
   </div>
 </template>
 

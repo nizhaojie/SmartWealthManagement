@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from "vue";
-import { SectionCard } from "@wealth/shared";
+import { PanelCard } from "@wealth/shared";
 import { getQuestionnaire, saveDraft, submitAssessment } from "./api";
 import type { AssessmentResult, Question } from "./types";
 
@@ -60,7 +60,7 @@ async function onSubmit() {
 </script>
 
 <template>
-  <SectionCard title="风险测评">
+  <PanelCard title="风险测评">
     <p v-if="loading">正在加载问卷…</p>
     <p v-if="errorMessage" role="alert">{{ errorMessage }}</p>
     <form v-if="!loading" @submit.prevent="onSubmit">
@@ -82,7 +82,7 @@ async function onSubmit() {
         提交测评
       </el-button>
     </form>
-  </SectionCard>
+  </PanelCard>
 </template>
 
 <style scoped>

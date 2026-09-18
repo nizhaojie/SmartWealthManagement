@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import { SectionCard } from "@wealth/shared";
+import { PanelCard } from "@wealth/shared";
 import { searchKnowledge } from "./api";
 import RetrievalHitCard from "./RetrievalHitCard.vue";
 import { KNOWLEDGE_TYPES, type ChunkHit, type KnowledgeType } from "./types";
@@ -94,7 +94,7 @@ function hitPresentation(hit: ChunkHit): {
 </script>
 
 <template>
-  <SectionCard title="检索试验">
+  <PanelCard title="检索试验">
     <div class="retrieval-lab__form">
       <el-input
         v-model="query"
@@ -134,7 +134,7 @@ function hitPresentation(hit: ChunkHit): {
         :score-text="row.scoreText"
       />
     </template>
-  </SectionCard>
+  </PanelCard>
 </template>
 
 <style scoped>

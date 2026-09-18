@@ -2,45 +2,77 @@
  * 设计令牌层：全局唯一的视觉数值事实源（spec「设计令牌层」）。
  * 前缀 --wm-，避免与 Element Plus 的 --el-* 撞名；EP 主题化映射见文件末尾。
  * 色彩令牌的 TS 只读镜像在同目录 tokens.ts，改值需两处同步并跑 tokens.test.ts。
- * 后续壳、复合组件与逐页改造只消费这里的变量，不允许各自发明色值。
+ *
+ * 本文件同时是两个应用唯一加载的全局样式表（各 app 的 main.ts 里
+ * import "@wealth/shared/tokens.css"），所以 02 的全局材质与可访问性规则
+ * （focus-visible / 自定义滚动条 / ::selection / 动效关键帧）也落在文件末尾，
+ * 不在应用里各复刻一份。
+ *
+ * 不引入 02 的两样东西：body::before 的全屏 grain 噪点层（与 EP 弹层、ECharts
+ * canvas 叠加时会出现可见斑驳）与卡片 hover 上浮（transform:translateY(-3px)）。
  */
 
 :root {
   /* 品牌 */
-  --wm-color-primary: #1f6feb;
-  /* 主色淡染底(10% 主色混白):侧边导航激活项、入口卡片图标底座等浅色底 */
-  --wm-color-primary-tint: color-mix(in srgb, var(--wm-color-primary) 10%, white);
+  --wm-color-primary: #1570f0;
+  /*
+   * 淡染底上的文字（导航激活项、tag、浅底强调块）。02 用 #1677ff on #e8f1ff
+   * 只有 3.61:1，跌破 4.5 门槛，这里按 78% 主色 + 22% 黑现场派生到 5.96:1。
+   */
+  --wm-color-primary-strong: color-mix(in srgb, var(--wm-color-primary) 78%, black);
+  /* 主色实底上的前景色（按钮文字、::selection） */
+  --wm-color-primary-fg: #ffffff;
+  /*
+   * 主色淡染底：侧边导航激活项、入口卡片图标底座、tag 蓝底等浅色底（02 的 --accent-soft；
+   * 02 的 --tag2-bg 写作 #e8f1ff，与 --accent-soft 是同一个浅蓝，1/255 的差值是 02 自身的不一致）。
+   */
+  --wm-color-primary-tint: #e9f1ff;
 
   /* 涨跌：红涨绿跌（中国金融惯例）。与 success/danger 同值但独立命名，保留分叉余地 */
   --wm-color-up: #c81e1e;
   --wm-color-down: #1e7a46;
 
-  /* 语义状态 */
+  /* 语义状态：success/warning 偏离 02 的 tag 文字色（3.51 / 3.19:1），压深到达标档 */
   --wm-color-success: #1e7a46;
   --wm-color-warning: #b45309;
-  --wm-color-danger: #c81e1e;
+  --wm-color-danger: #d4380d;
+  /*
+   * 状态 tag 的浅底（02 的 --tag1-bg / --tag3-bg）。文字色走 success / warning / primary-strong
+   * 令牌，不取 02 的 --tag*-fg——那两个值在自家浅底上只有 3.51 / 3.19:1。
+   */
+  --wm-color-success-tint: #e7f7ee;
+  --wm-color-warning-tint: #fff4e5;
 
   /* 文字 */
-  --wm-text-primary: #1f2937;
+  --wm-text-primary: #1f2329;
+  /*
+   * 过渡档：spec 的令牌表只有 primary / muted / placeholder 三级，02 没有中间档。
+   * 未被重写的应用页仍在引用它，值沿用上一轮；02/03 重写完成后即可删除。
+   */
   --wm-text-secondary: #374151;
-  --wm-text-muted: #6b7280;
-  /* 豁免：对白底 2.54:1，不满足正文级——仅限 placeholder 与装饰，禁用于有意义文字 */
-  --wm-text-placeholder: #9ca3af;
+  --wm-text-muted: #6b7688;
+  /* 豁免：对白底 2.28:1，不满足正文级——仅限 placeholder 与装饰，禁用于有意义文字 */
+  --wm-text-placeholder: #a3acbd;
 
   /* 中性面 */
-  --wm-bg-page: #f5f7fa;
+  --wm-bg-page: #f4f6fa;
   --wm-bg-card: #ffffff;
-  --wm-border: #e5e7eb;
-  --wm-border-hairline: #eef0f3;
+  --wm-bg-sidebar: #ffffff;
+  --wm-bg-subtle: #fafbfc;
+  --wm-border: #e6e9f0;
+  --wm-border-hairline: #eef1f6;
+  /* 用户气泡底：02 的 --user-bg，配 --wm-text-primary 为 13.9:1 */
+  --wm-bg-user-bubble: #e8f1ff;
 
-  /* 圆角 */
-  --wm-radius-sm: 4px;
+  /* 圆角：三档 6/8/10 + 02 的胶囊档（进度条、徽标、tag） */
+  --wm-radius-sm: 6px;
   --wm-radius-md: 8px;
-  --wm-radius-lg: 12px;
+  --wm-radius-lg: 10px;
+  --wm-radius-pill: 99px;
 
-  /* 阴影 */
-  --wm-shadow-card: 0 1px 2px rgba(16, 24, 40, 0.06);
-  --wm-shadow-overlay: 0 4px 16px rgba(16, 24, 40, 0.12);
+  /* 阴影：卡片承托与浮层 */
+  --wm-shadow-card: 0 1px 3px rgba(16, 24, 40, 0.06), 0 1px 2px rgba(16, 24, 40, 0.04);
+  --wm-shadow-overlay: 0 10px 26px rgba(16, 24, 40, 0.12);
 
   /* 间距刻度：4/8/12/16/24/32 */
   --wm-space-1: 4px;
@@ -50,13 +82,21 @@
   --wm-space-5: 24px;
   --wm-space-6: 32px;
 
-  /* 字体 */
+  /* 字体：不引入 02 的 Bahnschrift / DengXian（Windows 独占，其他机器必然掉字） */
   --wm-font-family: system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei",
     sans-serif;
+  /* SQL 与代码块。数字对齐场景统一挂 font-variant-numeric: tabular-nums，不另立字体族 */
+  --wm-font-mono: Consolas, "DejaVu Sans Mono", monospace;
 
   /* 布局常量 */
-  --wm-sidebar-width: 220px;
-  --wm-topbar-height: 56px;
+  --wm-sidebar-width: 248px;
+  --wm-topbar-height: 60px;
+  --wm-inspector-width: 336px;
+  /* customer 主区限宽居中（02 未给，为本 slice 新增） */
+  --wm-content-max-width: 1080px;
+
+  /* 动效曲线：载入浮现与面板发丝线呼吸共用（02 的 cubic-bezier(.22,1,.36,1)） */
+  --wm-ease-rise: cubic-bezier(0.22, 1, 0.36, 1);
 
   /*
    * Element Plus 主题化：主色及其明暗派生全部映射到令牌，
@@ -75,4 +115,113 @@
   --el-color-primary-light-7: color-mix(in srgb, var(--wm-color-primary) 30%, white);
   --el-color-primary-light-8: color-mix(in srgb, var(--wm-color-primary) 20%, white);
   --el-color-primary-light-9: color-mix(in srgb, var(--wm-color-primary) 10%, white);
+}
+
+/*
+ * 唯一的响应式规则：窄屏收窄侧栏与检查器。第三栏在 <1200px 塌陷由 AppShell 负责
+ * （塌陷是骨架行为，收窄是尺寸事实），不做移动端适配。
+ */
+@media (max-width: 1280px) {
+  :root {
+    --wm-sidebar-width: 220px;
+    --wm-inspector-width: 300px;
+  }
+}
+
+/* ---- 全局材质与可访问性（02 的配方，两个应用共用） ---- */
+
+body {
+  margin: 0;
+  font-family: var(--wm-font-family);
+  background-color: var(--wm-bg-page);
+  color: var(--wm-text-primary);
+  -webkit-font-smoothing: antialiased;
+}
+
+:focus-visible {
+  outline: 2px solid var(--wm-color-primary);
+  outline-offset: 2px;
+  /* 02 此处硬编码 3px；这里走令牌，取值差异肉眼不可分辨 */
+  border-radius: var(--wm-radius-sm);
+}
+
+*::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: var(--wm-border);
+  border-radius: var(--wm-radius-pill);
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--wm-text-muted);
+  background-clip: content-box;
+}
+
+::selection {
+  background: var(--wm-color-primary);
+  color: var(--wm-color-primary-fg);
+}
+
+/*
+ * 动效：只在系统未要求减少动效时启用。关键帧定义在这里（全局），
+ * 组件从自己的 scoped style 里引用——不定义逐项 nth-child 错峰延迟，
+ * 列表长度是动态的，硬编码 nth-child 是伪动效。
+ *   wbRise  载入浮现：卡片、面板、侧栏与顶栏区块
+ *   wbFade  侧栏导航项的水平浮现
+ *   wbPulse 预警脉冲：「待处置」类实时标记（检查器的预警圆点、侧栏徽标）
+ *   wbGlow  面板顶部发丝渐变线的呼吸
+ */
+@media (prefers-reduced-motion: no-preference) {
+  @keyframes wbRise {
+    from {
+      opacity: 0;
+      transform: translateY(14px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+
+  @keyframes wbFade {
+    from {
+      opacity: 0;
+      transform: translateX(-6px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+
+  @keyframes wbPulse {
+    0%,
+    100% {
+      opacity: 1;
+      transform: scale(1);
+    }
+    50% {
+      opacity: 0.35;
+      transform: scale(0.8);
+    }
+  }
+
+  @keyframes wbGlow {
+    0%,
+    100% {
+      opacity: 0.26;
+    }
+    50% {
+      opacity: 0.6;
+    }
+  }
 }

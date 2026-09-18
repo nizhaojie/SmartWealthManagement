@@ -103,23 +103,27 @@ onBeforeUnmount(dispose);
 </template>
 
 <style scoped>
-/* 着色一律经 --wm-* 令牌（tokenDiscipline.test.ts 有裸色值闸门），行为与结构保持原样 */
+/* 着色与间距一律经 --wm-* 令牌（tokenDiscipline.test.ts 有裸色值闸门），行为与结构保持原样；
+   容器样式并入 02 的卡片语言（白面 + 发丝线 + 圆角 + 卡片阴影）。
+   1px 描边与骨架条的 22px / 108px 尺寸不在令牌刻度内，属令牌纪律声明的极少数例外。 */
 .chart-frame {
   margin: 0;
-  padding: 1rem;
+  padding: var(--wm-space-4);
   border: 1px solid var(--wm-border);
   border-radius: var(--wm-radius-md);
+  background-color: var(--wm-bg-card);
+  box-shadow: var(--wm-shadow-card);
 }
 
 .chart-frame__title {
-  margin-bottom: 0.25rem;
+  margin-bottom: var(--wm-space-1);
   color: var(--wm-text-primary);
   font-size: 0.95rem;
   font-weight: 600;
 }
 
 .chart-frame__hint {
-  margin: 0 0 0.5rem;
+  margin: 0 0 var(--wm-space-2);
   color: var(--wm-text-muted);
   font-size: 0.85rem;
 }
@@ -134,7 +138,7 @@ onBeforeUnmount(dispose);
   justify-content: center;
   min-height: 140px;
   margin: 0;
-  padding: 1rem;
+  padding: var(--wm-space-4);
   border: 1px dashed var(--wm-border);
   border-radius: var(--wm-radius-md);
   background: var(--wm-bg-page);
@@ -147,7 +151,7 @@ onBeforeUnmount(dispose);
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 0.75rem;
+  gap: var(--wm-space-3);
   min-height: 180px;
   border-radius: var(--wm-radius-md);
   background: var(--wm-bg-page);
@@ -156,7 +160,7 @@ onBeforeUnmount(dispose);
 .chart-frame__bars {
   display: flex;
   align-items: flex-end;
-  gap: 0.5rem;
+  gap: var(--wm-space-2);
   height: 108px;
 }
 
@@ -164,23 +168,6 @@ onBeforeUnmount(dispose);
   width: 22px;
   border-radius: var(--wm-radius-sm);
   background: var(--wm-border);
-  animation: chart-frame-pulse 1.2s ease-in-out infinite;
-}
-
-.chart-frame__bars span:nth-child(2) {
-  animation-delay: 0.12s;
-}
-
-.chart-frame__bars span:nth-child(3) {
-  animation-delay: 0.24s;
-}
-
-.chart-frame__bars span:nth-child(4) {
-  animation-delay: 0.36s;
-}
-
-.chart-frame__bars span:nth-child(5) {
-  animation-delay: 0.48s;
 }
 
 .chart-frame__loading-text {
@@ -189,13 +176,20 @@ onBeforeUnmount(dispose);
   font-size: 0.85rem;
 }
 
-@keyframes chart-frame-pulse {
-  0%,
-  100% {
-    opacity: 0.45;
+/* 骨架条的呼吸只在系统未要求减少动效时启用；不做逐项 nth-child 错峰延迟 */
+@media (prefers-reduced-motion: no-preference) {
+  @keyframes chart-frame-pulse {
+    0%,
+    100% {
+      opacity: 0.45;
+    }
+    50% {
+      opacity: 1;
+    }
   }
-  50% {
-    opacity: 1;
+
+  .chart-frame__bars span {
+    animation: chart-frame-pulse 1.2s ease-in-out infinite;
   }
 }
 </style>

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { ApiError, SectionCard } from "@wealth/shared";
+import { ApiError, PanelCard } from "@wealth/shared";
 import { currentEmployee } from "../auth/store";
 import { acceptWorkOrder, closeWorkOrder, completeWorkOrder, getWorkOrder } from "./api";
 import { canHandleWorkOrder, errorMessage, formatDateTime, workOrderTagType } from "./riskView";
@@ -106,9 +106,9 @@ onMounted(load);
 <template>
   <div class="work-order-detail" data-test="work-order-detail">
     <p v-if="loading">加载中…</p>
-    <SectionCard v-else-if="forbidden" title="无权查看" data-test="work-order-forbidden">
+    <PanelCard v-else-if="forbidden" title="无权查看" data-test="work-order-forbidden">
       <p role="alert">{{ forbiddenMessage }}</p>
-    </SectionCard>
+    </PanelCard>
     <p v-else-if="loadError" role="alert" class="work-order-detail__error" data-test="load-error">
       {{ loadError }}
     </p>
@@ -122,7 +122,7 @@ onMounted(load);
         </el-tag>
       </header>
 
-      <SectionCard title="工单概况">
+      <PanelCard title="工单概况">
         <el-descriptions :column="3" border>
           <el-descriptions-item label="来源">{{ detail.order_type }}</el-descriptions-item>
           <el-descriptions-item label="优先级">{{ detail.priority }}</el-descriptions-item>
@@ -139,9 +139,9 @@ onMounted(load);
             {{ detail.alert_id ?? "—" }}
           </el-descriptions-item>
         </el-descriptions>
-      </SectionCard>
+      </PanelCard>
 
-      <SectionCard v-if="canAct" title="处置" data-test="work-order-actions">
+      <PanelCard v-if="canAct" title="处置" data-test="work-order-actions">
         <el-input
           v-model="reason"
           type="textarea"
@@ -197,7 +197,7 @@ onMounted(load);
         >
           {{ actionError }}
         </p>
-      </SectionCard>
+      </PanelCard>
       <p v-else-if="detail.status === '已完成' || detail.status === '已关闭'" class="work-order-detail__hint" data-test="terminal-hint">
         工单已{{ detail.status.slice(1) }}，不能再流转。
       </p>
@@ -205,7 +205,7 @@ onMounted(load);
         当前角色只能查看，流转由风控专员完成。
       </p>
 
-      <SectionCard title="流转留痕">
+      <PanelCard title="流转留痕">
         <el-table :data="detail.transitions" data-test="transitions-table">
           <el-table-column label="流转" min-width="180">
             <template #default="{ row }">
@@ -220,7 +220,7 @@ onMounted(load);
             </template>
           </el-table-column>
         </el-table>
-      </SectionCard>
+      </PanelCard>
     </template>
   </div>
 </template>

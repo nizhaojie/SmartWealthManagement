@@ -63,10 +63,7 @@ useTabSummary(
         <el-input
           v-model="question"
           name="risk-question"
-          type="textarea"
-          :rows="3"
-          placeholder="用一句自然语言描述要看的风险数据（Ctrl + Enter 提交）"
-          @keydown.ctrl.enter="ask"
+          placeholder="用一句自然语言描述要看的风险数据（回车提交）"
         />
         <div class="query__row">
           <el-button

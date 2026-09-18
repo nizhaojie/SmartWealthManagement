@@ -61,7 +61,7 @@ onMounted(load);
       </label>
       <label class="filters__field">
         <span class="filters__label">交易类型</span>
-        <el-select v-model="filters.transaction_type" name="transaction_type" placeholder="全部">
+        <el-select v-model="filters.transaction_type" name="transaction_type" placeholder="全部" placement="top-start">
           <el-option label="全部" value="" />
           <el-option v-for="type in TRANSACTION_TYPES" :key="type" :label="type" :value="type" />
         </el-select>

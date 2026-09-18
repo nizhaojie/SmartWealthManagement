@@ -86,7 +86,7 @@ useTabSummary(
       <form class="filters" data-testid="alert-filters" @submit.prevent="loadAlerts">
         <label class="filters__field">
           <span class="filters__label">等级</span>
-          <el-select v-model="levelFilter" name="alert-level" placeholder="全部">
+          <el-select v-model="levelFilter" name="alert-level" placeholder="全部" placement="top-start">
             <el-option label="全部" value="" />
             <el-option v-for="level in ALERT_LEVELS" :key="level" :label="level" :value="level" />
           </el-select>
@@ -94,7 +94,7 @@ useTabSummary(
 
         <label class="filters__field">
           <span class="filters__label">状态</span>
-          <el-select v-model="statusFilter" name="alert-status" placeholder="全部">
+          <el-select v-model="statusFilter" name="alert-status" placeholder="全部" placement="top-start">
             <el-option label="全部" value="" />
             <el-option v-for="status in ALERT_STATUSES" :key="status" :label="status" :value="status" />
           </el-select>
@@ -113,7 +113,7 @@ useTabSummary(
 
         <label class="filters__field">
           <span class="filters__label">排序</span>
-          <el-select v-model="sortBy" name="alert-sort">
+          <el-select v-model="sortBy" name="alert-sort" placement="top-start">
             <el-option
               v-for="option in ALERT_SORT_OPTIONS"
               :key="option.value"

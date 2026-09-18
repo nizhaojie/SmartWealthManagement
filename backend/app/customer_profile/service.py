@@ -450,8 +450,13 @@ def _bigrams(text: str) -> set[str]:
     return {f"{chars[index]}{chars[index + 1]}" for index in range(len(chars) - 1)}
 
 
-def list_customers(db: Session) -> list[dict]:
-    rows = db.scalars(select(Customer).order_by(Customer.id.asc())).all()
+def list_customers(db: Session, *, manager_id: int | None = None) -> list[dict]:
+    query = select(Customer)
+    if manager_id is not None:
+        # 客户经理只看得到自己名下的客户（app.customer_scope）；其他角色
+        # 传 None 拿到全量目录。收窄在这里做，而不是调用方各自过滤。
+        query = query.where(Customer.manager_id == manager_id)
+    rows = db.scalars(query.order_by(Customer.id.asc())).all()
     profiles = {
         row.customer_id: row
         for row in db.scalars(select(CustomerProfile)).all()

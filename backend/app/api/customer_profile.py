@@ -16,6 +16,7 @@ from app.customer_profile.confidence import SOURCE_ADVISOR
 from app.customer_profile.rerank import DEFAULT_SCENARIO_WEIGHTS, UNKNOWN_SCENARIO_MESSAGE
 from app.customer_profile.schemas import WriteTagRequest
 from app.customer_profile.service import get_internal_profile, list_customers, write_tag
+from app.customer_scope import restrict_to_own_customers
 from app.db.models import Employee
 from app.db.session import get_session
 from app.exceptions import AppError
@@ -31,10 +32,13 @@ calibration_router = APIRouter(prefix="/api/internal/profiles")
 
 @internal_router.get("")
 def internal_list_customers(
-    _auth: AuthContext = Depends(require_internal),
+    employee: Employee = Depends(current_employee),
     db: Session = Depends(get_session),
 ):
-    return ok(list_customers(db))
+    # 客户经理只看得到自己名下客户（app.customer_scope）；理财顾问与风控
+    # 专员不受限，拿到全量目录。
+    manager_id = employee.id if restrict_to_own_customers(employee) else None
+    return ok(list_customers(db, manager_id=manager_id))
 
 
 def _now() -> datetime:

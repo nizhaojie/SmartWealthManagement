@@ -24,6 +24,7 @@ from app.advisory.review_status import (
     STATUS_PENDING,
     STATUS_REJECTED,
 )
+from app.advisory.runtime import has_pending_checkpoint
 from app.advisory_request.service import complete_request, reopen_request
 from app.db.models import AdvisoryReview
 from app.exceptions import AppError
@@ -34,6 +35,7 @@ ALREADY_DECIDED_MESSAGE = "该内容已完成审核"
 LOCKED_MESSAGE = "该内容正在被审核，请稍后再试"
 REASON_REQUIRED_MESSAGE = "驳回理由不能为空"
 OUT_OF_POOL_MESSAGE = "推荐产品已不在候选池内，放行被拒绝"
+REVIEW_STATE_LOST_MESSAGE = "审核状态已失效，请重新生成方案"
 
 
 def get_review_by_draft_id(db: Session, draft_id: int) -> AdvisoryReview:
@@ -82,6 +84,11 @@ def _unclaim(db: Session, review: AdvisoryReview) -> None:
 
 def _resume(db: Session, cache: redis.Redis, review: AdvisoryReview, resume_payload: dict) -> None:
     """把已校验通过的决定喂给运行时续跑；失败就解锁，让顾问能重试。"""
+    if not has_pending_checkpoint(review.thread_id):
+        # 暂停状态随进程重启丢失（见 app.advisory.runtime）：没有可续跑的
+        # 中断点，必须让顾问重新生成方案，而不是把 KeyError 漏成 500。
+        _unclaim(db, review)
+        raise AppError(409, REVIEW_STATE_LOST_MESSAGE)
     graph = build_graph(db, cache)
     try:
         graph.invoke(

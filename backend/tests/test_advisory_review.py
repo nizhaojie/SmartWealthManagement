@@ -12,6 +12,7 @@ from decimal import Decimal
 
 import pytest
 from fastapi.testclient import TestClient
+from langgraph.checkpoint.memory import MemorySaver
 from sqlalchemy import create_engine, delete, select
 from sqlalchemy.orm import Session as OrmSession
 
@@ -397,3 +398,32 @@ def test_two_concurrent_releases_of_the_same_draft_only_let_one_through(
         statuses = sorted(future.result().status_code for future in futures)
 
     assert statuses == [200, 409]
+
+
+def test_release_after_runtime_state_is_lost_returns_a_business_error(
+    auth_client: TestClient, customer, monkeypatch
+):
+    customer_id, _username = customer
+    draft = _generate_plan(auth_client, customer_id)
+
+    # 模拟后端进程重启：内存 checkpointer（app.advisory.runtime）里的暂停
+    # 状态全部丢失。放行时没有中断点可续跑，必须得到明确的业务错误，而不
+    # 是把恢复时的 KeyError 漏成 500。
+    monkeypatch.setattr("app.advisory.runtime.ADVISORY_CHECKPOINTER", MemorySaver())
+
+    response = _release(auth_client, draft["id"])
+    assert response.status_code == 409
+    assert response.json()["message"] == "审核状态已失效，请重新生成方案"
+
+
+def test_reject_after_runtime_state_is_lost_returns_a_business_error(
+    auth_client: TestClient, customer, monkeypatch
+):
+    customer_id, _username = customer
+    draft = _generate_plan(auth_client, customer_id)
+
+    monkeypatch.setattr("app.advisory.runtime.ADVISORY_CHECKPOINTER", MemorySaver())
+
+    response = _reject(auth_client, draft["id"], reason="理由无效，因为状态已丢失")
+    assert response.status_code == 409
+    assert response.json()["message"] == "审核状态已失效，请重新生成方案"

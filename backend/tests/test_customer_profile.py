@@ -312,6 +312,30 @@ def test_employee_token_is_rejected_on_customer_profile(auth_client: TestClient)
     assert response.status_code in (401, 403)
 
 
+def test_account_manager_only_sees_their_own_customers(auth_client: TestClient):
+    # 客户经理的客户目录按归属收窄：只能看到自己名下的客户，看不到其他
+    # 客户经理名下的客户。
+    response = auth_client.post(
+        "/api/internal/auth/login",
+        json={"username": "manager1", "password": SEEDED_PASSWORD},
+    )
+    manager_headers = {"Authorization": f"Bearer {response.json()['data']['access_token']}"}
+
+    listed = auth_client.get("/api/internal/customers", headers=manager_headers)
+    assert listed.status_code == 200
+    usernames = {row["username"] for row in listed.json()["data"]}
+    # manager1 名下只有 wangc1 / lisic2 / zhangc3；zhaoc4 / qianc5 归 manager2。
+    assert usernames == {"wangc1", "lisic2", "zhangc3"}
+
+
+def test_advisor_sees_the_full_customer_directory(auth_client: TestClient):
+    # 理财顾问不受归属收窄，能看到全量客户目录。
+    listed = auth_client.get("/api/internal/customers", headers=_employee_headers(auth_client))
+    assert listed.status_code == 200
+    usernames = {row["username"] for row in listed.json()["data"]}
+    assert SEEDED_USERNAMES <= usernames
+
+
 def _id_number_for_age(age: int) -> str:
     today = datetime.now(timezone.utc).date()
     birth = date(today.year - age, today.month, today.day)

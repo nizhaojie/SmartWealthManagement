@@ -14,3 +14,15 @@ Sqlite checkpoint 依赖），意味着待审内容的暂停状态不扛后端�
 from langgraph.checkpoint.memory import MemorySaver
 
 ADVISORY_CHECKPOINTER = MemorySaver()
+
+
+def has_pending_checkpoint(thread_id: str) -> bool:
+    """这个 thread_id 是否还有可恢复的暂停状态。
+
+    内存 checkpointer 不扛后端进程重启：重启后暂停状态丢失，此时不能再用
+    ``Command(resume=...)`` 续跑——LangGraph 会找不到中断点，从入口节点
+    重新执行，而恢复请求没有初始 state，各节点按 ``state[...]`` 取值会抛
+    ``KeyError``。放行/驳回前先查这里，把「状态已丢」对外说成一个明确的
+    业务错误，而不是把 KeyError 漏成 500。
+    """
+    return ADVISORY_CHECKPOINTER.get_tuple({"configurable": {"thread_id": thread_id}}) is not None

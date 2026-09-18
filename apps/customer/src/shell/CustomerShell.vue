@@ -50,6 +50,12 @@ async function onLogout(): Promise<void> {
       <span class="shell__crumb">{{ activeLabel }}</span>
     </template>
 
+    <template #topbar-right>
+      <span v-if="auth.currentUsername" class="shell__identity" data-testid="current-customer">
+        {{ auth.currentUsername }}
+      </span>
+    </template>
+
     <div class="shell__content">
       <router-view />
     </div>
@@ -68,5 +74,12 @@ async function onLogout(): Promise<void> {
   font-size: 0.85rem;
   font-weight: 600;
   color: var(--wm-text-primary);
+}
+
+/* 登出按钮左侧的当前用户名（客户登录时填写的账号）：弱化到 muted，不抢页面标题的视线 */
+.shell__identity {
+  color: var(--wm-text-muted);
+  font-size: 0.85rem;
+  white-space: nowrap;
 }
 </style>

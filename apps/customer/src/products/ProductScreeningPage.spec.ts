@@ -85,6 +85,9 @@ async function mountPage(): Promise<VueWrapper> {
   return wrapper;
 }
 
+// jsdom 不实现 scrollIntoView，这里替身记录「谁被滚进了视野」。
+const scrollIntoView = vi.fn();
+
 describe("ProductScreeningPage", () => {
   beforeEach(() => {
     listProducts.mockReset();
@@ -92,6 +95,8 @@ describe("ProductScreeningPage", () => {
     getCandidatePool.mockReset();
     listAdvisoryRequests.mockReset();
     submitAdvisoryRequest.mockReset();
+    scrollIntoView.mockReset();
+    Element.prototype.scrollIntoView = scrollIntoView;
 
     listProducts.mockResolvedValue({ products: [makeProduct()] });
     getCandidatePool.mockResolvedValue(makeCandidatePool());
@@ -100,6 +105,7 @@ describe("ProductScreeningPage", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView;
   });
 
   it("states the suitable range the customer may buy, next to the not-a-recommendation notice", async () => {
@@ -188,6 +194,25 @@ describe("ProductScreeningPage", () => {
     await flushPromises();
 
     expect(wrapper.get('[data-testid="advisory-error"]').text()).toContain("方案请求提交失败");
+  });
+
+  // 详情面板挂在清单下方，点「查看」时它落在视口之外——「按钮点了没反应」就是这么来的。
+  it("brings the opened product detail into view when 查看 is clicked", async () => {
+    getProduct.mockResolvedValue(makeProduct({ product_name: "天枢货币基金" }));
+    const wrapper = await mountPage();
+
+    await wrapper.get('[data-testid="product-detail-entry"]').trigger("click");
+    await flushPromises();
+
+    expect(getProduct).toHaveBeenCalledWith("F000001");
+    const detail = wrapper.get('[data-testid="product-detail"]');
+    expect(detail.text()).toContain("天枢货币基金");
+
+    expect(scrollIntoView).toHaveBeenCalledTimes(1);
+    expect(scrollIntoView).toHaveBeenCalledWith({ behavior: "smooth", block: "nearest" });
+    // 被滚动的是承载详情的元素本身，不是别的什么。
+    const scrolled = scrollIntoView.mock.instances[0] as unknown as HTMLElement;
+    expect(scrolled.contains(detail.element)).toBe(true);
   });
 
   it("explains that empty results come from filters that are too strict", async () => {

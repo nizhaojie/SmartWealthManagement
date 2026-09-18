@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from "vue";
+import { nextTick, onMounted, reactive, ref } from "vue";
 import { ApiError, PageHeader, PanelCard } from "@wealth/shared";
 import { listAdvisoryRequests, submitAdvisoryRequest } from "../advisory/api";
 import type { AdvisoryRequest } from "../advisory/types";
@@ -35,6 +35,8 @@ const errorMessage = ref("");
 
 const selected = ref<Product | null>(null);
 const detailError = ref("");
+// 详情面板挂在清单下方，需要被滚进视野才能算作「点了有反应」。
+const detailPanel = ref<HTMLElement | null>(null);
 
 // 适当性说明：可购范围只能由后端给出，前端不自行推断。
 const suitabilityNote = ref("");
@@ -93,6 +95,10 @@ async function openDetail(product: Product): Promise<void> {
     detailError.value = "产品详情加载失败";
     selected.value = product;
   }
+  // 面板出现在清单下方，长清单里它常常正好落在视口之外——滚进视野，点击才有可见反馈。
+  // block: nearest：面板已完整可见就不动，避免每次点击都跳页。
+  await nextTick();
+  detailPanel.value?.scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 
 async function requestAdvisory(): Promise<void> {
@@ -227,7 +233,9 @@ onMounted(async () => {
       </p>
     </PanelCard>
 
-    <ProductDetailPanel v-if="selected" :product="selected" :error="detailError" />
+    <div v-if="selected" ref="detailPanel">
+      <ProductDetailPanel :product="selected" :error="detailError" />
+    </div>
 
     <AdvisoryRequestList :requests="advisoryRequests" />
   </div>

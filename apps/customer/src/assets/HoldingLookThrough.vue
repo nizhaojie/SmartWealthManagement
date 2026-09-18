@@ -98,9 +98,9 @@ function percent(share: string): string {
         :data-code="row.node.code"
         :style="{ paddingLeft: `calc(var(--wm-space-4) * ${row.level})` }"
       >
-        <button
+        <el-button
           v-if="row.node.children.length > 0"
-          type="button"
+          size="small"
           class="look-through__toggle"
           data-testid="look-through-toggle"
           :data-code="row.node.code"
@@ -108,7 +108,7 @@ function percent(share: string): string {
           @click="toggle(row.key)"
         >
           {{ isExpanded(row.key) ? "收起" : "展开" }}
-        </button>
+        </el-button>
         <span v-else class="look-through__leaf" aria-hidden="true">·</span>
 
         <span class="look-through__name" data-testid="look-through-node-name">{{ row.node.name }}</span>
@@ -185,6 +185,7 @@ function percent(share: string): string {
   font-size: 0.85rem;
 }
 
+/* 与叶子节点的占位符同宽，深浅两层的名称因此能对齐成一列 */
 .look-through__toggle {
   min-width: calc(var(--wm-space-6) * 1.5);
 }

@@ -10,6 +10,7 @@ import App from "./App.vue";
 import { getAssets, listTransactions } from "./assets/api";
 import { login as loginRequest, logout as logoutRequest } from "./auth/api";
 import { clearTokens, getAccessToken } from "./auth/tokenStore";
+import { forgetUsername } from "./auth/username";
 import { getCandidatePool, listProducts } from "./products/api";
 import { getCurrentAssessment } from "./risk-assessment/api";
 import { router, routes } from "./router";
@@ -66,6 +67,7 @@ function mockSuccessfulLogin(): void {
 describe("客户应用·门控与路由", () => {
   beforeEach(async () => {
     clearTokens();
+    forgetUsername();
     pinia = createPinia();
     setActivePinia(pinia);
 
@@ -149,6 +151,22 @@ describe("客户应用·门控与路由", () => {
 
     expect(router.currentRoute.value.path).toBe("/products");
     expect(remounted.text()).toContain("这是符合条件的产品清单，不是推荐");
+  });
+
+  // 顶栏「登出」左侧要有当前用户名（客户登录时填写的账号）：登录后出现，登出后消失。
+  it("shows the current username next to the logout button", async () => {
+    mockSuccessfulLogin();
+    vi.mocked(logoutRequest).mockResolvedValue(null);
+    const wrapper = mountApp();
+    await submitLogin(wrapper, "wangc1", "Test@1234");
+
+    expect(wrapper.get('[data-testid="current-customer"]').text()).toBe("wangc1");
+
+    await wrapper.get('button[name="logout"]').trigger("click");
+    await flushPromises();
+
+    expect(router.currentRoute.value.path).toBe("/login");
+    expect(wrapper.find('[data-testid="current-customer"]').exists()).toBe(false);
   });
 
   it("leaves the session and the conversation behind on logout", async () => {

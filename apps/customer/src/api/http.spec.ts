@@ -11,6 +11,7 @@ const fetchMock = vi.hoisted(() => {
 });
 
 import { clearTokens, getAccessToken, setTokens } from "../auth/tokenStore";
+import { currentUsername, rememberUsername } from "../auth/username";
 import { http } from "./http";
 
 function envelope(code: number, message: string) {
@@ -57,6 +58,7 @@ describe("customer http client", () => {
 
   it("treats a 401 as an expired session and clears the stored tokens", async () => {
     setTokens({ accessToken: "expired-token", refreshToken: "r" });
+    rememberUsername("wangc1");
     fetchMock.mockResolvedValue({
       ok: false,
       status: 401,
@@ -67,5 +69,7 @@ describe("customer http client", () => {
 
     expect(getAccessToken()).toBeNull();
     expect(localStorage.getItem("wealth-customer-auth")).toBeNull();
+    // 顶栏展示名与令牌同生同灭，会话失效时也一并清掉。
+    expect(currentUsername.value).toBe("");
   });
 });

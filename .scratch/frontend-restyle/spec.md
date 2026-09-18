@@ -1,6 +1,9 @@
 # 前端样式重构（浅色骨架 + 设计令牌）
 
-Status: ready-for-agent
+Status: superseded-by `.scratch/frontend-rebuild/spec.md`
+
+> **本 spec 已被取代（2026-09-18）。** `frontend-rebuild` 决定从 0 重写两个前端并按 `02-企业浅色.html` 建立视觉语言，因此本文件中的三条结论不再适用：① 「只换皮、不动信息架构」的纪律；② 设计令牌层的具体值（主色 `#1F6FEB`、圆角 4/8/12、侧栏 220px、单形态外壳）；③ 「复合组件恰好三个，不再多」。
+> 本文件保留作为历史记录：它记录的问题陈述、EC 变量主题化路线、以及「shared 边界靠构建期检查」的判断仍然成立，`frontend-rebuild` 沿用了后者。
 
 前置：无——本 slice 横切既有前端（customer 与 internal 的全部页面），不依赖任何未完成的后端能力。
 

@@ -20,6 +20,8 @@
 
 四个 Agent 分别落在 1、5、6、8；四张 ECharts 图分别落在 4（两张）、6、7。
 
+横切 slice（不占串行链上的位置，可随时插入）：`frontend-rebuild` —— 按 `02-企业浅色.html` 从 0 重写两个前端（三栏内部工作台 / 两栏客户应用），取代 `frontend-restyle`。它不依赖任何未完成的后端能力，拆为三份 issue：shared 地基 → customer 应用 → internal 应用。`frontend-rebuild` 未合并前不要动 `apps/*/src`，否则两端会各自漂移。
+
 每份 spec 已拆成 ticket，存于 `.scratch/<slug>/issues/`，共 43 个。依赖是一条串行链：每份 spec 的第一个 ticket 被上一份 spec 的最后一个 ticket 阻塞，spec 内部亦为顺序推进。唯一的例外是 `foundation-and-customer-service-slice #07`（共享包边界检查），它只依赖 #01，可提前做。
 
 **当前 frontier**：`foundation-and-customer-service-slice #01 — 工程骨架与健康检查贯通`（无前置）。
@@ -119,7 +121,7 @@
 - [ ] 端到端客户旅程
 - [ ] 错误重试与降级（指数退避、Milvus 超时降级、Neo4j 超时跳过）
 - [ ] 回放模式预置数据（见 ADR-0008）
-- [ ] 前端视觉重构（Q18 约定：先默认主题跑通功能，最后统一视觉）
+- [ ] 前端从零重做（`frontend-rebuild`：按 `02-企业浅色.html` 重写两端骨架与页面，取代 `frontend-restyle`）
 - [ ] 答辩材料：PPT、API 文档、数据库文档、架构说明
 - [ ] 会议纪要补齐（评分表 -5，成本近零）
 

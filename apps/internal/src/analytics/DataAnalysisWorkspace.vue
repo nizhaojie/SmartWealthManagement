@@ -1,7 +1,10 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { PageHeader, PanelCard } from "@wealth/shared";
-import { errorMessage, formatDateTime } from "../format";
+import { errorMessage } from "../format";
+import { useInspector } from "../shell/pageSlots";
+import AnalyticsHistoryDetail from "./AnalyticsHistoryDetail.vue";
+import AnalyticsHistoryPanel from "./AnalyticsHistoryPanel.vue";
 import AnalyticsResultView from "./AnalyticsResultView.vue";
 import { listAnalyticsExamples, listAnalyticsHistory, runAnalyticsQuery } from "./api";
 import type {
@@ -19,13 +22,22 @@ const result = ref<AnalyticsQueryResponse | null>(null);
 const failureReason = ref("");
 
 const history = ref<AnalyticsHistoryItem[]>([]);
+const historyFailed = ref(false);
 const examples = ref<AnalyticsExampleItem[]>([]);
+const selectedHistoryId = ref<number | null>(null);
+
+// 选中的那条记录：被新一轮历史刷掉时详情自然收起，不留一份孤立副本。
+const selectedRecord = computed(
+  () => history.value.find((entry) => entry.id === selectedHistoryId.value) ?? null,
+);
 
 async function loadHistory(): Promise<void> {
   try {
     history.value = await listAnalyticsHistory();
+    historyFailed.value = false;
   } catch {
-    // 历史拉不到不影响提问：留着已有的一份，不把整页变成错误态。
+    // 历史拉不到不影响提问：留着已有的一份，只在栏里说明这一次没拉到。
+    historyFailed.value = true;
   }
 }
 
@@ -46,6 +58,8 @@ async function ask(): Promise<void> {
   asking.value = true;
   try {
     result.value = await runAnalyticsQuery({ question: question.value, sessionId });
+    // 主区已经有新的结果了，先前点开的那条历史记录就该收起。
+    selectedHistoryId.value = null;
     await loadHistory();
   } catch (error) {
     result.value = null;
@@ -55,9 +69,23 @@ async function ask(): Promise<void> {
   }
 }
 
+/** 示例问题只是把问题写进输入框；历史条目不再这么用——点它是「查看这条记录」。 */
 function reuseQuestion(value: string): void {
   question.value = value;
 }
+
+// 历史查询常驻壳层右侧栏：数据仍由这个页面拉取，栏只接收 props、上抛选中项。
+useInspector(() => ({
+  component: AnalyticsHistoryPanel,
+  props: {
+    history: history.value,
+    selectedId: selectedHistoryId.value,
+    failed: historyFailed.value,
+    onSelect: (id: number) => {
+      selectedHistoryId.value = id;
+    },
+  },
+}));
 
 onMounted(async () => {
   await Promise.all([loadHistory(), loadExamples()]);
@@ -68,68 +96,49 @@ onMounted(async () => {
   <div class="analytics">
     <PageHeader title="数据分析" :breadcrumb="['数据分析']" />
 
-    <div class="analytics__grid">
-      <PanelCard title="历史查询">
-        <ul v-if="history.length" class="history">
-          <li v-for="entry in history" :key="entry.id">
-            <button
-              type="button"
-              class="history__item"
-              :data-testid="`history-item-${entry.id}`"
-              @click="reuseQuestion(entry.question)"
-            >
-              <strong class="history__question">{{ entry.question }}</strong>
-              <span class="history__meta">
-                {{ entry.status }} · {{ formatDateTime(entry.create_time) }}
-              </span>
-            </button>
-          </li>
-        </ul>
-        <p v-else class="analytics__empty">还没有历史查询</p>
-      </PanelCard>
-
-      <PanelCard title="提问">
-        <form class="ask" @submit.prevent="ask">
-          <el-input
-            v-model="question"
-            name="question"
-            type="textarea"
-            :rows="3"
-            placeholder="用一句自然语言描述你要看的数据（Ctrl + Enter 提交）"
-            @keydown.ctrl.enter="ask"
-          />
-          <div class="ask__row">
-            <el-button
-              type="primary"
-              native-type="submit"
-              name="ask"
-              :loading="asking"
-              data-testid="ask"
-            >
-              提问
-            </el-button>
-          </div>
-        </form>
-
-        <div v-if="examples.length" class="examples">
-          <span class="examples__label">示例问题</span>
-          <button
-            v-for="example in examples"
-            :key="example.question"
-            type="button"
-            class="examples__item"
-            data-testid="example-question"
-            @click="reuseQuestion(example.question)"
+    <PanelCard title="提问">
+      <form class="ask" @submit.prevent="ask">
+        <el-input
+          v-model="question"
+          name="question"
+          type="textarea"
+          :rows="3"
+          placeholder="用一句自然语言描述你要看的数据（Ctrl + Enter 提交）"
+          @keydown.ctrl.enter="ask"
+        />
+        <div class="ask__row">
+          <el-button
+            type="primary"
+            native-type="submit"
+            name="ask"
+            :loading="asking"
+            data-testid="ask"
           >
-            {{ example.question }}
-          </button>
+            提问
+          </el-button>
         </div>
+      </form>
 
-        <p v-if="failureReason" class="analytics__error" role="alert" data-testid="failure-reason">
-          {{ failureReason }}
-        </p>
-      </PanelCard>
-    </div>
+      <div v-if="examples.length" class="examples">
+        <span class="examples__label">示例问题</span>
+        <button
+          v-for="example in examples"
+          :key="example.question"
+          type="button"
+          class="examples__item"
+          data-testid="example-question"
+          @click="reuseQuestion(example.question)"
+        >
+          {{ example.question }}
+        </button>
+      </div>
+
+      <p v-if="failureReason" class="analytics__error" role="alert" data-testid="failure-reason">
+        {{ failureReason }}
+      </p>
+    </PanelCard>
+
+    <AnalyticsHistoryDetail v-if="selectedRecord" :record="selectedRecord" />
 
     <AnalyticsResultView v-if="result" :result="result" />
   </div>
@@ -140,61 +149,6 @@ onMounted(async () => {
   display: flex;
   flex-direction: column;
   gap: var(--wm-space-4);
-}
-
-.analytics__grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
-  gap: var(--wm-space-4);
-  align-items: start;
-}
-
-@media (max-width: 1280px) {
-  .analytics__grid {
-    grid-template-columns: minmax(0, 1fr);
-  }
-}
-
-.history {
-  display: flex;
-  flex-direction: column;
-  gap: var(--wm-space-2);
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  max-height: calc(var(--wm-space-6) * 12);
-  overflow-y: auto;
-}
-
-.history__item {
-  display: flex;
-  flex-direction: column;
-  gap: var(--wm-space-1);
-  width: 100%;
-  padding: var(--wm-space-2) var(--wm-space-3);
-  /* 细边框属令牌纪律声明的极少数 1px 例外；常态透明，只为 hover 时不让内容位移 */
-  border: 1px solid transparent;
-  border-radius: var(--wm-radius-sm);
-  background-color: var(--wm-bg-subtle);
-  font-family: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-
-.history__item:hover {
-  border-color: var(--wm-color-primary);
-}
-
-.history__question {
-  color: var(--wm-text-primary);
-  font-size: 0.82rem;
-  font-weight: 500;
-  line-height: 1.6;
-}
-
-.history__meta {
-  color: var(--wm-text-muted);
-  font-size: 0.75rem;
 }
 
 .ask {
@@ -235,12 +189,6 @@ onMounted(async () => {
 
 .examples__item:hover {
   border-color: var(--wm-color-primary);
-}
-
-.analytics__empty {
-  margin: 0;
-  color: var(--wm-text-muted);
-  font-size: 0.85rem;
 }
 
 .analytics__error {

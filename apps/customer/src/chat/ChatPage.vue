@@ -4,6 +4,7 @@ import { useChatStore, type ChatMessage } from "../stores/chat";
 import CitationPanel from "./CitationPanel.vue";
 import CiteChip from "./CiteChip.vue";
 import { streamChatMessage } from "./api";
+import ChatHistoryDrawer from "./ChatHistoryDrawer.vue";
 import { splitCitations } from "./citations";
 
 // 断流时的兜底话术：客服链路的合规呈现面——客户必须始终有一条人工去路。
@@ -13,6 +14,7 @@ const CONNECTION_FALLBACK = "对话连接已中断，请稍后重试，或拨打
 
 const chat = useChatStore();
 
+const historyOpen = ref(false);
 const draft = ref("");
 const sending = ref(false);
 const openCitationKey = ref<string | null>(null);
@@ -83,10 +85,13 @@ async function send(): Promise<void> {
 <template>
   <div class="chat">
     <header class="chat__head">
-      <h2 class="chat__title">智能客服</h2>
-      <p class="chat__hint">
-        只回答有知识依据的问题：每条论断都挂来源角标；检索不到依据时我会直说，并给出人工渠道。
-      </p>
+      <div class="chat__head-main">
+        <h2 class="chat__title">智能客服</h2>
+        <p class="chat__hint">
+          只回答有知识依据的问题：每条论断都挂来源角标；检索不到依据时我会直说，并给出人工渠道。
+        </p>
+      </div>
+      <el-button data-testid="history-toggle" @click="historyOpen = true">历史记录</el-button>
     </header>
 
     <div ref="listEl" class="chat__list" data-testid="chat-list">
@@ -141,6 +146,8 @@ async function send(): Promise<void> {
       />
       <el-button type="primary" native-type="submit" :loading="sending">发送</el-button>
     </form>
+
+    <ChatHistoryDrawer :open="historyOpen" @close="historyOpen = false" />
   </div>
 </template>
 
@@ -152,6 +159,13 @@ async function send(): Promise<void> {
 }
 
 .chat__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--wm-space-3);
+}
+
+.chat__head-main {
   display: flex;
   flex-direction: column;
   gap: var(--wm-space-1);

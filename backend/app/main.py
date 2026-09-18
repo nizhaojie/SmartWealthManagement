@@ -18,6 +18,7 @@ from app.api.chat import router as chat_router
 from app.api.conversations import router as conversations_router
 from app.api.customer_assets import internal_router as customer_assets_internal_router
 from app.api.customer_assets import router as customer_assets_router
+from app.api.customer_conversations import router as customer_conversations_router
 from app.api.customers import router as customers_router
 from app.api.graph import router as graph_router
 from app.api.health import router as health_router
@@ -133,6 +134,7 @@ app.include_router(customers_router)
 app.include_router(knowledge_router)
 app.include_router(chat_router)
 app.include_router(conversations_router)
+app.include_router(customer_conversations_router)
 app.include_router(risk_assessment_router)
 app.include_router(risk_assessment_internal_router)
 app.include_router(customer_profile_router)

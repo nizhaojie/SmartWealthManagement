@@ -215,3 +215,116 @@ def _ensure_can_view(db: Session, row: ConversationArchive, viewer: Employee) ->
     )
     if not is_under_management(customer, viewer):
         raise AppError(403, NOT_YOUR_CUSTOMER_SESSION_MESSAGE)
+
+
+def _first_user_message_titles(db: Session, session_ids: list[str]) -> dict[str, str]:
+    """每个会话的第一条客户提问（role 为 user 且 id 最小的行），用作历史列表的标题。
+
+    批量取而非逐会话查，避免浏览 100 条历史时退化成 100 次查询。
+    """
+    if not session_ids:
+        return {}
+    first_ids = (
+        select(
+            ConversationArchive.session_id,
+            func.min(ConversationArchive.id).label("first_id"),
+        )
+        .where(
+            ConversationArchive.session_id.in_(session_ids),
+            ConversationArchive.role == "user",
+        )
+        .group_by(ConversationArchive.session_id)
+        .subquery()
+    )
+    rows = db.execute(
+        select(first_ids.c.session_id, ConversationArchive.content).join(
+            ConversationArchive,
+            ConversationArchive.id == first_ids.c.first_id,
+        )
+    ).all()
+    return {session_id: content for session_id, content in rows}
+
+
+def list_customer_sessions(
+    db: Session,
+    *,
+    user_id: int,
+    exclude_session_id: str | None = None,
+) -> list[dict]:
+    """客户本人的历史会话列表：按最后发言倒序，标题取该会话第一条客户提问。
+
+    与内部端 `list_sessions` 不同：这里不做客户经理可见范围收紧——调用方就是客户
+    本人，可见范围天然是「自己」，直接把 user_id 定死、并排除当前会话（当前会话在
+    智能对话页可见，历史只收「已结束的登录会话」）。
+    """
+    last_at = func.max(ConversationArchive.create_time)
+    conditions = [
+        ConversationArchive.identity_domain == IDENTITY_CUSTOMER,
+        ConversationArchive.user_id == user_id,
+    ]
+    if exclude_session_id is not None:
+        conditions.append(ConversationArchive.session_id != exclude_session_id)
+
+    query = (
+        select(
+            ConversationArchive.session_id,
+            func.count(ConversationArchive.id).label("message_count"),
+            func.min(ConversationArchive.create_time).label("started_at"),
+            last_at.label("ended_at"),
+        )
+        .where(*conditions)
+        .group_by(ConversationArchive.session_id)
+        .order_by(last_at.desc())
+        .limit(LIST_LIMIT)
+    )
+    rows = db.execute(query).all()
+    if not rows:
+        return []
+
+    titles = _first_user_message_titles(db, [row.session_id for row in rows])
+    return [
+        {
+            "session_id": row.session_id,
+            "title": titles.get(row.session_id, ""),
+            "message_count": int(row.message_count),
+            "started_at": row.started_at.isoformat(),
+            "ended_at": row.ended_at.isoformat(),
+        }
+        for row in rows
+    ]
+
+
+def get_customer_session(db: Session, *, session_id: str, user_id: int) -> dict:
+    """客户本人查看一次会话的完整流水（只读回看）。
+
+    直接按 session_id + user_id 过滤：别人的会话即使知道 session_id 也查不到，
+    与「不存在」同等待遇（404），不暴露存在性。详情只给 role / content / citations /
+    时间——tool_calls 与 content_classification 是内部/合规字段，不进客户可见视图。
+    """
+    rows = list(
+        db.scalars(
+            select(ConversationArchive)
+            .where(
+                ConversationArchive.session_id == session_id,
+                ConversationArchive.identity_domain == IDENTITY_CUSTOMER,
+                ConversationArchive.user_id == user_id,
+            )
+            .order_by(ConversationArchive.id.asc())
+        )
+    )
+    if not rows:
+        raise AppError(404, SESSION_NOT_FOUND_MESSAGE)
+    return {
+        "session_id": session_id,
+        "started_at": rows[0].create_time.isoformat(),
+        "ended_at": rows[-1].create_time.isoformat(),
+        "messages": [
+            {
+                "role": row.role,
+                "content": row.content,
+                "citations": row.citations or [],
+                "created_at": row.create_time.isoformat(),
+            }
+            for row in rows
+        ],
+    }

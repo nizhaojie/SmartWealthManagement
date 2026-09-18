@@ -77,8 +77,15 @@ async function loadDocuments(): Promise<void> {
 watch([typeFilter, statusFilter], loadDocuments, { immediate: true });
 onUnmounted(stopPolling);
 
+const selectedFileName = computed(() => selectedFile.value?.name ?? "");
+
 function handleFileChange(uploadFile: UploadFile): void {
   selectedFile.value = uploadFile.raw ?? null;
+}
+
+/** 已经选过文件后再选一份会走 exceed 分支：直接替换选中项，不必先清空。 */
+function handleFileExceed(files: File[]): void {
+  selectedFile.value = files[0] ?? null;
 }
 
 async function submitUpload(): Promise<void> {
@@ -142,15 +149,21 @@ const processingCount = computed(
           <el-input v-model="uploadTitle" name="knowledge-title" placeholder="缺省取文件名" />
         </label>
 
-        <el-upload
-          class="upload__picker"
-          :auto-upload="false"
-          :limit="1"
-          :on-change="handleFileChange"
-          accept=".txt,.md,.docx"
-        >
-          <el-button name="pick-file">选择文件</el-button>
-        </el-upload>
+        <div class="upload__field">
+          <span class="upload__label">文件</span>
+          <!-- show-file-list 关掉：EP 的文件列表渲染在按钮下方，会把按钮顶离基线。 -->
+          <el-upload
+            class="upload__picker"
+            :auto-upload="false"
+            :limit="1"
+            :show-file-list="false"
+            :on-change="handleFileChange"
+            :on-exceed="handleFileExceed"
+            accept=".txt,.md,.docx"
+          >
+            <el-button name="pick-file">选择文件</el-button>
+          </el-upload>
+        </div>
 
         <el-button
           type="primary"
@@ -162,6 +175,9 @@ const processingCount = computed(
           上传
         </el-button>
       </form>
+      <p v-if="selectedFileName" class="documents__hint" data-testid="selected-file">
+        已选择：{{ selectedFileName }}
+      </p>
       <p v-if="uploadError" class="documents__error" role="alert" data-testid="upload-error">
         {{ uploadError }}
       </p>
@@ -266,6 +282,11 @@ const processingCount = computed(
   min-width: calc(var(--wm-space-6) * 5);
 }
 
+/* el-upload 内部的 .el-upload 是 inline-flex，块级容器里会带基线间隙；开成 flex 消除。 */
+.upload__picker {
+  display: flex;
+}
+
 .upload__label,
 .filters__label {
   color: var(--wm-text-muted);
@@ -283,6 +304,12 @@ const processingCount = computed(
 .documents__error {
   margin: var(--wm-space-3) 0 0;
   color: var(--wm-color-danger);
+  font-size: 0.85rem;
+}
+
+.documents__hint {
+  margin: var(--wm-space-3) 0 0;
+  color: var(--wm-text-muted);
   font-size: 0.85rem;
 }
 

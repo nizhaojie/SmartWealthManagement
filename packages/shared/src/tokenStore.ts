@@ -10,6 +10,12 @@ export type TokenStore = {
   getAccessToken: () => string | null;
   getRefreshToken: () => string | null;
   setTokens: (next: StoredTokens) => void;
+  /**
+   * 只换 access token，保留手里的 refresh token。会话续期走这条路：
+   * 刷新接口只发新的 access token，整对覆盖会把还没过期的 refresh token 抹掉。
+   * 没有会话时（未登录）忽略——无从知道该配哪一张 refresh token。
+   */
+  setAccessToken: (accessToken: string) => void;
   clearTokens: () => void;
 };
 
@@ -33,6 +39,14 @@ export function createTokenStore(storageKey: string): TokenStore {
     getAccessToken: () => tokens.value?.accessToken ?? null,
     getRefreshToken: () => tokens.value?.refreshToken ?? null,
     setTokens(next: StoredTokens) {
+      tokens.value = next;
+      localStorage.setItem(storageKey, JSON.stringify(next));
+    },
+    setAccessToken(accessToken: string) {
+      if (!tokens.value) {
+        return;
+      }
+      const next = { ...tokens.value, accessToken };
       tokens.value = next;
       localStorage.setItem(storageKey, JSON.stringify(next));
     },

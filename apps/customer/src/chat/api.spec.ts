@@ -1,8 +1,32 @@
 // SSE 帧解析是客服链路的传输面：`event: done` 携带定案答案与引用，其余帧携带 delta，
 // 异常必须走 onError 而不是抛出去。这里只测这三件事，不测页面渲染。
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { clearTokens, getAccessToken, setTokens } from "../auth/tokenStore";
 import { streamChatMessage } from "./api";
+
+// 续期请求走的是全局 fetch（http 客户端自己那一份），不随 streamChatMessage 注入的
+// fetchImpl 走。默认装一个「刷新凭证也已过期」的替身：任何用例都不会真的出网，
+// 要验证续期成功的用例在用例内自带替身。
+beforeEach(() => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => ({
+      ok: false,
+      status: 401,
+      json: async () => ({
+        code: 401,
+        message: "刷新凭证无效或已过期",
+        data: null,
+        trace_id: "trace-1",
+      }),
+    })),
+  );
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  clearTokens();
+});
 
 function sseResponse(
   frames: string[],
@@ -118,5 +142,43 @@ describe("streamChatMessage", () => {
 
     expect(onError).toHaveBeenCalledTimes(1);
     expect(getAccessToken()).toBeNull();
+  });
+
+  // 这条通道绕过了 http 客户端，401 得自己处理。access token 过期不等于会话结束：
+  // 换一张再重连，而不是把人送回登录页。
+  it("renews the access token on 401 and reconnects the stream", async () => {
+    setTokens({ accessToken: "expired-token", refreshToken: "refresh-1" });
+    const refreshFetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        code: 200,
+        message: "success",
+        data: { access_token: "fresh-token", token_type: "bearer", expires_in: 900 },
+        trace_id: "trace-1",
+      }),
+    }));
+    vi.stubGlobal("fetch", refreshFetch);
+
+    const streamFetch = vi
+      .fn()
+      .mockImplementationOnce(sseResponse([], { ok: false, status: 401 }))
+      .mockImplementationOnce(
+        sseResponse([
+          'event: done\ndata: {"answer":"续上了","citations":[],"intent":"FAQ","content_classification":"事实性内容"}\n\n',
+        ]),
+      ) as unknown as typeof fetch;
+
+    const onDone = vi.fn();
+    const onError = vi.fn();
+    await streamChatMessage("问题", { onDelta: vi.fn(), onDone, onError }, streamFetch);
+
+    expect(String(refreshFetch.mock.calls[0][0])).toContain("/api/customer/auth/refresh");
+    expect(onDone).toHaveBeenCalledTimes(1);
+    expect(onError).not.toHaveBeenCalled();
+    expect(getAccessToken()).toBe("fresh-token");
+
+    const [, retryInit] = vi.mocked(streamFetch).mock.calls[1] as [RequestInfo | URL, RequestInit];
+    expect((retryInit.headers as Record<string, string>).Authorization).toBe("Bearer fresh-token");
   });
 });

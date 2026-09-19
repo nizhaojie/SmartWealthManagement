@@ -3,7 +3,7 @@
 // SSE 帧为 `event:` / `data:` 两行，帧之间以空行分隔；`event: done` 携带定案答案与引用，
 // 其余帧携带 `delta`。用 fetch + body.getReader() 手动切帧，不用 EventSource——
 // EventSource 只能发 GET，而这条通道是 POST。
-import { apiBaseUrl, handleExpiredSession } from "../api/http";
+import { apiBaseUrl, handleExpiredSession, renewSession } from "../api/http";
 import { getAccessToken } from "../auth/tokenStore";
 
 export type Citation = {
@@ -60,6 +60,17 @@ export async function streamChatMessage(
   handlers: ChatStreamHandlers,
   fetchImpl: typeof fetch = fetch,
 ): Promise<void> {
+  return runStream(message, handlers, fetchImpl, true);
+}
+
+/** 这条通道绕过了 http 客户端，401 得自己处理——与那边的续期/失效两段式保持一致。 */
+async function runStream(
+  message: string,
+  handlers: ChatStreamHandlers,
+  fetchImpl: typeof fetch,
+  // 续期后只重发一次：再 401 就是真的失效，不能再续，否则两边互相不认时会转圈。
+  allowRenewal: boolean,
+): Promise<void> {
   try {
     const token = getAccessToken();
     const response = await fetchImpl(streamUrl(), {
@@ -72,6 +83,10 @@ export async function streamChatMessage(
     });
 
     if (response.status === 401) {
+      // access token 过期不是会话结束：换一张再重发，令牌已由 renewSession 写回。
+      if (allowRenewal && (await renewSession())) {
+        return runStream(message, handlers, fetchImpl, false);
+      }
       handleExpiredSession();
       throw new Error("凭证无效或已过期");
     }

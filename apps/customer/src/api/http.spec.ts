@@ -10,7 +10,7 @@ const fetchMock = vi.hoisted(() => {
   return fn;
 });
 
-import { clearTokens, getAccessToken, setTokens } from "../auth/tokenStore";
+import { clearTokens, getAccessToken, getRefreshToken, setTokens } from "../auth/tokenStore";
 import { currentUsername, rememberUsername } from "../auth/username";
 import { http } from "./http";
 
@@ -71,5 +71,68 @@ describe("customer http client", () => {
     expect(localStorage.getItem("wealth-customer-auth")).toBeNull();
     // 顶栏展示名与令牌同生同灭，会话失效时也一并清掉。
     expect(currentUsername.value).toBe("");
+  });
+
+  // access token 只有 15 分钟。过期不是会话结束：拿 refresh token 换一张再重发，
+  // 否则「登录后过一会就退回登录页」正是这条路径的必然结果。
+  it("access token 过期时用 refresh token 续期并重发原请求", async () => {
+    setTokens({ accessToken: "expired-token", refreshToken: "refresh-1" });
+    rememberUsername("wangc1");
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/api/customer/auth/refresh")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            code: 200,
+            message: "success",
+            data: { access_token: "fresh-token", token_type: "bearer", expires_in: 900 },
+            trace_id: "trace-1",
+          }),
+        };
+      }
+      const headers = (init?.headers ?? {}) as Record<string, string>;
+      return headers.Authorization === "Bearer fresh-token"
+        ? { ok: true, status: 200, json: async () => envelope(200, "success") }
+        : { ok: false, status: 401, json: async () => envelope(401, "凭证无效或已过期") };
+    });
+
+    await expect(http.get("/api/customer/assets")).resolves.toBeNull();
+
+    const urls = fetchMock.mock.calls.map(([input]) => String(input));
+    expect(urls.filter((url) => url.includes("/api/customer/auth/refresh"))).toHaveLength(1);
+    expect(urls.filter((url) => url.includes("/api/customer/assets"))).toHaveLength(2);
+
+    const refreshCall = fetchMock.mock.calls.find(([input]) =>
+      String(input).includes("/api/customer/auth/refresh"),
+    );
+    expect(JSON.parse((refreshCall?.[1] as RequestInit).body as string)).toEqual({
+      refresh_token: "refresh-1",
+    });
+    // 只换 access token，refresh token 原样留着，下次过期还能续。
+    expect(getAccessToken()).toBe("fresh-token");
+    expect(getRefreshToken()).toBe("refresh-1");
+    // 会话没失效，展示名不该被清掉。
+    expect(currentUsername.value).toBe("wangc1");
+  });
+
+  it("续期也换不到令牌时才清会话", async () => {
+    setTokens({ accessToken: "expired-token", refreshToken: "stale-refresh" });
+    rememberUsername("wangc1");
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+      const message = String(input).includes("/api/customer/auth/refresh")
+        ? "刷新凭证无效或已过期"
+        : "凭证无效或已过期";
+      return { ok: false, status: 401, json: async () => envelope(401, message) };
+    });
+
+    await expect(http.get("/api/customer/assets")).rejects.toThrow("凭证无效或已过期");
+
+    expect(getAccessToken()).toBeNull();
+    expect(localStorage.getItem("wealth-customer-auth")).toBeNull();
+    expect(currentUsername.value).toBe("");
+    // 续期失败就收手：一次续期 + 一次原请求重发之前的那次，不再追问。
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });

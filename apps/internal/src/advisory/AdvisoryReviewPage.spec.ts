@@ -194,4 +194,38 @@ describe("审核页", () => {
     expect(page.get('[data-testid="final-panel"]').text()).toContain("稳健增利一号（定稿）");
     expect(page.find('[data-testid="review-decision"]').exists()).toBe(false);
   });
+
+  it("待审状态仍是审核形态：标题与审核决定入口俱在", async () => {
+    const page = await mountPage(ADVISOR);
+
+    const header = page.get('[data-testid="page-header"]');
+    expect(header.get(".page-header__title").text()).toBe("审核");
+    expect(header.text()).toContain("投顾助手");
+    expect(header.text()).toContain("审核");
+    expect(page.get('[data-testid="back-to-queue"]').text()).toBe("返回队列");
+    expect(page.find('[data-testid="review-decision"]').exists()).toBe(true);
+  });
+
+  it("已放行后页面退化为回看：标题改「查看方案」，不再有放行与驳回入口", async () => {
+    responded = { review: { draft_id: 7, status: "已放行" } };
+    const page = await mountPage(ADVISOR);
+
+    const header = page.get('[data-testid="page-header"]');
+    expect(header.get(".page-header__title").text()).toBe("查看方案");
+    expect(header.get(".page-header__crumb-current").text()).toBe("查看方案");
+    expect(page.get('[data-testid="back-to-queue"]').text()).toBe("返回投顾助手");
+    expect(page.find('[data-testid="review-decision"]').exists()).toBe(false);
+    expect(page.find('[data-testid="release"]').exists()).toBe(false);
+    expect(page.find('[data-testid="reject"]').exists()).toBe(false);
+  });
+
+  it("已驳回后同样是回看形态：没有放行与驳回入口", async () => {
+    responded = { review: { draft_id: 7, status: "已驳回" } };
+    const page = await mountPage(ADVISOR);
+
+    expect(page.get(".page-header__title").text()).toBe("查看方案");
+    expect(page.find('[data-testid="review-decision"]').exists()).toBe(false);
+    expect(page.find('[data-testid="release"]').exists()).toBe(false);
+    expect(page.find('[data-testid="reject"]').exists()).toBe(false);
+  });
 });

@@ -33,6 +33,10 @@ import type {
  *
  * 左列是 AI 原稿（永久留存），右列放行前是顾问编辑版本、放行后换成顾问定稿。
  * 放行与驳回都只对理财顾问开放；其他角色只能查看与留言（后端也会再挡一次）。
+ *
+ * 本页同时承担两个场景：待审时是「审核」，已放行 / 已驳回时退化为只读回看——
+ * 标题、面包屑与返回文案跟着 `decided` 走，决定面板由它挡住。往本页加功能前先问
+ * 它此刻代表哪一个。
  */
 const route = useRoute();
 const router = useRouter();
@@ -62,6 +66,11 @@ const commentSubmitting = ref(false);
 const isAdvisor = computed(() => canReview(auth.currentEmployee?.employee_role));
 const decided = computed(() => isDecided(review.value?.status));
 const editable = computed(() => isAdvisor.value && !decided.value);
+
+// 同一页两种场景：待审是「审核」，已决定是回看。标题与返回去向都跟着场景走。
+const pageTitle = computed(() => (decided.value ? "查看方案" : "审核"));
+const breadcrumb = computed(() => ["投顾助手", pageTitle.value]);
+const backLabel = computed(() => (decided.value ? "返回投顾助手" : "返回队列"));
 
 async function loadComments(): Promise<void> {
   try {
@@ -167,10 +176,10 @@ watch(draftId, load, { immediate: true });
 
 <template>
   <div class="review">
-    <PageHeader title="审核" :breadcrumb="['投顾助手', '审核']">
+    <PageHeader :title="pageTitle" :breadcrumb="breadcrumb">
       <template #actions>
         <el-button size="small" name="back-to-queue" data-testid="back-to-queue" @click="backToQueue">
-          返回队列
+          {{ backLabel }}
         </el-button>
       </template>
     </PageHeader>

@@ -218,6 +218,18 @@ onMounted(loadAll);
         <el-table-column label="操作时间" width="180">
           <template #default="{ row }">{{ formatDateTime(row.decided_at) }}</template>
         </el-table-column>
+        <el-table-column label="查看" width="90">
+          <template #default="{ row }">
+            <el-button
+              size="small"
+              name="open-history-review"
+              data-testid="open-history-review"
+              @click="openReview(row.draft_id)"
+            >
+              查看
+            </el-button>
+          </template>
+        </el-table-column>
       </el-table>
     </PanelCard>
 

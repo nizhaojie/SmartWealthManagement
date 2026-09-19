@@ -1,4 +1,4 @@
-"""客户侧的交易受理入口：申购与赎回。
+"""客户侧的交易受理入口：申购、赎回与转账。
 
 客户标识由凭证推导，请求体里没有这个字段——塞进来的不作数。这里只做参数拼装：
 校验、成交与持仓、可用余额的更新都在 `app.order_acceptance`，风控的接入在
@@ -38,6 +38,13 @@ class RedemptionRequest(BaseModel):
     shares: Decimal
 
 
+class TransferRequest(BaseModel):
+    # 对手方是机构之外的收款人（ADR-0019），只有姓名与账号，没有产品。
+    payee_name: str
+    payee_account: str
+    amount: Decimal
+
+
 @router.post("/purchase")
 def purchase(
     body: PurchaseRequest,
@@ -71,6 +78,26 @@ def redemption(
             customer_id=auth.subject_id,
             product_code=body.product_code,
             shares=body.shares,
+            now=_now(),
+        )
+    )
+
+
+@router.post("/transfer")
+def transfer(
+    body: TransferRequest,
+    auth: AuthContext = Depends(require_customer),
+    db: Session = Depends(get_session),
+    publisher: EventPublisher = Depends(get_event_publisher),
+):
+    return ok(
+        service.transfer(
+            db,
+            publisher=publisher,
+            customer_id=auth.subject_id,
+            payee_name=body.payee_name,
+            payee_account=body.payee_account,
+            amount=body.amount,
             now=_now(),
         )
     )

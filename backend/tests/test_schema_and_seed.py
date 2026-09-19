@@ -14,6 +14,7 @@ EXPECTED_TABLES = {
     "fin_underlying_asset",
     "fin_product_underlying",
     "fin_transaction",
+    "fin_transfer",
     "fin_holdings",
     "fin_funding_account",
     "fin_risk_assessment",

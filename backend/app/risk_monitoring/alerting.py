@@ -2,7 +2,9 @@
 
 一笔交易事件的处置顺序是固定的三步，改动顺序会破坏不变量：
 
-1. **先事务性落库**。交易记录是事实，先落库才有后面的一切。
+1. **先事务性落库**。交易记录是事实，先落库才有后面的一切。事实落在哪张表由有没有
+   产品决定：申购、赎回与内部补录落在 `fin_transaction`，转账落在 `fin_transfer`
+   （ADR-0019），后者由受理侧写入、由这里提交。
 2. **再广播**。广播失败只记日志、不回滚（`event_bus.publish_safely`）——交易记录
    不能因为广播通道的问题而丢失，订阅方漏收可以按库里的事实补查。
 3. **最后过规则引擎**。命中即产生预警，预警本身再广播一次。
@@ -27,7 +29,14 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app import degradation
-from app.db.models import Customer, CustomerProfile, Product, RiskAlert, Transaction
+from app.db.models import (
+    Customer,
+    CustomerProfile,
+    Product,
+    RiskAlert,
+    Transaction,
+    Transfer,
+)
 from app.event_bus import (
     EVENT_RISK_ALERT_RAISED,
     EVENT_TRANSACTION_SUBMITTED,
@@ -98,6 +107,9 @@ NON_POSITIVE_AMOUNT_MESSAGE = "交易金额必须大于零"
 CUSTOMER_NOT_FOUND_MESSAGE = "客户不存在"
 PRODUCT_NOT_FOUND_MESSAGE = "产品不存在"
 DUPLICATE_TRANSACTION_NO_MESSAGE = "交易流水号已存在"
+# 无产品的事件（转账）必须带上已落库事实的标识：入海口不替它写 fin_transaction，
+# 那个标识是它唯一能被广播与预警关联上的凭据。这是内部约定，不面向客户。
+RECORDED_FACT_REQUIRED_MESSAGE = "交易事件缺少已落库事实的标识"
 
 
 def history_lookback_hours(rules: list[RuleSpec]) -> int:
@@ -121,30 +133,82 @@ def _to_event(transaction: Transaction) -> TransactionEvent:
     )
 
 
+def _fin_transaction_id(event: TransactionEvent) -> int | None:
+    """本笔事件在 `fin_transaction` 里的行标识；转账没有那一行（ADR-0019）。
+
+    `TransactionEvent.transaction_id` 是「本笔事实在自己那张表里的标识」：有产品的
+    交易落在 `fin_transaction`，转账落在 `fin_transfer`，两边的 id 各自从 1 开始。
+    预警的 `transaction_ids` 存的是前者，转账因此不填它——混着填会让预警详情按 id
+    回查到另一笔毫不相干的交易，而那种错在界面上看起来完全正常。
+    """
+    return event.transaction_id if event.product_id is not None else None
+
+
+def _transfer_event(transfer: Transfer) -> TransactionEvent:
+    """一行转账也是一个交易事件：没有产品，类型固定为「转账」。"""
+    return TransactionEvent(
+        transaction_id=transfer.id,
+        customer_id=transfer.customer_id,
+        product_id=None,
+        transaction_type=TRANSFER,
+        amount=transfer.amount,
+        occurred_at=transfer.create_time,
+    )
+
+
+def _history_events(
+    db: Session, *, event: TransactionEvent, start: datetime
+) -> list[TransactionEvent]:
+    """同客户、在本笔之前、回溯窗口内的事件，按发生时间升序。
+
+    **两张流水表都要读**（ADR-0019）：转账不是 `fin_transaction` 的行，漏掉它不会
+    报错，只会让窗口与累计类规则少算几笔转账——那不是漏报某一条规则，是所有读历史的
+    算子一起少算，而且从结果上完全看不出来。
+
+    自身那一行按事件来自哪张表排除：两张表的 id 各自从 1 开始，拿一个去排除另一张表
+    的行会误伤不相干的交易。
+
+    已知的精度限制（既有的，不是这里引入的）：成交时间是秒精度列，带小数秒的时间会被
+    四舍五入到下一秒，于是「同一秒里更早那一笔」有时不在历史里。人手动操作不会撞上，
+    批量回放也不会——`_customer_has_prior_alert` 对同一个限制做了放宽，两处的口径
+    不同是因为它们问的不是同一个问题（那个问「系统记下了什么」，这个问「钱动过几笔」）。
+    """
+    transaction_stmt = select(Transaction).where(
+        Transaction.customer_id == event.customer_id,
+        Transaction.create_time >= start,
+        Transaction.create_time <= event.occurred_at,
+    )
+    if event.product_id is not None:
+        transaction_stmt = transaction_stmt.where(Transaction.id != event.transaction_id)
+
+    transfer_stmt = select(Transfer).where(
+        Transfer.customer_id == event.customer_id,
+        Transfer.create_time >= start,
+        Transfer.create_time <= event.occurred_at,
+    )
+    if event.product_id is None:
+        transfer_stmt = transfer_stmt.where(Transfer.id != event.transaction_id)
+
+    events = [_to_event(row) for row in db.scalars(transaction_stmt).all()]
+    events.extend(_transfer_event(row) for row in db.scalars(transfer_stmt).all())
+    # 时间相同的两笔先后无所谓（间隔为零），因此只按时间排；稳定排序让结果可复现。
+    events.sort(key=lambda item: item.occurred_at)
+    return events
+
+
 def build_context(
-    db: Session, transaction: Transaction, *, lookback_hours: int
+    db: Session, event: TransactionEvent, *, lookback_hours: int
 ) -> MonitoringContext:
     """把库里的事实拼成求值输入：本笔事件、同客户之前的事件、产品与客户画像。"""
-    start = transaction.create_time - timedelta(hours=lookback_hours)
-    history = db.scalars(
-        select(Transaction)
-        .where(
-            Transaction.customer_id == transaction.customer_id,
-            Transaction.id != transaction.id,
-            Transaction.create_time >= start,
-            Transaction.create_time <= transaction.create_time,
-        )
-        .order_by(Transaction.create_time.asc(), Transaction.id.asc())
-    ).all()
-
-    product = db.get(Product, transaction.product_id)
+    start = event.occurred_at - timedelta(hours=lookback_hours)
+    product = db.get(Product, event.product_id) if event.product_id is not None else None
     profile = db.scalar(
-        select(CustomerProfile).where(CustomerProfile.customer_id == transaction.customer_id)
+        select(CustomerProfile).where(CustomerProfile.customer_id == event.customer_id)
     )
 
     return MonitoringContext(
-        event=_to_event(transaction),
-        history=tuple(_to_event(row) for row in history),
+        event=event,
+        history=tuple(_history_events(db, event=event, start=start)),
         product_risk_level=product.risk_level if product is not None else None,
         customer=CustomerSnapshot(
             risk_level=profile.risk_level if profile is not None else None,
@@ -179,20 +243,34 @@ def _customer_has_prior_alert(db: Session, *, customer_id: int, now: datetime) -
     return bool(count)
 
 
-def _transaction_event(transaction: Transaction) -> Event:
+def _transaction_event(
+    *,
+    transaction_id: int,
+    transaction_no: str,
+    customer_id: int,
+    product_id: int | None,
+    transaction_type: str,
+    amount: Decimal,
+    occurred_at: datetime,
+) -> Event:
+    """交易事件的广播载荷。有产品的交易与转账共用一份形状，不各拼一遍。
+
+    转账的 `product_id` 为空（ADR-0019）；订阅方读的是载荷里有的那几样，空值不会
+    让谁少收到事件。
+    """
     return Event(
         event_type=EVENT_TRANSACTION_SUBMITTED,
         source=SOURCE_RISK_MONITORING,
         payload={
-            "transaction_id": transaction.id,
-            "transaction_no": transaction.transaction_no,
-            "customer_id": transaction.customer_id,
-            "product_id": transaction.product_id,
-            "transaction_type": transaction.transaction_type,
-            "amount": format(transaction.amount, "f"),
-            "occurred_at": transaction.create_time.isoformat(),
+            "transaction_id": transaction_id,
+            "transaction_no": transaction_no,
+            "customer_id": customer_id,
+            "product_id": product_id,
+            "transaction_type": transaction_type,
+            "amount": format(amount, "f"),
+            "occurred_at": occurred_at.isoformat(),
         },
-        occurred_at=transaction.create_time,
+        occurred_at=occurred_at,
         trace_id=get_trace_id(),
     )
 
@@ -216,14 +294,14 @@ def _alert_event(alert: RiskAlert) -> Event:
     )
 
 
-def create_alerts_for_transaction(
+def create_alerts_for_event(
     db: Session,
     *,
-    transaction: Transaction,
+    event: TransactionEvent,
     publisher: EventPublisher,
     now: datetime,
 ) -> list[RiskAlert]:
-    """对一笔已落库的交易过一遍规则引擎，命中即产生一条预警。
+    """对一笔已落库的交易事件过一遍规则引擎，命中即产生一条预警。
 
     一笔交易最多产生一条预警：它把该笔命中的规则都收在同一条记录里，因此分级看的
     是「这一笔命中了多少条」；否则同一笔交易会被拆成互不相关的多条预警。
@@ -232,18 +310,19 @@ def create_alerts_for_transaction(
     if not rules:
         return []
 
-    context = build_context(db, transaction, lookback_hours=history_lookback_hours(rules))
+    context = build_context(db, event, lookback_hours=history_lookback_hours(rules))
     hits = match_rules(rules, context)
     if not hits:
         return []
 
+    fin_transaction_id = _fin_transaction_id(event)
     alert = RiskAlert(
-        customer_id=transaction.customer_id,
+        customer_id=event.customer_id,
         alert_type=alert_type_for(hits),
         alert_level=grade_alert_level(
             len(hits),
             has_prior_alert=_customer_has_prior_alert(
-                db, customer_id=transaction.customer_id, now=now
+                db, customer_id=event.customer_id, now=now
             ),
         ),
         confidence=compute_confidence(hits),
@@ -252,7 +331,9 @@ def create_alerts_for_transaction(
         # 展示时回查规则等于用今天的口径解释过去的预警。
         rule_hits=[hit_evidence(hit) for hit in hits],
         trigger_detail=render_trigger_detail(hits),
-        transaction_ids=[transaction.id],
+        # 关联交易是 `fin_transaction` 的标识；转账没有那一行（ADR-0019），
+        # 因此这一列为空，金额与类型仍在命中依据里。
+        transaction_ids=[fin_transaction_id] if fin_transaction_id is not None else [],
         status=ALERT_STATUS_OPEN,
         handler_id=None,
         handle_result=None,
@@ -278,7 +359,15 @@ def _require_customer(db: Session, customer_id: int) -> None:
         raise AppError(404, CUSTOMER_NOT_FOUND_MESSAGE)
 
 
-def _require_product(db: Session, product_id: int) -> None:
+def _require_product(db: Session, product_id: int | None) -> None:
+    """有产品才要求它存在。
+
+    转账没有产品（ADR-0019），它的事件里 `product_id` 为空。风控的交易事件模型本来
+    就不假设交易一定有产品（`TransactionEvent.product_id` 可空），入海口因此不能对
+    无产品的事件报「产品不存在」——那会把转账挡在监测之外。
+    """
+    if product_id is None:
+        return
     if db.get(Product, product_id) is None:
         raise AppError(404, PRODUCT_NOT_FOUND_MESSAGE)
 
@@ -299,10 +388,14 @@ class TransactionSubmission:
 
     `shares` / `nav` / `fee` 风控用不到，但交易流水本身要它们——它同时是客户可见
     视图里的成交记录，缺了这三个数就是一笔查不清的流水。
+
+    `product_id` 可空：转账没有产品（ADR-0019）。没有产品时事实不落在
+    `fin_transaction` 里，因此由受理侧传入 `transaction_id` 与 `transaction_no`
+    ——「先事务性落库」这一步仍然发生，只是那一行在转账自己的表里。
     """
 
     customer_id: int
-    product_id: int
+    product_id: int | None
     transaction_type: str
     amount: Decimal
     occurred_at: datetime
@@ -310,6 +403,55 @@ class TransactionSubmission:
     nav: Decimal = Decimal("0")
     fee: Decimal = Decimal("0")
     transaction_no: str | None = None
+    # 已经落库的事实的标识，只在没有产品时由受理侧传入（转账）。
+    transaction_id: int | None = None
+
+
+def _submit_recorded_fact(
+    db: Session,
+    *,
+    publisher: EventPublisher,
+    submission: TransactionSubmission,
+    now: datetime,
+) -> tuple[None, list[RiskAlert]]:
+    """转账：事实已经由受理侧写在自己的表里，这里只提交它、广播、过规则引擎。
+
+    「先事务性落库」这一步不能省——受理侧把转账行与可用余额的变动写在同一个会话里，
+    由这里一次提交，广播与规则匹配因此都发生在事实落库之后（进入海口本来就窄，
+    业务校验不在这里，ADR-0018）。
+    """
+    if submission.transaction_id is None or not submission.transaction_no:
+        raise AppError(400, RECORDED_FACT_REQUIRED_MESSAGE)
+    # 第一步：事务性落库。
+    db.commit()
+
+    event = TransactionEvent(
+        transaction_id=submission.transaction_id,
+        customer_id=submission.customer_id,
+        product_id=None,
+        transaction_type=submission.transaction_type,
+        amount=submission.amount,
+        occurred_at=submission.occurred_at,
+    )
+
+    # 第二步：广播。失败只记日志与降级留痕，不回滚。
+    _publish_or_record(
+        db,
+        publisher,
+        _transaction_event(
+            transaction_id=submission.transaction_id,
+            transaction_no=submission.transaction_no,
+            customer_id=submission.customer_id,
+            product_id=None,
+            transaction_type=submission.transaction_type,
+            amount=submission.amount,
+            occurred_at=submission.occurred_at,
+        ),
+    )
+
+    # 第三步：过规则引擎。
+    alerts = create_alerts_for_event(db, event=event, publisher=publisher, now=now)
+    return None, alerts
 
 
 def submit_transaction_event(
@@ -319,18 +461,23 @@ def submit_transaction_event(
     submission: TransactionSubmission,
     operator_id: int | None,
     now: datetime,
-) -> tuple[Transaction, list[RiskAlert]]:
+) -> tuple[Transaction | None, list[RiskAlert]]:
     """接收一笔交易事件：先落库，再广播，最后过规则引擎。
 
-    返回落库后的交易与它产生的预警（可能为空）。
+    有产品的交易（申购、赎回、内部补录）由这里落 `fin_transaction` 并返回它；转账
+    没有产品，事实落在 `fin_transfer` 里，这里只提交、广播、过规则引擎，返回的交易
+    为 `None`。两条路径的先后顺序完全一样，因为风控的输入是既成事实而不是它的载体。
     """
     if submission.amount <= 0:
         raise AppError(400, NON_POSITIVE_AMOUNT_MESSAGE)
     _require_transaction_type(submission.transaction_type)
     _require_customer(db, submission.customer_id)
     _require_product(db, submission.product_id)
-    number = _resolve_transaction_no(db, submission.transaction_no, submission.occurred_at)
 
+    if submission.product_id is None:
+        return _submit_recorded_fact(db, publisher=publisher, submission=submission, now=now)
+
+    number = _resolve_transaction_no(db, submission.transaction_no, submission.occurred_at)
     transaction = Transaction(
         transaction_no=number,
         customer_id=submission.customer_id,
@@ -350,11 +497,23 @@ def submit_transaction_event(
     db.refresh(transaction)
 
     # 第二步：广播。失败只记日志与降级留痕，不回滚。
-    _publish_or_record(db, publisher, _transaction_event(transaction))
+    _publish_or_record(
+        db,
+        publisher,
+        _transaction_event(
+            transaction_id=transaction.id,
+            transaction_no=transaction.transaction_no,
+            customer_id=transaction.customer_id,
+            product_id=transaction.product_id,
+            transaction_type=transaction.transaction_type,
+            amount=transaction.amount,
+            occurred_at=transaction.create_time,
+        ),
+    )
 
     # 第三步：过规则引擎。
-    alerts = create_alerts_for_transaction(
-        db, transaction=transaction, publisher=publisher, now=now
+    alerts = create_alerts_for_event(
+        db, event=_to_event(transaction), publisher=publisher, now=now
     )
     return transaction, alerts
 

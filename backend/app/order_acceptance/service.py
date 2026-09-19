@@ -1,4 +1,4 @@
-"""客户侧的交易受理：申购与赎回。
+"""客户侧的交易受理：申购、赎回与转账。
 
 业务校验放在这里、放在落库之前（ADR-0018）。风控的交易事件入海口
 （`app.risk_monitoring.alerting.submit_transaction_event`）是**既成事实**的输入，
@@ -15,6 +15,11 @@
 | 申购金额不低于起投金额 | 低于产品起投金额 |
 | 可用余额足够（申购含手续费） | 拒绝，并给出还差多少 |
 | 赎回份额不超过持仓份额 | 拒绝 |
+
+转账是同一套受理里的另一条路径，但它没有产品，因此适当性、起投金额与产品状态三条
+不适用：校验只剩金额为正、收款人姓名与账号非空、可用余额足够。它的事实落在自己的表
+`fin_transfer` 里（ADR-0019），但一样是一笔交易事件，一样从**同一个**入海口进风控
+（`alerting.submit_transaction_event`，产品为空的那条分支）。
 
 风评的判定**只看有没有测评记录，不看有效期**（Q18）：开户时写下的等级是占位而不是
 结论，拿它去拒绝客户，客户会收到一个他无法理解的拒绝；而种子客户的风评 `valid_until`
@@ -36,12 +41,18 @@ from __future__ import annotations
 
 from datetime import datetime
 from decimal import ROUND_HALF_UP, Decimal
+from uuid import uuid4
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.customer_assets.service import HELD_STATUS, serialize_transaction
-from app.db.models import FundingAccount, Holding, Product, Transaction
+from app.customer_assets.service import (
+    HELD_STATUS,
+    TRANSFER,
+    serialize_transaction,
+    serialize_transfer,
+)
+from app.db.models import FundingAccount, Holding, Product, Transaction, Transfer
 from app.event_bus import EventPublisher
 from app.exceptions import AppError
 from app.risk_assessment.service import find_current_result
@@ -69,6 +80,11 @@ NON_POSITIVE_AMOUNT_MESSAGE = "交易金额必须大于零"
 NON_POSITIVE_SHARES_MESSAGE = "赎回份额必须大于零"
 HOLDING_MISSING_MESSAGE = "没有可赎回的持仓"
 NOT_ENOUGH_SHARES_MESSAGE = "赎回份额超过持仓份额"
+MISSING_PAYEE_NAME_MESSAGE = "收款人姓名不能为空"
+MISSING_PAYEE_ACCOUNT_MESSAGE = "收款人账号不能为空"
+
+# 转账流水号与交易流水号同一形状、不同前缀：两类记录会并排出现在客户的同一个列表里。
+TRANSFER_NO_PREFIX = "TR"
 
 
 def _money(value: Decimal) -> Decimal:
@@ -334,3 +350,79 @@ def redeem(
         now=now,
     )
     return _trade_result(transaction, product, account)
+
+
+def _require_payee(payee_name: str, payee_account: str) -> tuple[str, str]:
+    """收款人姓名与账号都非空：去掉首尾空白再判，写进库的也是归一化后的值。"""
+    name = payee_name.strip()
+    account = payee_account.strip()
+    if not name:
+        raise AppError(400, MISSING_PAYEE_NAME_MESSAGE)
+    if not account:
+        raise AppError(400, MISSING_PAYEE_ACCOUNT_MESSAGE)
+    return name, account
+
+
+def _transfer_no(occurred_at: datetime) -> str:
+    return f"{TRANSFER_NO_PREFIX}{occurred_at:%Y%m%d%H%M%S}{uuid4().hex[:6].upper()}"
+
+
+def transfer(
+    db: Session,
+    *,
+    publisher: EventPublisher,
+    customer_id: int,
+    payee_name: str,
+    payee_account: str,
+    amount: Decimal,
+    now: datetime,
+) -> dict:
+    """转账：校验通过后当场成交，并照常进风控。
+
+    转账没有产品（ADR-0019），因此适当性、起投金额与产品状态三条不适用；对手方是
+    机构之外的收款人，客户与收款人之间是什么关系不是受理该判断的事。校验全部在写库
+    之前，被拒绝的转账在库里不留任何痕迹。
+
+    事实落在 `fin_transfer` 里而不是 `fin_transaction`，但它与申购赎回走的是**同一个**
+    交易事件入海口——风控不关心事实存在哪张表，它要的是「发生了什么」。
+    """
+    if amount <= 0:
+        raise AppError(400, NON_POSITIVE_AMOUNT_MESSAGE)
+    name, account_no = _require_payee(payee_name, payee_account)
+    account = _require_account(db, customer_id=customer_id)
+    _require_balance(account, amount)
+
+    # 校验全部通过：从这里开始写库。客户自助发起，因此 operator_id 为空（Q22）。
+    number = _transfer_no(now)
+    row = Transfer(
+        transfer_no=number,
+        customer_id=customer_id,
+        amount=amount,
+        payee_name=name,
+        payee_account=account_no,
+        create_time=now,
+    )
+    db.add(row)
+    account.available_balance = account.available_balance - amount
+    # 落库由入海口提交（转账行与余额的变动此刻还在同一个会话里），于是「成交」与
+    # 「钱的变动」在同一次提交中发生——与申购赎回完全一样。
+    db.flush()
+    alerting.submit_transaction_event(
+        db,
+        publisher=publisher,
+        submission=alerting.TransactionSubmission(
+            customer_id=customer_id,
+            product_id=None,
+            transaction_type=TRANSFER,
+            amount=amount,
+            occurred_at=now,
+            transaction_id=row.id,
+            transaction_no=number,
+        ),
+        operator_id=None,
+        now=now,
+    )
+    return {
+        "transaction": serialize_transfer(row),
+        "available_balance": format(account.available_balance, "f"),
+    }

@@ -65,6 +65,9 @@ def submit_transaction_event(
         operator_id=employee.id,
         now=now,
     )
+    # 内部补录必带产品，因此一定落在 fin_transaction 里（转账走客户侧受理，
+    # 它有收款人信息，而这条路子没有）。
+    assert transaction is not None
     return ok(
         {
             "transaction": alerting.transaction_response(transaction),

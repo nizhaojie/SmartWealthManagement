@@ -291,6 +291,37 @@ class Transaction(Base):
     create_time: Mapped[datetime] = mapped_column(DateTime, comment="成交时间")
 
 
+class Transfer(Base):
+    """转账：客户把自己资金账户里的钱付给机构之外的收款人（CONTEXT「转账」）。
+
+    它没有产品，因此不进 `fin_transaction`（ADR-0019）：把交易流水表的产品外键改成
+    可空，会让资产页、语义视图、持仓穿透以及所有按产品读流水的地方都开始处理空值，
+    而它们拿一笔没有产品的流水几乎无事可做。客户侧的「交易流水」把两张表合并读出
+    一张列表——对客户来说申购、赎回、转账都是「我动过的钱」。
+
+    与申购赎回一样，它是一笔交易事件，一样进风控监测（`app.risk_monitoring.alerting`）：
+    事实落在这一行上，入海口不替它写 `fin_transaction`。金额精度与 `fin_transaction.amount`
+    对齐（18,2），两张表合并进同一个列表时不会出现两种口径的尾数。
+    """
+
+    __tablename__ = "fin_transfer"
+    __table_args__ = (
+        Index("ix_fin_transfer_customer_id", "customer_id"),
+        CheckConstraint("amount > 0", name="ck_transfer_amount_positive"),
+        {"comment": "转账"},
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    transfer_no: Mapped[str] = mapped_column(String(64), unique=True, comment="转账流水号")
+    customer_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("sys_customer.id"), comment="客户标识"
+    )
+    amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), comment="转账金额")
+    payee_name: Mapped[str] = mapped_column(String(128), comment="收款人姓名")
+    payee_account: Mapped[str] = mapped_column(String(64), comment="收款人账号")
+    create_time: Mapped[datetime] = mapped_column(DateTime, comment="成交时间")
+
+
 class Holding(Base):
     __tablename__ = "fin_holdings"
     __table_args__ = (

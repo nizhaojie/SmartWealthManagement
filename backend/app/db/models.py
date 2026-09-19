@@ -227,6 +227,38 @@ class ProductUnderlying(Base):
     )
 
 
+class FundingAccount(Base):
+    """资金账户：客户在本机构可以动用的钱，一个客户一个（CONTEXT「资金账户」）。
+
+    余额与 `fin_customer_profile.total_assets` **不共用字段、不互相写**：总资产是客户
+    在所有地方的资产规模（自述、用于画像研判），余额只装客户能在这里动用的钱。把两者
+    放到同一列上，「总资产 80 万」会被顺手读成「能买 80 万」。
+
+    精度与 `fin_transaction.amount` 一致（18,2）——余额是同一批金额加减的结果，两边
+    精度不同的话，一次赎回之后余额就会带出交易流水里不存在的尾数。
+    """
+
+    __tablename__ = "fin_funding_account"
+    __table_args__ = (
+        UniqueConstraint("customer_id", name="uk_funding_account_customer"),
+        CheckConstraint(
+            "available_balance >= 0",
+            name="ck_funding_account_available_balance_non_negative",
+        ),
+        {"comment": "资金账户"},
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    customer_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("sys_customer.id"), comment="客户标识"
+    )
+    available_balance: Mapped[Decimal] = mapped_column(Numeric(18, 2), comment="可用余额")
+    create_time: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    update_time: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now()
+    )
+
+
 class Transaction(Base):
     __tablename__ = "fin_transaction"
     __table_args__ = (

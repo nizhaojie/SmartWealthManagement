@@ -20,6 +20,8 @@ from app.api.customer_assets import internal_router as customer_assets_internal_
 from app.api.customer_assets import router as customer_assets_router
 from app.api.customer_conversations import router as customer_conversations_router
 from app.api.customers import router as customers_router
+from app.api.funding_account import internal_router as funding_account_internal_router
+from app.api.funding_account import router as funding_account_router
 from app.api.graph import router as graph_router
 from app.api.health import router as health_router
 from app.api.knowledge import router as knowledge_router
@@ -145,6 +147,8 @@ app.include_router(suitability_internal_router)
 app.include_router(products_router)
 app.include_router(customer_assets_router)
 app.include_router(customer_assets_internal_router)
+app.include_router(funding_account_router)
+app.include_router(funding_account_internal_router)
 app.include_router(advisory_request_router)
 app.include_router(advisory_request_internal_router)
 app.include_router(analytics_router)

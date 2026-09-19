@@ -11,6 +11,7 @@ from app.db.models import (
     Customer,
     CustomerProfile,
     Employee,
+    FundingAccount,
     Holding,
     Product,
     ProductUnderlying,
@@ -74,6 +75,7 @@ class CustomerSeed(TypedDict):
     investment_experience: str
     annual_income_range: str
     total_assets: Decimal
+    available_balance: Decimal
     target_allocation: dict[str, int]
     product_preference: dict[str, list[str]]
     confidence_score: Decimal
@@ -259,6 +261,9 @@ _CUSTOMERS: tuple[CustomerSeed, ...] = (
         "investment_experience": "0-1年",
         "annual_income_range": "10万以下",
         "total_assets": Decimal("80000.00"),
+        # 刻意留的余额不足客户：用它演示「余额不足被拒绝」——余额只有两千，
+        # 而这位 C1 客户能买的产品起投一千，跨过它只需要一笔稍大的申购或转账。
+        "available_balance": Decimal("2000.00"),
         "target_allocation": {"股票": 10, "债券": 40, "现金": 50, "另类": 0},
         "product_preference": {"基金": ["货币基金"]},
         "confidence_score": Decimal("0.86"),
@@ -288,6 +293,7 @@ _CUSTOMERS: tuple[CustomerSeed, ...] = (
         "investment_experience": "1-3年",
         "annual_income_range": "10-30万",
         "total_assets": Decimal("300000.00"),
+        "available_balance": Decimal("120000.00"),
         "target_allocation": {"股票": 20, "债券": 50, "现金": 25, "另类": 5},
         "product_preference": {"基金": ["债券基金"]},
         "confidence_score": Decimal("0.88"),
@@ -317,6 +323,7 @@ _CUSTOMERS: tuple[CustomerSeed, ...] = (
         "investment_experience": "3-5年",
         "annual_income_range": "30-50万",
         "total_assets": Decimal("800000.00"),
+        "available_balance": Decimal("1000000.00"),
         "target_allocation": {"股票": 40, "债券": 35, "现金": 15, "另类": 10},
         "product_preference": {"基金": ["混合基金"]},
         "confidence_score": Decimal("0.90"),
@@ -346,6 +353,7 @@ _CUSTOMERS: tuple[CustomerSeed, ...] = (
         "investment_experience": "5-10年",
         "annual_income_range": "50-100万",
         "total_assets": Decimal("3000000.00"),
+        "available_balance": Decimal("2500000.00"),
         "target_allocation": {"股票": 55, "债券": 25, "现金": 10, "另类": 10},
         "product_preference": {"基金": ["股票基金"]},
         "confidence_score": Decimal("0.91"),
@@ -375,6 +383,7 @@ _CUSTOMERS: tuple[CustomerSeed, ...] = (
         "investment_experience": "10年以上",
         "annual_income_range": "100万以上",
         "total_assets": Decimal("12000000.00"),
+        "available_balance": Decimal("5000000.00"),
         "target_allocation": {"股票": 70, "债券": 10, "现金": 5, "另类": 15},
         "product_preference": {"基金": ["股票基金"]},
         "confidence_score": Decimal("0.93"),
@@ -525,6 +534,20 @@ def _seed_customers(
         if customer.manager_id != manager.id:
             customer.manager_id = manager.id
             session.flush()
+
+        # 资金账户：余额只来自种子，应用里没有入金（spec Q20），因此重复 seed 时把
+        # 余额对齐回配置值——重新 seed 等于把演示状态恢复成初始状态。
+        account = session.scalar(
+            select(FundingAccount).where(FundingAccount.customer_id == customer.id)
+        )
+        if account is None:
+            session.add(
+                FundingAccount(
+                    customer_id=customer.id, available_balance=item["available_balance"]
+                )
+            )
+        else:
+            account.available_balance = item["available_balance"]
 
         if session.scalar(
             select(CustomerProfile).where(CustomerProfile.customer_id == customer.id)

@@ -51,10 +51,10 @@ def _request_no(now: datetime) -> str:
 
 
 def _serialize(row: AdvisoryRequest) -> dict:
+    # 不带 customer_id：客户由令牌圈定，响应里不需要也不该回显内部标识。
     return {
         "id": row.id,
         "request_no": row.request_no,
-        "customer_id": row.customer_id,
         "status": row.status,
         "filters": row.filters,
         "submitted_at": row.submitted_at.isoformat(),

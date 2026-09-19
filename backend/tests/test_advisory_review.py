@@ -40,6 +40,24 @@ SEEDED_PASSWORD = "Test@1234"
 TARGET_ALLOCATION = {"股票": 40, "债券": 35, "现金": 15, "另类": 10}
 PRODUCT_PREFERENCE = {"基金": ["混合基金"]}
 
+# 客户送达视图里产品清单保留的字段（ADR-0016）：客户拿到的候选是定稿
+# 候选中这一组字段的子集，不是定稿候选本身。
+CUSTOMER_VISIBLE_PRODUCT_FIELDS = (
+    "product_code",
+    "product_name",
+    "product_type",
+    "risk_level",
+    "expected_return",
+    "term_days",
+)
+
+
+def _customer_products(candidates: list[dict]) -> list[dict]:
+    return [
+        {field: candidate.get(field) for field in CUSTOMER_VISIBLE_PRODUCT_FIELDS}
+        for candidate in candidates
+    ]
+
 
 def _real_now() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
@@ -260,7 +278,7 @@ def test_releasing_produces_a_final_the_customer_can_read(auth_client: TestClien
     customer_view = auth_client.get(
         "/api/customer/advisory/plan", headers=_customer_headers(auth_client, username)
     ).json()["data"]
-    assert customer_view["candidates"] == draft["candidates"]
+    assert customer_view["candidates"] == _customer_products(draft["candidates"])
     assert customer_view["disclaimer"]
     # 客户要知道方案是谁出具的才知道该找谁，光有内部的 advisor_id 不够。
     assert customer_view["advisor_name"]
@@ -281,7 +299,7 @@ def test_advisor_edit_at_release_is_what_the_customer_sees_and_the_draft_stays_u
     customer_view = auth_client.get(
         "/api/customer/advisory/plan", headers=_customer_headers(auth_client, username)
     ).json()["data"]
-    assert customer_view["candidates"] == edited_candidates
+    assert customer_view["candidates"] == _customer_products(edited_candidates)
 
     # 原稿是举证材料，不随顾问的编辑改变——差异正是审核实质性的依据。
     refetched_draft = auth_client.get(

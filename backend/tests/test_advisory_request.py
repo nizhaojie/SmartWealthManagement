@@ -103,13 +103,12 @@ def test_submitted_request_is_listed_back_to_its_submitter_with_a_status(auth_cl
     assert mine[0]["status"] == STATUS_PENDING
 
 
-def test_request_records_its_customer_submit_time_and_triggering_filters(auth_client: TestClient):
+def test_request_records_its_submit_time_and_triggering_filters(auth_client: TestClient):
     before = _utc_now() - timedelta(seconds=5)
 
     created = _submit(auth_client, CUSTOMER_A, BOND_FILTERS)
 
     assert created["filters"] == BOND_FILTERS
-    assert created["customer_id"] == _customer_id(CUSTOMER_A)
     submitted_at = datetime.fromisoformat(created["submitted_at"])
     assert before <= submitted_at <= _utc_now() + timedelta(seconds=5)
 
@@ -129,7 +128,20 @@ def test_a_forged_customer_id_in_the_request_body_is_ignored(auth_client: TestCl
     response = auth_client.post("/api/customer/advisory-requests", headers=headers, json=forged)
 
     assert response.status_code == 200
-    assert response.json()["data"]["customer_id"] == _customer_id(CUSTOMER_A)
+    # 请求归属于令牌圈定的客户 A，而不是请求体里伪造的客户 B。
+    created_no = response.json()["data"]["request_no"]
+    assert [row["request_no"] for row in _my_requests(auth_client, CUSTOMER_A)] == [created_no]
+    assert all(row["request_no"] != created_no for row in _my_requests(auth_client, CUSTOMER_B))
+
+
+def test_customer_side_responses_do_not_echo_the_internal_customer_id(
+    auth_client: TestClient,
+):
+    created = _submit(auth_client, CUSTOMER_A, BOND_FILTERS)
+    assert "customer_id" not in created
+
+    listed = _my_requests(auth_client, CUSTOMER_A)
+    assert all("customer_id" not in row for row in listed)
 
 
 def test_requests_can_be_listed_on_the_internal_side_for_the_review_queue(auth_client: TestClient):
@@ -138,10 +150,6 @@ def test_requests_can_be_listed_on_the_internal_side_for_the_review_queue(auth_c
 
     rows = _internal_requests(auth_client)
     assert {row["request_no"] for row in rows} == {mine, theirs}
-    assert {row["customer_id"] for row in rows} == {
-        _customer_id(CUSTOMER_A),
-        _customer_id(CUSTOMER_B),
-    }
 
     pending = _internal_requests(auth_client, status=STATUS_PENDING)
     assert [row["request_no"] for row in pending] == [mine, theirs]

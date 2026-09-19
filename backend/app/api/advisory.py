@@ -9,8 +9,11 @@ from app.advisory.comments import add_comment, list_comments
 from app.advisory.draft import get_draft, serialize_draft
 from app.advisory.final import (
     get_final_by_draft_id,
+    get_final_for_customer,
     get_latest_final_for_customer,
+    list_finals_for_customer,
     serialize_final,
+    serialize_final_for_customer,
 )
 from app.advisory.queue import list_my_history, list_queue
 from app.advisory.review import (
@@ -180,6 +183,39 @@ def reject_advisory_draft(
     return ok(result)
 
 
+@customer_router.get("/plans")
+def customer_list_advisory_plans(
+    # 客户侧只读定稿：未经审核的原稿无论走哪个接口都读不到。
+    auth: AuthContext = Depends(require_customer),
+    db: Session = Depends(get_session),
+):
+    # 尚无已放行方案时是空列表，不是 404——「还没有方案」不是一种错误。
+    return ok(
+        {
+            "plans": [
+                serialize_final_for_customer(db, final)
+                for final in list_finals_for_customer(db, customer_id=auth.subject_id)
+            ]
+        }
+    )
+
+
+@customer_router.get("/plans/{final_id}")
+def customer_get_advisory_plan_by_id(
+    final_id: int,
+    auth: AuthContext = Depends(require_customer),
+    db: Session = Depends(get_session),
+):
+    # 范围由 id 与调用者共同圈定，不是由令牌单独兜住——越权检查显式写在
+    # get_final_for_customer 里，别人的定稿在这里与不存在同义（404）。
+    return ok(
+        serialize_final_for_customer(
+            db,
+            get_final_for_customer(db, final_id=final_id, customer_id=auth.subject_id),
+        )
+    )
+
+
 @customer_router.get("/plan")
 def customer_get_advisory_plan(
     # 客户侧只读定稿：未经审核的原稿无论走哪个接口都读不到。
@@ -187,5 +223,7 @@ def customer_get_advisory_plan(
     db: Session = Depends(get_session),
 ):
     return ok(
-        serialize_final(db, get_latest_final_for_customer(db, customer_id=auth.subject_id))
+        serialize_final_for_customer(
+            db, get_latest_final_for_customer(db, customer_id=auth.subject_id)
+        )
     )

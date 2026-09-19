@@ -536,10 +536,11 @@ def _walk_full_journey(
     assert release.status_code == 200, release.text
 
     # 送达客户的是顾问定稿，不是 AI 原稿：客户读到的配置建议带顾问的修改。
+    # 客户送达视图不外泄内部标识，原稿 id 不在其中。
     final = client.get("/api/customer/advisory/plan", headers=customer)
     assert final.status_code == 200, final.text
     delivered = final.json()["data"]
-    assert delivered["draft_id"] == draft_id
+    assert "draft_id" not in delivered
     assert delivered["allocation_suggestion"] == edited_allocation
     assert delivered["allocation_suggestion"] != original_allocation
     assert delivered["advisor_name"]

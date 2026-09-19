@@ -3,6 +3,10 @@
 同 app.advisory.draft 一样，只提供 record 与 get，没有 update——定稿落库
 后不可修改，它与 AI 原稿并存，两者的差异是举证「审核是实质性的」的
 依据。定稿是唯一允许经客户侧接口读取的版本。
+
+定稿同时供两端读取，但两端要的东西不一样：内部端要完整的举证材料
+（`serialize_final`），客户侧只要**客户送达视图**（`serialize_final_for_customer`）。
+裁剪发生在服务端，不共用内部端的序列化（见 ADR-0016）。
 """
 
 from datetime import datetime
@@ -53,6 +57,64 @@ def get_latest_final_for_customer(db: Session, *, customer_id: int) -> AdvisoryF
     if final is None:
         raise AppError(404, FINAL_NOT_FOUND_MESSAGE)
     return final
+
+
+def list_finals_for_customer(db: Session, *, customer_id: int) -> list[AdvisoryFinal]:
+    return list(
+        db.scalars(
+            select(AdvisoryFinal)
+            .where(AdvisoryFinal.customer_id == customer_id)
+            .order_by(AdvisoryFinal.released_at.desc(), AdvisoryFinal.id.desc())
+        ).all()
+    )
+
+
+def get_final_for_customer(db: Session, *, final_id: int, customer_id: int) -> AdvisoryFinal:
+    """按 id 取一份定稿，但只在这份定稿属于该客户时才给。
+
+    这个接口不像 `get_latest_final_for_customer` 那样天然被令牌圈定范围，
+    越权检查必须显式写在查询条件里：id 不属于调用者时与不存在一样，回
+    404 而不是 403——不确认他人资源是否存在。
+    """
+    final = db.scalar(
+        select(AdvisoryFinal).where(
+            AdvisoryFinal.id == final_id,
+            AdvisoryFinal.customer_id == customer_id,
+        )
+    )
+    if final is None:
+        raise AppError(404, FINAL_NOT_FOUND_MESSAGE)
+    return final
+
+
+# 客户送达视图里产品清单保留的字段：客观已披露的产品要素。综合得分、
+# 排序依据与推荐理由都不在其中（见 ADR-0016），因此这里逐项拣选，不用
+# `{**candidate}` 展开——以后往候选里加字段时默认是内部字段，要让它送达
+# 客户必须在这里显式加一次。
+CUSTOMER_VISIBLE_PRODUCT_FIELDS = (
+    "product_code",
+    "product_name",
+    "product_type",
+    "risk_level",
+    "expected_return",
+    "term_days",
+)
+
+
+def _serialize_candidate_for_customer(candidate: dict) -> dict:
+    return {field: candidate.get(field) for field in CUSTOMER_VISIBLE_PRODUCT_FIELDS}
+
+
+def serialize_final_for_customer(db: Session, final: AdvisoryFinal) -> dict:
+    advisor = db.get(Employee, final.advisor_id)
+    return {
+        "id": final.id,
+        "advisor_name": advisor.real_name if advisor else None,
+        "candidates": [_serialize_candidate_for_customer(c) for c in final.candidates],
+        "allocation_suggestion": final.allocation_suggestion,
+        "released_at": final.released_at.isoformat(),
+        "disclaimer": disclaimer_for(final.content_classification),
+    }
 
 
 def serialize_final(db: Session, final: AdvisoryFinal) -> dict:

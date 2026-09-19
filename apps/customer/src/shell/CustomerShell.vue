@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { ChatDotRound, Coin, Filter, Odometer } from "@element-plus/icons-vue";
+import { ChatDotRound, Coin, Document, Filter, Odometer } from "@element-plus/icons-vue";
 import { useRoute, useRouter } from "vue-router";
 import { AppShell, type AppShellNavItem } from "@wealth/shared";
 import { useAuthStore } from "../stores/auth";
@@ -14,9 +14,12 @@ const navItems: AppShellNavItem[] = [
   { key: "risk-assessment", label: "风险测评", name: "nav-risk-assessment", icon: Odometer },
   { key: "products", label: "产品筛选", name: "nav-products", icon: Filter },
   { key: "assets", label: "我的资产", name: "nav-assets", icon: Coin },
+  { key: "advisory", label: "我的方案", name: "nav-advisory", icon: Document },
 ];
 
-const activeKey = computed(() => (typeof route.name === "string" ? route.name : ""));
+// 导航键与路径首段同名（key 就是 `/${key}`）：详情路由的 name 与导航键不同
+// （advisory-plan vs advisory），按路径取键，进详情时侧栏仍停在「我的方案」。
+const activeKey = computed(() => route.path.split("/").filter(Boolean)[0] ?? "");
 // 顶栏左侧的页面标题：壳不认识模块名，key → 标题的映射留在应用里。
 const activeLabel = computed(
   () => navItems.find((item) => item.key === activeKey.value)?.label ?? "",

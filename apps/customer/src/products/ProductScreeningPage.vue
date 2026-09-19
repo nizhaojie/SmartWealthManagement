@@ -1,9 +1,8 @@
 <script setup lang="ts">
 import { nextTick, onMounted, reactive, ref } from "vue";
+import { useRouter } from "vue-router";
 import { ApiError, PageHeader, PanelCard } from "@wealth/shared";
-import { listAdvisoryRequests, submitAdvisoryRequest } from "../advisory/api";
-import type { AdvisoryRequest } from "../advisory/types";
-import AdvisoryRequestList from "./AdvisoryRequestList.vue";
+import { submitAdvisoryRequest } from "../advisory/api";
 import ProductDetailPanel from "./ProductDetailPanel.vue";
 import { compactFilters, getCandidatePool, getProduct, listProducts } from "./api";
 import {
@@ -41,9 +40,10 @@ const detailPanel = ref<HTMLElement | null>(null);
 // 适当性说明：可购范围只能由后端给出，前端不自行推断。
 const suitabilityNote = ref("");
 
-const advisoryRequests = ref<AdvisoryRequest[]>([]);
 const advisoryError = ref("");
 const advisorySubmitting = ref(false);
+
+const router = useRouter();
 
 async function loadProducts(): Promise<void> {
   loading.value = true;
@@ -79,14 +79,6 @@ async function loadSuitability(): Promise<void> {
   }
 }
 
-async function loadAdvisoryRequests(): Promise<void> {
-  try {
-    advisoryRequests.value = (await listAdvisoryRequests()).requests;
-  } catch {
-    // 拉不到列表时保留已有内容：刚提交的请求不能因为一次 GET 失败就从页面上消失。
-  }
-}
-
 async function openDetail(product: Product): Promise<void> {
   detailError.value = "";
   try {
@@ -106,8 +98,8 @@ async function requestAdvisory(): Promise<void> {
   advisorySubmitting.value = true;
   try {
     await submitAdvisoryRequest(compactFilters(filters));
-    // 列表以服务端为准：提交成功后再拉一次，避免与页面初次加载的响应抢写同一份状态。
-    await loadAdvisoryRequests();
+    // 提交完就知道该去哪里看结果：请求进度与已放行方案都在「我的方案」页。
+    await router.push({ name: "advisory" });
   } catch (error) {
     advisoryError.value = error instanceof ApiError ? error.message : "方案请求提交失败";
   } finally {
@@ -116,7 +108,7 @@ async function requestAdvisory(): Promise<void> {
 }
 
 onMounted(async () => {
-  await Promise.all([loadProducts(), loadSuitability(), loadAdvisoryRequests()]);
+  await Promise.all([loadProducts(), loadSuitability()]);
 });
 </script>
 
@@ -236,8 +228,6 @@ onMounted(async () => {
     <div v-if="selected" ref="detailPanel">
       <ProductDetailPanel :product="selected" :error="detailError" />
     </div>
-
-    <AdvisoryRequestList :requests="advisoryRequests" />
   </div>
 </template>
 

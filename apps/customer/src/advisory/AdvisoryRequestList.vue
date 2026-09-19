@@ -1,8 +1,8 @@
 <script setup lang="ts">
-// 方案请求的状态列表。客户在这里能看到「请求到哪一步了」，
-// 但看不到顾问定稿本身——投顾内容必须经审核后才能送达，本 slice 不做送达面（Q17）。
+// 方案请求的进度列表，是「我的方案」页的下半区。客户在这里能看到「请求走到哪一步了」，
+// 但看不到顾问定稿本身——定稿在上半区的「已放行方案」里，两者是两份不同的东西。
 import { PanelCard } from "@wealth/shared";
-import type { AdvisoryRequest } from "../advisory/types";
+import type { AdvisoryRequest } from "./types";
 
 defineProps<{
   requests: AdvisoryRequest[];
@@ -35,7 +35,7 @@ function statusHint(status: string): string {
 </script>
 
 <template>
-  <PanelCard v-if="requests.length" title="我的方案请求">
+  <PanelCard v-if="requests.length" title="方案请求进度">
     <ul class="requests" data-testid="advisory-requests">
       <li
         v-for="request in requests"

@@ -5,7 +5,7 @@ import { createPinia, setActivePinia, type Pinia } from "pinia";
 import { flushPromises, mount, type VueWrapper } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createMemoryHistory, createRouter } from "vue-router";
-import { listAdvisoryRequests } from "./advisory/api";
+import { listAdvisoryRequests, listReleasedPlans } from "./advisory/api";
 import App from "./App.vue";
 import { getAssets, listTransactions } from "./assets/api";
 import { login as loginRequest, logout as logoutRequest } from "./auth/api";
@@ -38,6 +38,8 @@ vi.mock("./products/api", async (importOriginal) => ({
 vi.mock("./advisory/api", () => ({
   listAdvisoryRequests: vi.fn(),
   submitAdvisoryRequest: vi.fn(),
+  listReleasedPlans: vi.fn(),
+  getReleasedPlan: vi.fn(),
 }));
 
 let pinia: Pinia;
@@ -79,6 +81,7 @@ describe("客户应用·门控与路由", () => {
     vi.mocked(listProducts).mockReset();
     vi.mocked(getCandidatePool).mockReset();
     vi.mocked(listAdvisoryRequests).mockReset();
+    vi.mocked(listReleasedPlans).mockReset();
 
     vi.mocked(getCurrentAssessment).mockResolvedValue({ risk_level: "C1", valid_until: "2027-03-15" });
     vi.mocked(getAssets).mockResolvedValue({
@@ -97,6 +100,7 @@ describe("客户应用·门控与路由", () => {
       products: [],
     });
     vi.mocked(listAdvisoryRequests).mockResolvedValue({ requests: [] });
+    vi.mocked(listReleasedPlans).mockResolvedValue({ plans: [] });
 
     await router.push("/login");
     await router.isReady();
@@ -208,7 +212,7 @@ describe("客户应用·门控与路由", () => {
     const wrapper = mountApp();
     await submitLogin(wrapper, "wangc1", "Test@1234");
 
-    for (const name of ["risk-assessment", "products", "assets", "chat"] as const) {
+    for (const name of ["risk-assessment", "products", "assets", "advisory", "chat"] as const) {
       await wrapper.get(`button[name="nav-${name}"]`).trigger("click");
       await flushPromises();
       expect(router.currentRoute.value.path).toBe(`/${name}`);
@@ -225,6 +229,21 @@ describe("客户应用·门控与路由", () => {
     await router.push("/assets");
     await flushPromises();
     expect(wrapper.get('[data-testid="asset-summary"]').text()).toContain("20420.00");
+  });
+
+  // 投顾内容的送达面有固定入口：侧栏第 5 项「我的方案」，没收到方案时也不留空白。
+  it("exposes 我的方案 as the fifth nav item and lands on its page", async () => {
+    mockSuccessfulLogin();
+    const wrapper = mountApp();
+    await submitLogin(wrapper, "wangc1", "Test@1234");
+
+    expect(wrapper.findAll(".app-shell__nav-item")).toHaveLength(5);
+
+    await wrapper.get('button[name="nav-advisory"]').trigger("click");
+    await flushPromises();
+
+    expect(router.currentRoute.value.path).toBe("/advisory");
+    expect(wrapper.text()).toContain("还没有提交过方案请求");
   });
 
   it("returns to the previous view with the browser back button", async () => {

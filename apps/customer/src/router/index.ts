@@ -1,4 +1,6 @@
 import { createRouter, createWebHistory, type RouteRecordRaw } from "vue-router";
+import AdvisoryPlanDetailPage from "../advisory/AdvisoryPlanDetailPage.vue";
+import AdvisoryPlanPage from "../advisory/AdvisoryPlanPage.vue";
 import AssetsPage from "../assets/AssetsPage.vue";
 import LoginPage from "../auth/LoginPage.vue";
 import ChatPage from "../chat/ChatPage.vue";
@@ -18,6 +20,13 @@ export const routes: RouteRecordRaw[] = [
       { path: "risk-assessment", name: "risk-assessment", component: RiskAssessmentWorkspace },
       { path: "products", name: "products", component: ProductScreeningPage },
       { path: "assets", name: "assets", component: AssetsPage },
+      { path: "advisory", name: "advisory", component: AdvisoryPlanPage },
+      // 一份方案有自己的地址：列表与详情是两个可后退的页面，不是一个页面里的展开区。
+      {
+        path: "advisory/plans/:finalId",
+        name: "advisory-plan",
+        component: AdvisoryPlanDetailPage,
+      },
     ],
   },
 ];

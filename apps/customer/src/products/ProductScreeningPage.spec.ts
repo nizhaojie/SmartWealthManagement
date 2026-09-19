@@ -1,7 +1,10 @@
 // 产品筛选页的合规呈现面：适当性说明与「不是推荐」常驻，且清单不提供任何可排序表头。
+// 方案请求的进度列表不在这页——它迁去了「我的方案」页，这里只留提交按钮。
 import ElementPlus from "element-plus";
 import { flushPromises, mount, type VueWrapper } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { h } from "vue";
+import { createMemoryHistory, createRouter, type Router } from "vue-router";
 import { ApiError } from "@wealth/shared";
 import type { AdvisoryRequest } from "../advisory/types";
 import type { CandidatePool, Product } from "./types";
@@ -12,10 +15,7 @@ const { listProducts, getProduct, getCandidatePool } = vi.hoisted(() => ({
   getCandidatePool: vi.fn(),
 }));
 
-const { listAdvisoryRequests, submitAdvisoryRequest } = vi.hoisted(() => ({
-  listAdvisoryRequests: vi.fn(),
-  submitAdvisoryRequest: vi.fn(),
-}));
+const { submitAdvisoryRequest } = vi.hoisted(() => ({ submitAdvisoryRequest: vi.fn() }));
 
 // 保留模块里的纯函数（compactFilters）——只桩掉发请求的那几个。
 vi.mock("./api", async (importOriginal) => ({
@@ -24,7 +24,7 @@ vi.mock("./api", async (importOriginal) => ({
   getProduct,
   getCandidatePool,
 }));
-vi.mock("../advisory/api", () => ({ listAdvisoryRequests, submitAdvisoryRequest }));
+vi.mock("../advisory/api", () => ({ submitAdvisoryRequest }));
 
 import ProductScreeningPage from "./ProductScreeningPage.vue";
 
@@ -71,7 +71,6 @@ function makeRequest(overrides: Partial<AdvisoryRequest> = {}): AdvisoryRequest 
   return {
     id: 1,
     request_no: "AR20260915A1B2C3",
-    customer_id: 7,
     status: "待处理",
     filters: { product_type: "债券基金" },
     submitted_at: "2026-09-15T08:30:00",
@@ -79,8 +78,23 @@ function makeRequest(overrides: Partial<AdvisoryRequest> = {}): AdvisoryRequest 
   };
 }
 
+const Blank = { render: () => h("div") };
+
+let router: Router;
+
+/** 页面提交成功后要跳转，因此每个用例都带一张路由表（详情页不在本文件覆盖范围内）。 */
 async function mountPage(): Promise<VueWrapper> {
-  const wrapper = mount(ProductScreeningPage, { global: { plugins: [ElementPlus] } });
+  router = createRouter({
+    history: createMemoryHistory(),
+    routes: [
+      { path: "/products", name: "products", component: Blank },
+      { path: "/advisory", name: "advisory", component: Blank },
+    ],
+  });
+  await router.push("/products");
+  await router.isReady();
+
+  const wrapper = mount(ProductScreeningPage, { global: { plugins: [ElementPlus, router] } });
   await flushPromises();
   return wrapper;
 }
@@ -93,14 +107,12 @@ describe("ProductScreeningPage", () => {
     listProducts.mockReset();
     getProduct.mockReset();
     getCandidatePool.mockReset();
-    listAdvisoryRequests.mockReset();
     submitAdvisoryRequest.mockReset();
     scrollIntoView.mockReset();
     Element.prototype.scrollIntoView = scrollIntoView;
 
     listProducts.mockResolvedValue({ products: [makeProduct()] });
     getCandidatePool.mockResolvedValue(makeCandidatePool());
-    listAdvisoryRequests.mockResolvedValue({ requests: [] });
   });
 
   afterEach(() => {
@@ -169,19 +181,18 @@ describe("ProductScreeningPage", () => {
     expect(wrapper.findAll("tbody tr")[0].text()).toContain("F000001");
   });
 
-  it("lists the submitted 方案请求 with its status", async () => {
+  it("sends the customer to 我的方案 after the 方案请求 is submitted", async () => {
     submitAdvisoryRequest.mockResolvedValue(makeRequest());
     const wrapper = await mountPage();
-    // 提交后列表以服务端为准，重新拉一次。
-    listAdvisoryRequests.mockResolvedValueOnce({ requests: [makeRequest()] });
 
     await wrapper.get('button[name="request-advisory"]').trigger("click");
     await flushPromises();
 
-    const row = wrapper.get('[data-testid="advisory-request"]').text();
-    expect(row).toContain("待处理");
-    expect(row).toContain("AR20260915A1B2C3");
-    expect(row).toContain("债券基金");
+    expect(submitAdvisoryRequest).toHaveBeenCalledWith({});
+    expect(router.currentRoute.value.name).toBe("advisory");
+    expect(router.currentRoute.value.path).toBe("/advisory");
+    // 请求列表已经交出去了：这页不再自己渲染它。
+    expect(wrapper.find('[data-testid="advisory-requests"]').exists()).toBe(false);
   });
 
   it("surfaces a failure to submit the 方案请求", async () => {

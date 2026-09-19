@@ -420,7 +420,8 @@ flowchart TB
 | 产品筛选 | `app/product_screening/` | `/api/customer/products` | `apps/customer/products/` |
 | 资产与持仓穿透 | `app/customer_assets/` | `/api/customer/assets/*` | `apps/customer/assets/` |
 | 投顾助手与审核流 | `app/advisory/` | `/api/internal/advisory/*` | `apps/internal/advisory/` |
-| 客户方案请求 | `app/advisory_request/` | `/api/customer/advisory-requests` | `apps/customer/products/` |
+| 客户方案请求 | `app/advisory_request/` | `/api/customer/advisory-requests` | `apps/customer/products/`（提交）、`apps/customer/advisory/`（进度） |
+| 客户侧方案送达 | `app/advisory/final.py` | `/api/customer/advisory/plans` | `apps/customer/advisory/` |
 | 数据分析（NL2SQL） | `app/analytics/` | `/api/internal/analytics/*` | `apps/internal/analytics/` |
 | 知识图谱与 GraphRAG | `app/knowledge_graph/` | `/api/internal/graph/*` | `apps/internal/graph/` |
 | 风控监测与预警 | `app/risk_monitoring/` | `/api/internal/risk-alerts/*` | `apps/internal/risk/` |

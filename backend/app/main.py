@@ -19,6 +19,7 @@ from app.api.conversations import router as conversations_router
 from app.api.customer_assets import internal_router as customer_assets_internal_router
 from app.api.customer_assets import router as customer_assets_router
 from app.api.customer_conversations import router as customer_conversations_router
+from app.api.customer_transactions import router as customer_transactions_router
 from app.api.customers import router as customers_router
 from app.api.funding_account import internal_router as funding_account_internal_router
 from app.api.funding_account import router as funding_account_router
@@ -149,6 +150,7 @@ app.include_router(customer_assets_router)
 app.include_router(customer_assets_internal_router)
 app.include_router(funding_account_router)
 app.include_router(funding_account_internal_router)
+app.include_router(customer_transactions_router)
 app.include_router(advisory_request_router)
 app.include_router(advisory_request_internal_router)
 app.include_router(analytics_router)

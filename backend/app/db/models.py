@@ -151,6 +151,7 @@ class Product(Base):
             "risk_level IN ('R1','R2','R3','R4','R5')",
             name="ck_product_risk_level",
         ),
+        CheckConstraint("nav > 0", name="ck_product_nav_positive"),
         {"comment": "产品"},
     )
 
@@ -164,6 +165,10 @@ class Product(Base):
     term_days: Mapped[int] = mapped_column(comment="期限天数")
     fund_manager: Mapped[str | None] = mapped_column(String(64), comment="基金经理")
     fee_rate: Mapped[Decimal] = mapped_column(Numeric(7, 4), comment="费率")
+    # 当前单位净值，只用于成交（申购 份额 = 金额 / 净值，赎回金额 = 份额 × 净值 - 手续费）。
+    # 只有一个当前值，没有时间序列；持仓的当前市值因此仍然是独立维护的字段，
+    # 不写成 份额 × 净值 的推导值（见 `app.order_acceptance.service`）。
+    nav: Mapped[Decimal] = mapped_column(Numeric(12, 6), comment="当前单位净值")
     status: Mapped[str] = mapped_column(String(16), comment="产品状态")
     create_time: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     update_time: Mapped[datetime] = mapped_column(

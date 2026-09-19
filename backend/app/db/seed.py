@@ -44,6 +44,7 @@ class ProductSeed(TypedDict):
     term_days: int
     fund_manager: str
     fee_rate: Decimal
+    nav: Decimal
     status: str
 
 
@@ -129,6 +130,8 @@ _PRODUCTS: tuple[ProductSeed, ...] = (
         "term_days": 0,
         "fund_manager": "吴宁",
         "fee_rate": Decimal("0.2500"),
+        # 每位客户的历史成交就是按这个价格落下的：份额 = 金额 / 净值，两处不能各说一套。
+        "nav": Decimal("1.000000"),
         "status": "在售",
     },
     {
@@ -141,6 +144,7 @@ _PRODUCTS: tuple[ProductSeed, ...] = (
         "term_days": 0,
         "fund_manager": "郑岚",
         "fee_rate": Decimal("0.4000"),
+        "nav": Decimal("1.200000"),
         "status": "在售",
     },
     {
@@ -153,6 +157,7 @@ _PRODUCTS: tuple[ProductSeed, ...] = (
         "term_days": 0,
         "fund_manager": "冯川",
         "fee_rate": Decimal("1.2000"),
+        "nav": Decimal("1.500000"),
         "status": "在售",
     },
     {
@@ -165,6 +170,7 @@ _PRODUCTS: tuple[ProductSeed, ...] = (
         "term_days": 365,
         "fund_manager": "曹越",
         "fee_rate": Decimal("1.5000"),
+        "nav": Decimal("2.000000"),
         "status": "在售",
     },
     {
@@ -177,6 +183,7 @@ _PRODUCTS: tuple[ProductSeed, ...] = (
         "term_days": 0,
         "fund_manager": "蒋远",
         "fee_rate": Decimal("1.5000"),
+        "nav": Decimal("2.500000"),
         "status": "在售",
     },
     # 这两只互为底层：成环的持有关系，用于验证穿透查询有界终止而不是挂死。
@@ -191,6 +198,7 @@ _PRODUCTS: tuple[ProductSeed, ...] = (
         "term_days": 0,
         "fund_manager": "邵行",
         "fee_rate": Decimal("1.0000"),
+        "nav": Decimal("1.000000"),
         "status": "停售",
     },
     {
@@ -203,6 +211,7 @@ _PRODUCTS: tuple[ProductSeed, ...] = (
         "term_days": 0,
         "fund_manager": "邵行",
         "fee_rate": Decimal("1.0000"),
+        "nav": Decimal("1.000000"),
         "status": "停售",
     },
 )
@@ -246,6 +255,9 @@ _PRODUCT_UNDERLYINGS: tuple[ProductUnderlyingSeed, ...] = (
     {"product_code": "F900002", "target_kind": "asset", "target_code": "BOND-0001", "weight": Decimal("0.200000")},
 )
 
+# 每位客户的这笔历史成交与产品共用同一套成交口径（issue 02）：份额 = 金额 / 净值、
+# 手续费 = 金额 × 费率。两处对不上，演示时第一步就散架，而 `test_customer_purchase_and_redemption`
+# 里有一条断言专门盯着它们一致。
 _CUSTOMERS: tuple[CustomerSeed, ...] = (
     {
         "username": "wangc1",
@@ -276,7 +288,7 @@ _CUSTOMERS: tuple[CustomerSeed, ...] = (
         "amount": Decimal("20000.00"),
         "shares": Decimal("20000.0000"),
         "nav": Decimal("1.000000"),
-        "fee": Decimal("0.00"),
+        "fee": Decimal("50.00"),
         "current_value": Decimal("20420.00"),
     },
     {
@@ -306,7 +318,7 @@ _CUSTOMERS: tuple[CustomerSeed, ...] = (
         "amount": Decimal("50000.00"),
         "shares": Decimal("41666.6667"),
         "nav": Decimal("1.200000"),
-        "fee": Decimal("50.00"),
+        "fee": Decimal("200.00"),
         "current_value": Decimal("52000.00"),
     },
     {
@@ -336,7 +348,7 @@ _CUSTOMERS: tuple[CustomerSeed, ...] = (
         "amount": Decimal("100000.00"),
         "shares": Decimal("66666.6667"),
         "nav": Decimal("1.500000"),
-        "fee": Decimal("100.00"),
+        "fee": Decimal("1200.00"),
         "current_value": Decimal("108000.00"),
     },
     {
@@ -366,7 +378,7 @@ _CUSTOMERS: tuple[CustomerSeed, ...] = (
         "amount": Decimal("200000.00"),
         "shares": Decimal("100000.0000"),
         "nav": Decimal("2.000000"),
-        "fee": Decimal("200.00"),
+        "fee": Decimal("3000.00"),
         "current_value": Decimal("224000.00"),
     },
     {
@@ -396,7 +408,7 @@ _CUSTOMERS: tuple[CustomerSeed, ...] = (
         "amount": Decimal("500000.00"),
         "shares": Decimal("200000.0000"),
         "nav": Decimal("2.500000"),
-        "fee": Decimal("500.00"),
+        "fee": Decimal("7500.00"),
         "current_value": Decimal("590000.00"),
     },
 )
@@ -611,24 +623,30 @@ def _seed_customers(
                 )
             )
 
-        if session.scalar(
+        # 历史成交按流水号对齐而不是只补不改：这几笔是种子自己的数据，重复 seed 等于把
+        # 演示状态恢复成初始状态（资金账户余额已经是这么做的）。只补不改的话，成交口径
+        # 一改，旧库里就留下按老口径躺着的历史流水，而产品详情上写的是新口径——演示时
+        # 一比对就是两个数。
+        transaction = session.scalar(
             select(Transaction).where(Transaction.transaction_no == item["transaction_no"])
-        ) is None:
-            session.add(
-                Transaction(
-                    transaction_no=item["transaction_no"],
-                    customer_id=customer.id,
-                    product_id=product.id,
-                    transaction_type="申购",
-                    amount=item["amount"],
-                    shares=item["shares"],
-                    nav=item["nav"],
-                    fee=item["fee"],
-                    status="已确认",
-                    operator_id=operator_id,
-                    create_time=item["trade_at"],
-                )
+        )
+        if transaction is None:
+            transaction = Transaction(
+                transaction_no=item["transaction_no"],
+                customer_id=customer.id,
+                product_id=product.id,
+                transaction_type="申购",
+                status="已确认",
             )
+            session.add(transaction)
+        transaction.customer_id = customer.id
+        transaction.product_id = product.id
+        transaction.amount = item["amount"]
+        transaction.shares = item["shares"]
+        transaction.nav = item["nav"]
+        transaction.fee = item["fee"]
+        transaction.operator_id = operator_id
+        transaction.create_time = item["trade_at"]
 
 
 def _seed_risk_rules(session: Session) -> None:

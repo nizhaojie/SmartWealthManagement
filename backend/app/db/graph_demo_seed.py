@@ -149,6 +149,7 @@ class _ProductSeed(TypedDict):
     term_days: int
     fund_manager: str
     fee_rate: Decimal
+    nav: Decimal
     status: str
 
 
@@ -170,6 +171,8 @@ def _demo_products() -> tuple[_ProductSeed, ...]:
                     "term_days": 0 if product_type == "货币基金" else 180,
                     "fund_manager": manager,
                     "fee_rate": Decimal(str(0.2 + tier * 0.25)),
+                    # 演示产品也要有成交价：净值随风险档位递增，确定性生成，跑两次一样。
+                    "nav": Decimal(str(1.0 + tier * 0.5)),
                     "status": "在售",
                 }
             )

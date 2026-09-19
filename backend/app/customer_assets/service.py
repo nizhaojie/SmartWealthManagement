@@ -36,7 +36,12 @@ def _serialize_holding(holding: Holding, product: Product) -> dict:
     }
 
 
-def _serialize_transaction(transaction: Transaction, product: Product) -> dict:
+def serialize_transaction(transaction: Transaction, product: Product) -> dict:
+    """一笔交易流水的呈现形状。
+
+    客户在「流水」里看到的与刚成交时看到的是同一笔记录，形状因此只有一份：各拼一遍
+    的话，加字段时总有一个视图会漏掉它，而漏掉的那个视图看起来仍然「正常」。
+    """
     return {
         "transaction_no": transaction.transaction_no,
         "transaction_type": transaction.transaction_type,
@@ -125,4 +130,4 @@ def list_transactions(
     stmt = stmt.order_by(Transaction.create_time.desc(), Transaction.id.desc())
 
     rows = db.execute(stmt).all()
-    return {"transactions": [_serialize_transaction(row, product) for row, product in rows]}
+    return {"transactions": [serialize_transaction(row, product) for row, product in rows]}

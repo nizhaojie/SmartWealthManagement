@@ -22,6 +22,8 @@
 
 横切 slice（不占串行链上的位置，可随时插入）：`frontend-rebuild` —— 按 `02-企业浅色.html` 从 0 重写两个前端（三栏内部工作台 / 两栏客户应用），取代 `frontend-restyle`。它不依赖任何未完成的后端能力，拆为三份 issue：shared 地基 → customer 应用 → internal 应用。`frontend-rebuild` 未合并前不要动 `apps/*/src`，否则两端会各自漂移。
 
+另一条横切 slice（2026-09-19）：`advisory-plan-visibility` —— 投顾内容的送达面，客户侧「我的方案」页 + 顾问侧回看已放行内容。它显式推翻 `frontend-rebuild` 的 Q17（「客户侧不新增我的方案页」），理由见该 spec 的 Further Notes。拆为三份 issue：客户侧接口 → 客户侧页面 → 顾问侧回看（第三份不依赖前两份，可并行）。
+
 每份 spec 已拆成 ticket，存于 `.scratch/<slug>/issues/`，共 43 个。依赖是一条串行链：每份 spec 的第一个 ticket 被上一份 spec 的最后一个 ticket 阻塞，spec 内部亦为顺序推进。唯一的例外是 `foundation-and-customer-service-slice #07`（共享包边界检查），它只依赖 #01，可提前做。
 
 **当前 frontier**：`foundation-and-customer-service-slice #01 — 工程骨架与健康检查贯通`（无前置）。
@@ -87,6 +89,7 @@
 - [ ] AI 原稿 / 顾问定稿两版本留存
 - [ ] 审核队列与放行驳回（LangGraph interrupt）→ **护栏测试 5**
 - [ ] 内部端画像面板：目标配置 vs 实际配置对比条形图（见 ADR-0006）
+- [ ] 客户侧「我的方案」页与顾问侧回看已放行内容（`advisory-plan-visibility`）
 
 ### 知识图谱与 GraphRAG
 

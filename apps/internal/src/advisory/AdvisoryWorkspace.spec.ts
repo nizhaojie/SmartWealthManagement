@@ -6,8 +6,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createMemoryHistory, createRouter, type Router } from "vue-router";
 import { stubApiFetch } from "../testing";
 import AdvisoryWorkspace from "./AdvisoryWorkspace.vue";
+import type { AdvisoryHistoryEntry } from "./types";
 
-const HISTORY = [
+const HISTORY: AdvisoryHistoryEntry[] = [
   {
     draft_id: 7,
     customer_id: 9,
@@ -30,7 +31,7 @@ let pinia: Pinia;
 let router: Router;
 let wrapper: VueWrapper | null = null;
 
-async function mountWorkspace(history: unknown = HISTORY): Promise<VueWrapper> {
+async function mountWorkspace(history: AdvisoryHistoryEntry[] = HISTORY): Promise<VueWrapper> {
   stubApiFetch((url) => {
     if (url.includes("/api/internal/advisory/history")) return { history };
     return undefined;

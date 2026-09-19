@@ -165,7 +165,7 @@ async function submitComment(body: string): Promise<void> {
   }
 }
 
-function backToQueue(): void {
+function backToWorkspace(): void {
   void router.push("/advisory");
 }
 
@@ -178,7 +178,12 @@ watch(draftId, load, { immediate: true });
   <div class="review">
     <PageHeader :title="pageTitle" :breadcrumb="breadcrumb">
       <template #actions>
-        <el-button size="small" name="back-to-queue" data-testid="back-to-queue" @click="backToQueue">
+        <el-button
+          size="small"
+          name="back-to-workspace"
+          data-testid="back-to-workspace"
+          @click="backToWorkspace"
+        >
           {{ backLabel }}
         </el-button>
       </template>

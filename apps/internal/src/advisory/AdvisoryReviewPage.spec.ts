@@ -202,7 +202,7 @@ describe("审核页", () => {
     expect(header.get(".page-header__title").text()).toBe("审核");
     expect(header.text()).toContain("投顾助手");
     expect(header.text()).toContain("审核");
-    expect(page.get('[data-testid="back-to-queue"]').text()).toBe("返回队列");
+    expect(page.get('[data-testid="back-to-workspace"]').text()).toBe("返回队列");
     expect(page.find('[data-testid="review-decision"]').exists()).toBe(true);
   });
 
@@ -213,7 +213,7 @@ describe("审核页", () => {
     const header = page.get('[data-testid="page-header"]');
     expect(header.get(".page-header__title").text()).toBe("查看方案");
     expect(header.get(".page-header__crumb-current").text()).toBe("查看方案");
-    expect(page.get('[data-testid="back-to-queue"]').text()).toBe("返回投顾助手");
+    expect(page.get('[data-testid="back-to-workspace"]').text()).toBe("返回投顾助手");
     expect(page.find('[data-testid="review-decision"]').exists()).toBe(false);
     expect(page.find('[data-testid="release"]').exists()).toBe(false);
     expect(page.find('[data-testid="reject"]').exists()).toBe(false);

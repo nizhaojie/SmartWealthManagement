@@ -6,6 +6,7 @@ import { flushPromises, mount, type VueWrapper } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { h } from "vue";
 import { createMemoryHistory, createRouter, type Router } from "vue-router";
+import { ApiError } from "@wealth/shared";
 
 const { getReleasedPlan } = vi.hoisted(() => ({ getReleasedPlan: vi.fn() }));
 
@@ -112,6 +113,19 @@ describe("AdvisoryPlanDetailPage", () => {
     expect(text).not.toContain("客户风险承受等级");
     // 预警的措辞是写给顾问的。
     expect(text).not.toContain("请核实后再采用");
+  });
+
+  // 他人名下的 id 与不存在的 id 都由服务端回 404；服务端那句「尚无已放行的方案」
+  // 是给「最新一份」用的，照抄到详情页会说反事实。
+  it("does not restate the 404 as 尚无已放行的方案", async () => {
+    getReleasedPlan.mockRejectedValue(
+      new ApiError({ code: 404, message: "尚无已放行的方案", data: null, trace_id: "" }),
+    );
+    const wrapper = await mountPage();
+
+    const error = wrapper.get('[data-testid="plan-error"]').text();
+    expect(error).toContain("不存在");
+    expect(error).not.toContain("尚无已放行的方案");
   });
 
   it("returns to 我的方案 with the back entry", async () => {

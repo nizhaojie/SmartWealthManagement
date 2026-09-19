@@ -153,4 +153,18 @@ describe("AdvisoryPlanPage", () => {
     expect(wrapper.get('[data-testid="plans-error"]').text()).toContain("服务内部错误");
     expect(wrapper.find('[data-testid="plans-empty"]').exists()).toBe(false);
   });
+
+  // 尚无定稿时，请求进度就是页面上唯一该有内容的位置——它拉不到时不能只剩页头。
+  it("explains a failed 方案请求进度 load instead of leaving a blank page", async () => {
+    listReleasedPlans.mockResolvedValue({ plans: [] });
+    listAdvisoryRequests.mockRejectedValue(
+      new ApiError({ code: 500, message: "服务内部错误", data: null, trace_id: "" }),
+    );
+    const wrapper = await mountPage();
+
+    const notice = wrapper.get('[data-testid="requests-error"]').text();
+    expect(notice).toContain("方案请求进度加载失败");
+    expect(notice).toContain("服务内部错误");
+    expect(wrapper.find('[data-testid="plans-empty"]').exists()).toBe(false);
+  });
 });

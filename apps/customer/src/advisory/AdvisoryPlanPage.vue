@@ -23,6 +23,7 @@ const plansError = ref("");
 const requests = ref<AdvisoryRequest[]>([]);
 // 「请求拉取成功」与「请求为空」要分得开：接口故障不该被说成「你还没提过请求」。
 const requestsLoaded = ref(false);
+const requestsError = ref("");
 
 // 两级空状态：无定稿但有请求 → 空状态位置直接渲染请求进度；两者都无 → 引导去产品筛选。
 const showOnboarding = computed(
@@ -48,11 +49,15 @@ async function loadPlans(): Promise<void> {
 }
 
 async function loadRequests(): Promise<void> {
+  requestsError.value = "";
   try {
     requests.value = (await listAdvisoryRequests()).requests;
     requestsLoaded.value = true;
-  } catch {
-    // 请求进度拉不到不影响已放行的方案：少渲染一个分区，而不是把整页判为失败。
+  } catch (error) {
+    // 请求进度拉不到不影响已放行的方案，但也不能一声不响：尚无定稿时它就是
+    // 页面上唯一该有内容的位置，留白会让客户以为系统坏了（Q6 不留一块空白）。
+    requestsError.value =
+      error instanceof ApiError ? `方案请求进度加载失败：${error.message}` : "方案请求进度加载失败";
   }
 }
 
@@ -105,6 +110,10 @@ onMounted(() => {
     </p>
 
     <AdvisoryRequestList :requests="requests" />
+
+    <p v-if="requestsError" class="plans__error" role="alert" data-testid="requests-error">
+      {{ requestsError }}
+    </p>
 
     <PanelCard v-if="showOnboarding" title="还没有收到方案">
       <p class="plans__empty" data-testid="plans-empty">

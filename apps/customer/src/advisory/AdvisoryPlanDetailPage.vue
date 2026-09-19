@@ -32,8 +32,15 @@ async function load(): Promise<void> {
   try {
     plan.value = await getReleasedPlan(finalId.value);
   } catch (error) {
-    // 不属于自己的 id 由服务端回 404，这里照 404 的语义显示。
-    errorMessage.value = error instanceof ApiError ? error.message : "方案加载失败";
+    // 不属于自己的 id 与不存在同义（服务端回 404，不确认他人资源是否存在）。
+    // 服务端那句「尚无已放行的方案」是给「最新一份」用的：挂在详情页上，客户
+    // 明明有别的方案却读到「还没有方案」，与事实相反。
+    errorMessage.value =
+      error instanceof ApiError
+        ? error.code === 404
+          ? "打不开这份方案：它不存在，或不属于当前账号。"
+          : error.message
+        : "方案加载失败";
   } finally {
     loading.value = false;
   }

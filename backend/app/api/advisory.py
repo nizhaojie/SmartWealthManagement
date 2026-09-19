@@ -9,7 +9,7 @@ from app.advisory.comments import add_comment, list_comments
 from app.advisory.draft import get_draft, serialize_draft
 from app.advisory.final import (
     get_final_by_draft_id,
-    get_final_for_customer,
+    get_final_for_customer_by_id,
     get_latest_final_for_customer,
     list_finals_for_customer,
     serialize_final,
@@ -207,11 +207,11 @@ def customer_get_advisory_plan_by_id(
     db: Session = Depends(get_session),
 ):
     # 范围由 id 与调用者共同圈定，不是由令牌单独兜住——越权检查显式写在
-    # get_final_for_customer 里，别人的定稿在这里与不存在同义（404）。
+    # get_final_for_customer_by_id 里，别人的定稿在这里与不存在同义（404）。
     return ok(
         serialize_final_for_customer(
             db,
-            get_final_for_customer(db, final_id=final_id, customer_id=auth.subject_id),
+            get_final_for_customer_by_id(db, final_id=final_id, customer_id=auth.subject_id),
         )
     )
 

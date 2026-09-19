@@ -49,10 +49,13 @@ def get_final_by_draft_id(db: Session, draft_id: int) -> AdvisoryFinal:
 
 
 def get_latest_final_for_customer(db: Session, *, customer_id: int) -> AdvisoryFinal:
+    # 排序口径与 list_finals_for_customer 一致：都是「最新一份」的另一个
+    # 出口，两处口径分叉会让客户在列表首行与「最新一份」之间看到不同的
+    # 方案。released_at 相同时用 id 兜底，结果才是确定的。
     final = db.scalar(
         select(AdvisoryFinal)
         .where(AdvisoryFinal.customer_id == customer_id)
-        .order_by(AdvisoryFinal.id.desc())
+        .order_by(AdvisoryFinal.released_at.desc(), AdvisoryFinal.id.desc())
     )
     if final is None:
         raise AppError(404, FINAL_NOT_FOUND_MESSAGE)
@@ -69,7 +72,7 @@ def list_finals_for_customer(db: Session, *, customer_id: int) -> list[AdvisoryF
     )
 
 
-def get_final_for_customer(db: Session, *, final_id: int, customer_id: int) -> AdvisoryFinal:
+def get_final_for_customer_by_id(db: Session, *, final_id: int, customer_id: int) -> AdvisoryFinal:
     """按 id 取一份定稿，但只在这份定稿属于该客户时才给。
 
     这个接口不像 `get_latest_final_for_customer` 那样天然被令牌圈定范围，
@@ -105,11 +108,16 @@ def _serialize_candidate_for_customer(candidate: dict) -> dict:
     return {field: candidate.get(field) for field in CUSTOMER_VISIBLE_PRODUCT_FIELDS}
 
 
-def serialize_final_for_customer(db: Session, final: AdvisoryFinal) -> dict:
+def _advisor_name(db: Session, final: AdvisoryFinal) -> str | None:
+    """两端都要「方案由哪位顾问出具」，这段查询不因裁剪而分叉。"""
     advisor = db.get(Employee, final.advisor_id)
+    return advisor.real_name if advisor else None
+
+
+def serialize_final_for_customer(db: Session, final: AdvisoryFinal) -> dict:
     return {
         "id": final.id,
-        "advisor_name": advisor.real_name if advisor else None,
+        "advisor_name": _advisor_name(db, final),
         "candidates": [_serialize_candidate_for_customer(c) for c in final.candidates],
         "allocation_suggestion": final.allocation_suggestion,
         "released_at": final.released_at.isoformat(),
@@ -120,13 +128,12 @@ def serialize_final_for_customer(db: Session, final: AdvisoryFinal) -> dict:
 def serialize_final(db: Session, final: AdvisoryFinal) -> dict:
     # 客户要知道方案是谁出具的才能找得到人（见客户故事「看到方案由哪位
     # 顾问出具」），所以定稿在这里带出顾问姓名，不只是一个内部的 advisor_id。
-    advisor = db.get(Employee, final.advisor_id)
     return {
         "id": final.id,
         "draft_id": final.draft_id,
         "customer_id": final.customer_id,
         "advisor_id": final.advisor_id,
-        "advisor_name": advisor.real_name if advisor else None,
+        "advisor_name": _advisor_name(db, final),
         "content_classification": final.content_classification,
         "candidates": final.candidates,
         "allocation_suggestion": final.allocation_suggestion,

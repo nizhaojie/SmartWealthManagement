@@ -281,6 +281,12 @@ def test_released_finals_are_listed_newest_first_with_the_advisor_confirmed_allo
     assert detail.status_code == 200
     assert detail.json()["data"] == delivered
 
+    # 「最新一份」与列表首行是同一个口径，两个出口不该给出不同的方案。
+    latest = auth_client.get(
+        "/api/customer/advisory/plan", headers=_customer_headers(auth_client, username)
+    ).json()["data"]
+    assert latest == plans[0]
+
 
 def test_the_customer_delivery_view_carries_no_internal_fields(auth_client: TestClient, customer):
     customer_id, username = customer

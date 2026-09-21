@@ -4,6 +4,7 @@ import { useRoute, useRouter } from "vue-router";
 import { AppShell, type AppShellNavItem } from "@wealth/shared";
 import { useAdvisoryQueueStore } from "../advisory/queueStore";
 import { useAuthStore } from "../stores/auth";
+import { useLayoutStore } from "../stores/layout";
 import { iconForModule } from "./moduleIcons";
 import { getModule, visibleModules } from "./modules";
 import { providePageSlots } from "./pageSlots";
@@ -12,11 +13,20 @@ import RiskAlertSummaryCard from "./RiskAlertSummaryCard.vue";
 const route = useRoute();
 const router = useRouter();
 const auth = useAuthStore();
+const layout = useLayoutStore();
 // 待办计数的唯一来源，与审核页卡片标题读的是同一份（见 advisory/queueStore）。
 const queue = useAdvisoryQueueStore();
 
 // 壳把两个注入通道交给页面；没有页面注入检查器时 AppShell 自动塌成两栏。
 const pageSlots = providePageSlots();
+
+// 折叠状态归 layout store 持有：AppShell 是受控组件，侧栏触发条点击后 emit
+// update:sidebarCollapsed，这里用 v-model 把它接回 store 写回 localStorage。
+// 检查器折叠是纯 prop（开关在顶栏），直接读 store 的布尔。
+const sidebarCollapsed = computed({
+  get: () => layout.sidebarCollapsed,
+  set: (next: boolean) => layout.setSidebarCollapsed(next),
+});
 
 const navItems = computed<AppShellNavItem[]>(() =>
   visibleModules(auth.currentEmployee?.employee_role).map((module) => ({
@@ -65,6 +75,8 @@ async function onLogout(): Promise<void> {
 
 <template>
   <AppShell
+    v-model:sidebar-collapsed="sidebarCollapsed"
+    :inspector-collapsed="layout.inspectorCollapsed"
     :nav-items="navItems"
     :active-key="activeKey"
     brand-subtitle="Internal Workbench"
@@ -98,6 +110,18 @@ async function onLogout(): Promise<void> {
       <span class="shell__identity" data-testid="current-employee">
         {{ auth.currentEmployee?.real_name }} · {{ auth.currentEmployee?.employee_role }}
       </span>
+      <!-- 检查器开关只在页面注入检查器时出现；折叠是壳布局偏好，与页面是否注入是两回事。
+           「检查器」这个词留在应用层，shared 只认 inspectorCollapsed 布尔。 -->
+      <button
+        v-if="pageSlots.inspector.value"
+        type="button"
+        class="shell__inspector-toggle"
+        data-testid="inspector-toggle"
+        :aria-expanded="!layout.inspectorCollapsed"
+        @click="layout.toggleInspector()"
+      >
+        {{ layout.inspectorCollapsed ? "展开检查器" : "检查器" }}
+      </button>
     </template>
 
     <template #sidebar-footer>
@@ -146,5 +170,21 @@ async function onLogout(): Promise<void> {
   color: var(--wm-text-muted);
   font-size: 0.85rem;
   white-space: nowrap;
+}
+
+/* 检查器开关：与登出同源的次级按钮观感，aria-expanded 反映检查器展开态 */
+.shell__inspector-toggle {
+  padding: var(--wm-space-1) var(--wm-space-3);
+  border: 1px solid var(--wm-border);
+  border-radius: var(--wm-radius-sm);
+  background-color: var(--wm-bg-card);
+  color: var(--wm-text-muted);
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.shell__inspector-toggle:hover {
+  color: var(--wm-text-primary);
+  border-color: var(--wm-text-muted);
 }
 </style>

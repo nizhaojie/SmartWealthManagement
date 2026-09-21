@@ -90,6 +90,8 @@
 
   /* 布局常量 */
   --wm-sidebar-width: 248px;
+  /* 左栏折叠成图标条的宽度（EP el-menu 惯例），只有 AppShell 折叠态引用 */
+  --wm-sidebar-width-collapsed: 64px;
   --wm-topbar-height: 60px;
   --wm-inspector-width: 336px;
   /* customer 主区限宽居中（02 未给，为本 slice 新增） */

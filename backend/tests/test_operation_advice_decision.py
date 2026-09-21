@@ -3,13 +3,15 @@
 Seam：后端 HTTP 层。链路从客户经理发起的原稿出发：顾问放行 → 客户可见 → 客户接受或拒绝。
 断言落在响应、库里的决定记录与交易上。
 
-这一份盯住四件事：
+这一份盯住五件事：
 
 - **护栏 5 的第二个出口**：未放行的建议在任何客户侧接口都读不到；
 - **发起与放行不落进同一个人手里**：客户经理调用放行接口被拒绝；
 - **状态集与有效期**：`待客户决定 → 已接受 / 已拒绝 / 已过期`，7 个自然日；
 - **接受即成交，且是一次原子操作**：复用受理服务与同一个交易事件入海口，校验不过则
-  接受失败、建议留在待客户决定、库里不留任何交易。
+  接受失败、建议留在待客户决定、库里不留任何交易；
+- **赎回按草案里的份额成交**（ADR-0021）：部分赎回按比例减持、份额恰等持仓时清仓、
+  客户自己动过持仓导致份额不足则接受失败，份额列为空的历史行仍按当下全部成交。
 """
 
 from __future__ import annotations
@@ -72,6 +74,8 @@ REJECT_PATH = "/api/internal/operation-advice/{advice_id}/reject"
 MY_ADVICE_PATH = "/api/customer/operation-advice"
 
 HELD_STATUS = "持有中"
+# 份额归零的持仓不再是「持有中」（受理侧 `order_acceptance.CLEARED_STATUS`）。
+CLEARED_STATUS = "已清仓"
 # 新客户在应用里拿不到钱：余额只来自种子（Q20，本 slice 不做入金）。测试因此直接写
 # 一个资金账户——它是演示起点，不是被测行为。
 SEEDED_BALANCE = Decimal("500000.00")
@@ -200,6 +204,88 @@ def _holding_status(customer_id: int, product_code: str) -> str:
     return status
 
 
+def _holding(customer_id: int, product_code: str) -> dict:
+    """这一笔持仓的四个数：份额、成本、市值与状态（成交后的对照基准）。"""
+    engine = _engine()
+    try:
+        with OrmSession(engine) as session:
+            row = session.scalar(
+                select(Holding)
+                .join(Product, Product.id == Holding.product_id)
+                .where(
+                    Holding.customer_id == customer_id,
+                    Product.product_code == product_code,
+                )
+            )
+    finally:
+        engine.dispose()
+    assert row is not None
+    return {
+        "shares": row.shares,
+        "cost_amount": row.cost_amount,
+        "current_value": row.current_value,
+        "status": row.status,
+    }
+
+
+def _set_holding_shares(
+    customer_id: int, *, product_code: str, shares: Decimal
+) -> None:
+    """把持仓改成另一个份额：模拟「建议生成之后客户自己动过持仓」。
+
+    与 `_set_balance` 一样，这是场景的起点而不是被测行为，因此直接改库。成本与市值按
+    同一比例同向调整，持仓仍自洽——受理侧只读份额，但让测试数据自相矛盾没有好处。
+    """
+    engine = _engine()
+    try:
+        with OrmSession(engine) as session:
+            holding = session.scalar(
+                select(Holding)
+                .join(Product, Product.id == Holding.product_id)
+                .where(
+                    Holding.customer_id == customer_id,
+                    Product.product_code == product_code,
+                )
+            )
+            assert holding is not None
+            ratio = shares / holding.shares
+            holding.shares = shares
+            holding.cost_amount = (holding.cost_amount * ratio).quantize(Decimal("0.01"))
+            holding.current_value = (holding.current_value * ratio).quantize(
+                Decimal("0.01")
+            )
+            session.commit()
+    finally:
+        engine.dispose()
+
+
+def _stored_shares(advice_id: int) -> Decimal | None:
+    """草案里存的赎回份额（改动之后落库的行：赎回必带份额）。"""
+    engine = _engine()
+    try:
+        with OrmSession(engine) as session:
+            return session.scalar(
+                select(OperationAdviceDraft.redeemed_shares).where(
+                    OperationAdviceDraft.id == advice_id
+                )
+            )
+    finally:
+        engine.dispose()
+
+
+def _clear_redeemed_shares(advice_id: int) -> None:
+    """把草案的份额列清空：还原成改动之前落库的那一行（空值 = 全部赎回）。"""
+    engine = _engine()
+    try:
+        with OrmSession(engine) as session:
+            draft = session.get(OperationAdviceDraft, advice_id)
+            assert draft is not None
+            draft.redeemed_shares = None
+            session.commit()
+    finally:
+        engine.dispose()
+
+
 def _delete_customer(customer_id: int) -> None:
     """清掉这位客户的一切，顺序即外键依赖顺序。
 
@@ -323,11 +409,17 @@ def customer_of_manager(auth_client: TestClient) -> Iterator[dict]:
 # ---------------------------------------------------------------------------
 
 
-def _advice_body(client: TestClient, *, customer_id: int, direction: str) -> dict:
+def _advice_body(
+    client: TestClient,
+    *,
+    customer_id: int,
+    direction: str,
+    shares: Decimal | None = None,
+) -> dict:
     """一份合法的发起请求体：产品与金额 / 份额取自可选项端点。
 
     发起受理读的是同一份计算（ADR-0021），测试因此与端点用同一组输入——申购取第一
-    只买得起的产品的起投金额，赎回取那只持仓的全部份额。
+    只买得起的产品的起投金额，赎回默认取那只持仓的全部份额，也可以指定一个部分份额。
     """
     response = client.get(
         OPTIONS_PATH.format(customer_id=customer_id),
@@ -345,18 +437,26 @@ def _advice_body(client: TestClient, *, customer_id: int, direction: str) -> dic
             "amount": option["min_amount"],
         }
     option = options[0]
+    chosen = shares if shares is not None else option["max_shares"]
     return {
         "direction": direction,
         "product_code": option["product_code"],
-        "shares": option["max_shares"],
+        "shares": str(chosen),
     }
 
 
-def _generate(client: TestClient, customer_id: int, direction: str = "申购") -> dict:
+def _generate(
+    client: TestClient,
+    customer_id: int,
+    direction: str = "申购",
+    shares: Decimal | None = None,
+) -> dict:
     response = client.post(
         OPERATION_ADVICE_PATH.format(customer_id=customer_id),
         headers=_employee_headers(client, MANAGER),
-        json=_advice_body(client, customer_id=customer_id, direction=direction),
+        json=_advice_body(
+            client, customer_id=customer_id, direction=direction, shares=shares
+        ),
     )
     assert response.status_code == 200, response.text
     return response.json()["data"]
@@ -738,10 +838,12 @@ def test_an_unknown_decision_is_rejected(
 def test_accepting_a_redemption_advice_redeems_the_whole_holding(
     auth_client: TestClient, customer_of_manager: dict
 ):
-    """赎回建议的方向是全部赎回：接受按接受时刻的持仓份额成交，受理侧重新校验份额。"""
+    """赎回按草案里的份额成交：份额恰等于持仓时，成交后持仓状态为「已清仓」。"""
     customer_id = customer_of_manager["id"]
     _add_holding(customer_id, product_code="F000003", shares=Decimal("1200.0000"))
     advice = _generate(auth_client, customer_id, "赎回")
+    # 改动之后落库的赎回建议一律带份额——「空 = 全部」是历史行的语义，不是新行的写法。
+    assert _stored_shares(advice["id"]) == Decimal("1200.0000")
     assert _release(auth_client, advice["id"]).status_code == 200
 
     response = _decide(
@@ -753,8 +855,97 @@ def test_accepting_a_redemption_advice_redeems_the_whole_holding(
     assert data["status"] == STATUS_ACCEPTED
     assert data["transaction"]["transaction_type"] == "赎回"
     assert data["transaction"]["shares"] == "1200.0000"
-    # 份额归零的持仓不再「持有中」，资产页与穿透都不再看到它。
-    assert _holding_status(customer_id, "F000003") != HELD_STATUS
+    # 份额归零的持仓不再是「持有中」，资产页与穿透都不再看到它。
+    assert _holding_status(customer_id, "F000003") == CLEARED_STATUS
+
+
+def test_accepting_a_partial_redemption_advice_reduces_the_holding_proportionally(
+    auth_client: TestClient, customer_of_manager: dict
+):
+    """部分赎回：接受后剩余份额、成本与市值按比例减持，持仓状态仍是「持有中」。"""
+    customer_id = customer_of_manager["id"]
+    _add_holding(customer_id, product_code="F000003", shares=Decimal("1200.0000"))
+    before = _holding(customer_id, "F000003")
+    advice = _generate(auth_client, customer_id, "赎回", shares=Decimal("600.0000"))
+    assert _stored_shares(advice["id"]) == Decimal("600.0000")
+    assert _release(auth_client, advice["id"]).status_code == 200
+
+    response = _decide(
+        auth_client, advice["id"], DECISION_ACCEPT, customer_of_manager["headers"]
+    )
+    assert response.status_code == 200, response.text
+    data = response.json()["data"]
+
+    assert data["status"] == STATUS_ACCEPTED
+    assert data["transaction"]["transaction_type"] == "赎回"
+    # 成交的是草案里的那一个数，不是接受那一刻的全部持仓。
+    assert data["transaction"]["shares"] == "600.0000"
+
+    after = _holding(customer_id, "F000003")
+    assert after["shares"] == Decimal("600.0000")
+    # 成本与市值各减持一半（净值 1.5，1200 份的成本与市值都是 1800.00），盈亏比例不变。
+    assert after["cost_amount"] == before["cost_amount"] / 2
+    assert after["current_value"] == before["current_value"] / 2
+    assert after["status"] == HELD_STATUS
+
+
+def test_an_acceptance_short_of_shares_stays_awaiting_the_decision(
+    auth_client: TestClient, customer_of_manager: dict
+):
+    """赎回建议生成之后客户自己动过持仓导致份额不足 → 接受失败，建议仍在待客户决定。
+
+    与余额不足同一套语义（`decision._accept` 的既有回滚路径）：决定不落库、不产生交易。
+    """
+    customer_id = customer_of_manager["id"]
+    _add_holding(customer_id, product_code="F000003", shares=Decimal("1200.0000"))
+    advice = _generate(auth_client, customer_id, "赎回", shares=Decimal("600.0000"))
+    assert _release(auth_client, advice["id"]).status_code == 200
+    headers = customer_of_manager["headers"]
+
+    # 建议生成之后客户自己赎到只剩 400 份：草案里的 600 份已经赎不出来了。
+    _set_holding_shares(customer_id, product_code="F000003", shares=Decimal("400.0000"))
+    failed = _decide(auth_client, advice["id"], DECISION_ACCEPT, headers)
+    assert failed.status_code == 400, failed.text
+    assert "超过" in failed.json()["message"]
+
+    assert _stored_decision(advice["id"]) is None
+    assert _transactions_of(customer_id) == []
+    assert _view(auth_client, advice["id"], headers)["status"] == STATUS_AWAITING
+
+    # 客户把持仓补回去之后再来一次：这次按草案的 600 份成交。
+    _set_holding_shares(customer_id, product_code="F000003", shares=Decimal("1200.0000"))
+    retried = _decide(auth_client, advice["id"], DECISION_ACCEPT, headers)
+    assert retried.status_code == 200, retried.text
+    assert retried.json()["data"]["status"] == STATUS_ACCEPTED
+    assert _holding(customer_id, "F000003")["shares"] == Decimal("600.0000")
+
+
+def test_a_legacy_redemption_advice_without_shares_redeems_the_current_whole_holding(
+    auth_client: TestClient, customer_of_manager: dict
+):
+    """改动之前的赎回建议（份额列为空）接受时仍按当下的全部份额成交。
+
+    空值 = 全部赎回是既有语义的忠实延续，不是特例——它只服务改动之前已有的行。
+    """
+    customer_id = customer_of_manager["id"]
+    _add_holding(customer_id, product_code="F000003", shares=Decimal("1200.0000"))
+    advice = _generate(auth_client, customer_id, "赎回", shares=Decimal("600.0000"))
+    assert _release(auth_client, advice["id"]).status_code == 200
+    # 把这一行还原成改动之前落库的形状：份额列为空。
+    _clear_redeemed_shares(advice["id"])
+
+    # 期间客户自己动过持仓：现在只剩 900 份。旧语义按当下的全部成交——900 份，而不是
+    # 草案里那个早已不存在的 600（新行会因份额不足而失败，两者由此分得开）。
+    _set_holding_shares(customer_id, product_code="F000003", shares=Decimal("900.0000"))
+    response = _decide(
+        auth_client, advice["id"], DECISION_ACCEPT, customer_of_manager["headers"]
+    )
+    assert response.status_code == 200, response.text
+    data = response.json()["data"]
+
+    assert data["status"] == STATUS_ACCEPTED
+    assert data["transaction"]["shares"] == "900.0000"
+    assert _holding_status(customer_id, "F000003") == CLEARED_STATUS
 
 
 def test_another_customer_cannot_read_or_decide_on_it(

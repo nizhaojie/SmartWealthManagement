@@ -25,9 +25,10 @@
 同时不发生；校验不过时回滚，建议留在待客户决定——客户补足余额后可以再来一次，
 不存在「已接受但成交失败」这个状态。
 
-赎回建议的方向是**全部赎回**（`app.operation_advice.reasons` 的理由就是这么写的），
-接受时按**接受时刻**的持仓份额成交：受理侧的份额校验会重新跑一遍，持仓变少了就是
-接受失败，不会成交出一个比客户实际持有更多的份额。
+赎回建议带一个**发起人选定的份额**（ADR-0021），接受时按它成交：受理侧的份额校验会
+重新跑一遍，客户自己动过持仓导致份额不足就是接受失败，不会静默地按当下的全部持仓成交。
+份额列为空表示「全部赎回」——那是改动之前落库的行（当时只存金额），它按接受那一刻的
+全部持仓成交（`_redemption_shares` 的回退分支），旧语义因此原样延续。
 """
 
 from __future__ import annotations
@@ -295,9 +296,22 @@ def get_my_advice(db: Session, *, advice_id: int, customer_id: int, now: datetim
 
 
 def _current_holding_shares(db: Session, *, draft: OperationAdviceDraft) -> Decimal:
+    """接受那一刻的持仓份额——**只**服务份额列为空的历史行（「空 = 全部赎回」）。"""
     return list_holding_shares(db, customer_id=draft.customer_id).get(
         draft.product_code, ZERO
     )
+
+
+def _redemption_shares(db: Session, *, draft: OperationAdviceDraft) -> Decimal:
+    """这次赎回的份额：发起人选定并存进草案的那一个。
+
+    份额列为空表示「全部赎回」——那是改动之前落库的行（当时只存金额，成交用的是接受
+    那一刻的全部持仓）。空值在这里被读成「当下的全部持仓」，旧语义因此原样延续；新写入
+    的赎回建议一律带份额，不会走到这条回退分支。
+    """
+    if draft.redeemed_shares is not None:
+        return draft.redeemed_shares
+    return _current_holding_shares(db, draft=draft)
 
 
 def _accept(
@@ -328,7 +342,7 @@ def _accept(
             publisher=publisher,
             customer_id=draft.customer_id,
             product_code=draft.product_code,
-            shares=_current_holding_shares(db, draft=draft),
+            shares=_redemption_shares(db, draft=draft),
             now=now,
         )
     except Exception:

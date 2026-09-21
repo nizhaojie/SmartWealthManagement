@@ -85,8 +85,16 @@ function railItem(app: VueWrapper, id: number) {
   return app.get(`.app-shell__inspector [data-testid="history-item-${id}"]`);
 }
 
-function questionBox(app: VueWrapper): HTMLTextAreaElement {
-  return app.get("textarea[name='question']").element as HTMLTextAreaElement;
+/**
+ * 提问框现在是单行输入（`el-input` 的默认形态，见 `DataAnalysisWorkspace.vue`）。
+ * 三处断言都从这里取它，形态再变一次时只需改这一行。
+ */
+function questionInput(app: VueWrapper) {
+  return app.get("input[name='question']");
+}
+
+function questionText(app: VueWrapper): string {
+  return (questionInput(app).element as HTMLInputElement).value;
 }
 
 beforeEach(() => {
@@ -131,12 +139,11 @@ describe("数据分析的历史查询右侧栏", () => {
 
   it("点击历史记录不改写提问框", async () => {
     const app = await mountAnalysis();
-    const box = app.get("textarea[name='question']");
-    await box.setValue("我正在输入的问题");
+    await questionInput(app).setValue("我正在输入的问题");
 
     await railItem(app, 7).trigger("click");
 
-    expect(questionBox(app).value).toBe("我正在输入的问题");
+    expect(questionText(app)).toBe("我正在输入的问题");
   });
 
   it("提问后收起已选中的历史记录", async () => {
@@ -144,7 +151,7 @@ describe("数据分析的历史查询右侧栏", () => {
     await railItem(app, 7).trigger("click");
     expect(app.find("[data-testid='history-detail']").exists()).toBe(true);
 
-    await app.get("textarea[name='question']").setValue("这个月新增了几个客户");
+    await questionInput(app).setValue("这个月新增了几个客户");
     // jsdom 不实现「点 submit 按钮即提交表单」，这里直接触发 submit 事件（与登录页用例同一手法）。
     await app.get("form.ask").trigger("submit");
     await flushPromises();
@@ -166,6 +173,6 @@ describe("数据分析的历史查询右侧栏", () => {
 
     await app.get("[data-testid='example-question']").trigger("click");
 
-    expect(questionBox(app).value).toBe(EXAMPLE);
+    expect(questionText(app)).toBe(EXAMPLE);
   });
 });

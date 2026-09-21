@@ -6,8 +6,7 @@ import { listCustomers } from "../customers/api";
 import type { CustomerListItem } from "../customers/types";
 import { errorMessage, formatDateTime } from "../format";
 import SummaryCard from "../inspector/SummaryCard.vue";
-import { actionButton } from "../shell/actionButton";
-import { useInspector, useTopbarActions } from "../shell/pageSlots";
+import { useInspector } from "../shell/pageSlots";
 import { useAuthStore } from "../stores/auth";
 import { listWorkOrders } from "./api";
 import ExternalWorkOrderForm from "./ExternalWorkOrderForm.vue";
@@ -108,13 +107,6 @@ useInspector(() => ({
   },
 }));
 
-useTopbarActions(() => ({
-  component: actionButton({
-    label: showCreate.value ? "收起建单" : "创建外部工单",
-    name: "toggle-create-work-order",
-    onClick: toggleCreate,
-  }),
-}));
 </script>
 
 <template>
@@ -164,14 +156,14 @@ useTopbarActions(() => ({
       </form>
     </PanelCard>
 
-    <ExternalWorkOrderForm v-if="showCreate && isRiskOfficer" @created="onCreated" />
-    <PanelCard v-else-if="showCreate" title="外部工单创建">
-      <p class="work-orders__hint" data-testid="create-read-only">
-        当前角色只能查看工单；建单由风控专员完成。
-      </p>
-    </PanelCard>
+    <ExternalWorkOrderForm v-if="showCreate" @created="onCreated" @collapse="toggleCreate" />
 
     <PanelCard title="工单列表">
+      <template v-if="isRiskOfficer && !showCreate" #actions>
+        <el-button name="toggle-create-work-order" @click="toggleCreate">
+          创建外部工单
+        </el-button>
+      </template>
       <p v-if="loadError" class="work-orders__error" role="alert" data-testid="work-order-error">
         {{ loadError }}
       </p>

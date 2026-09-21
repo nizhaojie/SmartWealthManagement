@@ -9,7 +9,7 @@ import { createExternalWorkOrder } from "./api";
 import { EXTERNAL_ORDER_TYPES, type ExternalOrderType } from "./types";
 
 // 工单不只来自预警：客户投诉与转人工也走这里建单。
-const emit = defineEmits<{ created: [] }>();
+const emit = defineEmits<{ created: []; collapse: [] }>();
 
 const customers = ref<CustomerListItem[]>([]);
 const formRef = ref<FormInstance | null>(null);
@@ -66,6 +66,11 @@ onMounted(async () => {
 
 <template>
   <PanelCard title="外部工单创建">
+    <template #actions>
+      <el-button name="collapse-create-work-order" @click="emit('collapse')">
+        收起建单
+      </el-button>
+    </template>
     <el-form
       ref="formRef"
       :model="form"

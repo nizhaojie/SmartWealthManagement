@@ -9,7 +9,7 @@
 
 - **形态**：pnpm workspace。两个前端应用 `apps/customer`（客户，5173）、`apps/internal`（内部员工，5174），共享 `packages/shared`；后端 FastAPI 在 `backend/`，不进 workspace。
 - **身份域**（ADR-0004）：客户域与内部域彼此隔离 —— 不同的表、不同的 token audience（`customer-app` / `internal-app`）、不同的前端应用。
-- **Agent 运行时**（ADR-0007）：四个 Agent 是**同一套 LangGraph 运行时上的四份配置**，不是四套独立实现。配置见 `backend/app/agent/config.py`，注册表见 `backend/app/agent/registry.py`。
+- **Agent 运行时**（ADR-0007）：五个 Agent 是**同一套 LangGraph 运行时上的五份配置**，不是五套独立实现。配置见 `backend/app/agent/config.py`，注册表见 `backend/app/agent/registry.py`。
 - **统一响应信封**：`{code, message, data, trace_id}`（`backend/app/http.py`），由 `TraceIdMiddleware` 生成并回写 `x-trace-id`（`backend/app/main.py:51-72`）。
 - **核心约束**：投顾内容必须经理财顾问审核后才能送达客户；确定性判断（适当性过滤、风控阈值、投顾排序）不经过模型。
 
@@ -23,7 +23,7 @@ flowchart LR
 
     subgraph BE["后端 FastAPI :8000"]
         API["app/api/*<br/>30 个 router"]
-        AG["app/agent/*<br/>四个 Agent 配置 + LangGraph 运行时"]
+        AG["app/agent/*<br/>五个 Agent 配置 + LangGraph 运行时"]
         DOM["领域模块<br/>knowledge / profile / suitability /<br/>advisory / analytics / risk_monitoring ..."]
     end
 
@@ -53,15 +53,16 @@ flowchart LR
 
 ---
 
-## 1. 四个 Agent 与功能
+## 1. 五个 Agent 与功能
 
-四个 Agent 的定义（名称、工具集、内容分类默认值、身份域、入口路由）集中在 `backend/app/agent/registry.py:36-65`，由 `GET /api/agents` 只读输出（无鉴权，因为它只是静态路由事实，不含客户数据）。
+五个 Agent 的定义（名称、工具集、内容分类默认值、身份域、入口路由）集中在 `backend/app/agent/registry.py:37-74`，由 `GET /api/agents` 只读输出（无鉴权，因为它只是静态路由事实，不含客户数据）。
 
 | Agent | 中文名 | 身份域 | 入口路由 | 工具集 | 内容分类默认值 |
 |---|---|---|---|---|---|
 | `customer_service` | 智能客服 Agent | customer | `POST /api/customer/chat/messages`、`/stream` | `knowledge_search` | 事实性内容 |
 | `data_analysis` | 数据分析 Agent | internal | `POST /api/internal/analytics/query` | `analytics_query_generation`、`analytics_query_execution` | 事实性内容 |
 | `advisory` | 投顾助手 Agent | internal | `POST /api/internal/advisory/customers/{id}/plan` | `candidate_pool_ranking`、`allocation_suggestion` | **投顾内容**（必须审核） |
+| `operation_advice` | 业务操作 Agent | internal | `POST /api/internal/customers/{id}/operation-advice` | `candidate_pool_query`、`customer_holdings_and_balance_query`、`operation_advice_generation` | **投顾内容**（必须审核） |
 | `risk_monitoring` | 风控监测 Agent | internal | `POST /api/internal/risk-monitoring/query` | `risk_alert_query`、`work_order_operation`、`risk_rule_query` | 事实性内容 |
 
 ### 1.1 智能客服 Agent（`customer_service`）
@@ -144,7 +145,32 @@ flowchart TD
 - 排序三因子：收益（池内归一化）、风险（等级差）、期限匹配；侧重（均衡/收益优先/流动性优先）改变权重，不改代码（`advisory/scoring.py:24`）。
 - 风控告警以「风险标记」形式进入方案（`advisory/warnings.py:41`），来源是事件总线订阅到的风控预警。
 
-### 1.4 风控监测 Agent（`risk_monitoring`）
+### 1.4 业务操作 Agent（`operation_advice`）
+
+**面向对象**：客户经理（发起动作），理财顾问（放行动作）。**能力边界**：输入同样只能是经适当性硬过滤后的**候选池**，加上客户自己的持仓与资金账户；产物是**单笔**操作建议——一个产品、一个方向、一个金额、一条理由（ADR-0017：与投顾助手的分工在产物）。默认产出投顾内容，必须审核。
+
+**运行时图**（`backend/app/operation_advice/graph.py`，与投顾助手共用同一个 checkpointer 与 `interrupt()`）：
+
+```mermaid
+flowchart TD
+    START(["客户经理选定方向：申购 / 赎回"]) --> LCP["load_candidate_pool<br/>候选池 + 持仓 + 份额"]
+    LCP --> LFA["load_funding_account<br/>可用余额"]
+    LFA --> SP["select_product<br/>复用投顾助手的排序<br/>申购：未持有且买得起的第一只<br/>赎回：持有且在池内的第一只"]
+    SP --> BR["build_reason<br/>产品要素 + 持仓与余额的事实"]
+    BR --> PD["persist_draft<br/>落 AI 原稿（不可改）"]
+    PD --> AR["await_review<br/>interrupt 暂停"]
+    AR -->|"理财顾问放行"| REL["已放行（原稿即送达版本）"]
+    AR -->|"驳回（理由必填）"| REJ(["已驳回"])
+```
+
+要点：
+- **不引入第二套排序**：选品复用 `app.advisory.scoring.rank_candidates`，与投顾助手是同一份判断、同一套权重，两个 Agent 不会各排各的。
+- **金额由要素与持仓算出来**：申购取产品起投金额、赎回取该持仓的成交金额，两个数都走 `app.order_acceptance` 的成交口径——生成一条当场会被拒绝的建议没有意义。
+- **三条硬边界**：一次一个产品一个方向（载荷表上各是一列）、金额必填（`amount > 0`）、禁止收益预测与配置比例表述（落在理由的文字上，`operation_advice/reasons.py` 刻意不复用方案的理由生成）。
+- **发起权**：只有客户经理能发起、且只对名下客户；放行仍只有理财顾问（`app/operation_advice/service.py` 与入口依赖各守一道门）。
+- **同一条审核流水线**：原稿 + 「内容类型 + 内容引用」的审核记录（ADR-0020），队列、加锁与中断恢复与方案共用同一条。
+
+### 1.5 风控监测 Agent（`risk_monitoring`）
 
 **面向对象**：风控专员（处置动作）、全体内部员工（查看）。**特点**：主链路是**确定性规则引擎**，不是 LLM。
 
@@ -240,8 +266,13 @@ flowchart TD
     NEO["Neo4j 图谱增强<br/>GraphRAG"] -.-> ADV
     RK["风控预警事件"] -.->|"带风险标记"| ADV
 
+    POOL --> OP["业务操作 Agent<br/>选品 + 方向 + 金额 + 理由"]
+    HOLD -->|"持仓与可用余额"| OP
+    OP --> ODRAFT["操作建议原稿（不可改）"]
+
     DRAFT --> REVIEW{"理财顾问审核"}
-    REVIEW -->|"放行（重新校验候选池）"| FINAL["顾问定稿"]
+    ODRAFT --> REVIEW
+    REVIEW -->|"放行（方案重新校验候选池）"| FINAL["顾问定稿 / 已放行的操作建议"]
     REVIEW -->|"驳回（理由必填）"| BACK["回到顾问继续修改"]
     FINAL --> CUST["客户端 GET /api/customer/advisory/plan<br/>只读最新定稿"]
 
@@ -420,6 +451,7 @@ flowchart TB
 | 产品筛选 | `app/product_screening/` | `/api/customer/products` | `apps/customer/products/` |
 | 资产与持仓穿透 | `app/customer_assets/` | `/api/customer/assets/*` | `apps/customer/assets/` |
 | 投顾助手与审核流 | `app/advisory/` | `/api/internal/advisory/*` | `apps/internal/advisory/` |
+| 操作建议（业务操作 Agent） | `app/operation_advice/` | `/api/internal/customers/{id}/operation-advice` | `apps/internal/customer-relations/`（发起，见 #09） |
 | 客户方案请求 | `app/advisory_request/` | `/api/customer/advisory-requests` | `apps/customer/products/`（提交）、`apps/customer/advisory/`（进度） |
 | 客户侧方案送达 | `app/advisory/final.py` | `/api/customer/advisory/plans` | `apps/customer/advisory/` |
 | 数据分析（NL2SQL） | `app/analytics/` | `/api/internal/analytics/*` | `apps/internal/analytics/` |
@@ -434,7 +466,7 @@ flowchart TB
 
 ## 5. 设计要点速记
 
-1. **四个 Agent 是四份配置，不是四套实现**（ADR-0007）。路由按登录身份在入口确定，不存在运行时的意图分发。
+1. **五个 Agent 是五份配置，不是五套实现**（ADR-0007）。路由按登录身份在入口确定，不存在运行时的意图分发。
 2. **确定性判断不经过模型**：适当性硬过滤、风控阈值、投顾排序、高风险意图识别都是代码。
 3. **未审核内容不可送达**：投顾内容默认分类即投顾内容，AI 原稿永久留存用于举证审核是否为实质性审核。
 4. **Agent 协作走事件总线，广播是增强不是数据通道**：广播失败只记日志，核心链路继续。

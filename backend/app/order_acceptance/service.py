@@ -100,6 +100,21 @@ def _fee(amount: Decimal, fee_rate: Decimal) -> Decimal:
     return _money(amount * fee_rate / PERCENT)
 
 
+def purchase_cost(product: Product, amount: Decimal) -> Decimal:
+    """申购的全部支出：金额 + 手续费。
+
+    公开出来是因为成交口径只有一处：业务操作 Agent 判断一条建议买不买得起时
+    用的也是这个数，自己再算一遍费率迟早与受理侧漂移（差一分钱，建议就成了
+    一条当场会被拒绝的建议）。
+    """
+    return amount + _fee(amount, product.fee_rate)
+
+
+def redemption_amount(product: Product, shares: Decimal) -> Decimal:
+    """赎回的成交金额（毛额）：份额 × 净值。入账金额再扣手续费，口径同此一处。"""
+    return _money(shares * product.nav)
+
+
 def _refresh_profit(holding: Holding) -> None:
     """盈亏两列随份额与成本的变动同步重算，但仍然是存在表里的字段。"""
     profit = _money(holding.current_value - holding.cost_amount)
@@ -279,14 +294,15 @@ def purchase(
     _require_min_amount(product, amount)
     account = _require_account(db, customer_id=customer_id)
     fee = _fee(amount, product.fee_rate)
-    _require_balance(account, amount + fee)
+    cost = purchase_cost(product, amount)
+    _require_balance(account, cost)
 
     # 校验全部通过：从这里开始写库。
     bought = _share(amount / product.nav)
     _apply_purchase(
         db, customer_id=customer_id, product=product, shares=bought, amount=amount, now=now
     )
-    account.available_balance = account.available_balance - amount - fee
+    account.available_balance = account.available_balance - cost
     transaction = _submit(
         db,
         publisher=publisher,
@@ -329,7 +345,7 @@ def redeem(
 
     # 成交金额是毛额（份额 × 净值），手续费单列一行——与申购侧同一个形状，`fin_transaction.amount`
     # 因此始终是成交金额而不是到账金额；到账金额是可用余额这一步的效果。
-    gross = _money(shares * product.nav)
+    gross = redemption_amount(product, shares)
     fee = _fee(gross, product.fee_rate)
     proceeds = gross - fee
     if proceeds <= 0:

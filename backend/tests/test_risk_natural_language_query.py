@@ -184,7 +184,7 @@ def _ask(
 
 
 def test_risk_agent_is_a_config_with_its_domain_tools():
-    # ADR-0007：四个 Agent 是同一套运行时上的四份配置。这份配置的工具集落在风控域内。
+    # ADR-0007：五个 Agent 是同一套运行时上的五份配置。这份配置的工具集落在风控域内。
     assert RISK_MONITORING_CONFIG.name == "risk_monitoring"
     assert set(RISK_MONITORING_CONFIG.tools) == {
         "risk_alert_query",

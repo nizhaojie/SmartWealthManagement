@@ -30,10 +30,11 @@ from app.advisory.review_status import (
     STATUS_IN_PROGRESS,
     STATUS_PENDING,
     STATUS_REJECTED,
+    STATUS_RELEASED,
 )
 from app.advisory.runtime import has_pending_checkpoint
 from app.advisory_request.service import complete_request, reopen_request
-from app.db.models import AdvisoryReview
+from app.db.models import AdvisoryReview, AdvisoryReviewAudit
 from app.exceptions import AppError
 from app.suitability.service import get_candidate_pool
 
@@ -129,6 +130,37 @@ def resume_review(
     except Exception:
         _unclaim(db, review)
         raise
+
+
+def record_decision(
+    db: Session,
+    *,
+    review: AdvisoryReview,
+    action: str,
+    advisor_id: int,
+    reason: str | None,
+    now: datetime,
+) -> None:
+    """把一份决定落在审核记录上：置状态 + 写审核留痕 + 提交。
+
+    两类内容的图在各自的 finalize 节点里都只做这一件事，因此写在流水线里一份
+    （ADR-0020 的单流水线）：分头写两遍的话，改状态集时总有一处会漏，而漏掉的
+    那一处表现为「这份内容永远停在处理中」，不会有任何断言当场失败。
+
+    状态由动作推出，不由调用点给：动作只有放行与驳回两种（迁移里也是这么约束的），
+    让调用点同时传动作与状态，就多了一次可以传错的机会。
+    """
+    review.status = STATUS_RELEASED if action == ACTION_RELEASE else STATUS_REJECTED
+    db.add(
+        AdvisoryReviewAudit(
+            review_id=review.id,
+            advisor_id=advisor_id,
+            action=action,
+            reason=reason,
+            decided_at=now,
+        )
+    )
+    db.commit()
 
 
 def release_review(

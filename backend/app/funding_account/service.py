@@ -12,6 +12,8 @@
 
 from __future__ import annotations
 
+from decimal import Decimal
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -24,14 +26,28 @@ CUSTOMER_NOT_FOUND_MESSAGE = "客户不存在"
 NOT_YOUR_CUSTOMER_MESSAGE = "该客户不在你的名下，无权查看"
 
 
-def get_available_balance(db: Session, *, customer_id: int) -> dict:
+def _require_account(db: Session, *, customer_id: int) -> FundingAccount:
     account = db.scalar(
         select(FundingAccount).where(FundingAccount.customer_id == customer_id)
     )
     if account is None:
         raise AppError(404, ACCOUNT_MISSING_MESSAGE)
+    return account
+
+
+def get_available_balance(db: Session, *, customer_id: int) -> dict:
     # 与 `fin_transaction.amount` 同为两位小数，呈现口径也保持一致。
+    account = _require_account(db, customer_id=customer_id)
     return {"available_balance": format(account.available_balance, "f")}
+
+
+def get_available_balance_value(db: Session, *, customer_id: int) -> Decimal:
+    """可用余额的数值形式。
+
+    需要参与计算的调用方（业务操作 Agent 判断一条建议买不买得起）用这个，
+    不必去解析上面那个呈现用的字符串——两个函数读的是同一行。
+    """
+    return _require_account(db, customer_id=customer_id).available_balance
 
 
 def ensure_can_view(db: Session, employee: Employee, customer_id: int) -> None:

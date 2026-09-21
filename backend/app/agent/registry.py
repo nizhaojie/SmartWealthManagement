@@ -1,6 +1,6 @@
-"""四个 Agent 的统一注册表：类型 → 配置 → 调用入口。
+"""五个 Agent 的统一注册表：类型 → 配置 → 调用入口。
 
-ADR-0007：四个 Agent 是同一套运行时上的四份配置，路由按登录身份在入口处
+ADR-0007：五个 Agent 是同一套运行时上的五份配置，路由按登录身份在入口处
 确定，不存在运行时的意图分发。这张表是「按 Agent 类型路由」的唯一出处——
 某个 Agent 类型叫什么、装配哪份配置、从哪个入口被哪类身份调到，都只在这里
 写一遍；`GET /api/agents` 把它读出来，端到端测试据此验证路由。
@@ -12,6 +12,7 @@ from app.agent.config import (
     ADVISORY_CONFIG,
     CUSTOMER_SERVICE_CONFIG,
     DATA_ANALYSIS_CONFIG,
+    OPERATION_ADVICE_CONFIG,
     AgentConfig,
     RISK_MONITORING_CONFIG,
 )
@@ -55,6 +56,14 @@ AGENT_ENTRIES: tuple[AgentEntry, ...] = (
         # 投顾助手的入口是生成方案这一条；审核与读取是理财顾问工作台的路由，
         # 不是调用 Agent 本身。
         entry_path="/api/internal/advisory/customers/{customer_id}/plan",
+    ),
+    AgentEntry(
+        agent_type=OPERATION_ADVICE_CONFIG.name,
+        config=OPERATION_ADVICE_CONFIG,
+        identity_domain=DOMAIN_INTERNAL,
+        # 业务操作 Agent 的入口是客户经理发起建议这一条；放行、驳回与读取是理财
+        # 顾问工作台的路由，不是调用 Agent 本身。
+        entry_path="/api/internal/customers/{customer_id}/operation-advice",
     ),
     AgentEntry(
         agent_type=RISK_MONITORING_CONFIG.name,

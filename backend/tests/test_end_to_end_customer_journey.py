@@ -2,8 +2,8 @@
 
 Seam：后端 HTTP 层，不引入浏览器。一条贯穿全系统的长用例把九份 spec 的接缝
 真的串起来走一遍：开户 → 风险评测 → 咨询 → 产品筛选 → 请理财顾问出具方案 →
-理财顾问审核放行 → 交易 → 风控触发预警 → 工单处置。两位测试客户（私行与普通
-两个客户分层）各走一遍。
+理财顾问审核放行 → 客户经理发起操作建议 → 交易 → 风控触发预警 → 工单处置。
+两位测试客户（私行与普通两个客户分层）各走一遍。
 
 外部模型与向量化走 fake provider（确定性、零外部调用），向量检索落在测试
 Milvus 集合上，图谱指向一个从不重建的空命名空间——因此这里验证的是真实链路
@@ -19,6 +19,7 @@ import re
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
+from decimal import Decimal
 from pathlib import Path
 from uuid import uuid4
 
@@ -41,11 +42,12 @@ MANAGER = "manager1"
 ADVISOR = "advisor1"
 RISK_OFFICER = "risk1"
 
-# 统一入口（app.agent.registry）给出的四个 Agent 入口路由；旅程按它们发请求，
+# 统一入口（app.agent.registry）给出的五个 Agent 入口路由；旅程按它们发请求，
 # 注册表漂移会让这些常量对不上。
 CHAT_PATH = "/api/customer/chat/messages"
 ANALYTICS_PATH = "/api/internal/analytics/query"
 ADVISORY_PLAN_PATH = "/api/internal/advisory/customers/{customer_id}/plan"
+OPERATION_ADVICE_PATH = "/api/internal/customers/{customer_id}/operation-advice"
 RISK_QUERY_PATH = "/api/internal/risk-monitoring/query"
 
 ANALYTICS_QUESTION = "统计各风险等级的在售产品数量"
@@ -69,6 +71,10 @@ FAQ_CONTENT = "# 客户常见问题\n\n## 赎回后资金多久到账\n\n客户�
 FAQ_QUESTION = "客户办理赎回业务后，赎回资金将在三个工作日内到账。"
 
 RISK_INTENT_QUESTION = "我想分几笔转，转账限额是多少？"
+
+# 旅程开的客户在应用里拿不到钱：余额只来自种子（Q20，本 slice 不做入金）。旅程因此
+# 直接给他的资金账户写一个余额——它是演示的起点，不是被测行为。
+JOURNEY_BALANCE = Decimal("2000000.00")
 
 INFO_LOG = Path(__file__).resolve().parent.parent / "logs" / "info.log"
 
@@ -190,6 +196,22 @@ def _open_account(client: TestClient, persona: dict) -> dict:
     return response.json()["data"]
 
 
+def _fund_customer_account(customer_id: int) -> None:
+    """给旅程客户一笔可动的钱，见 `JOURNEY_BALANCE`。"""
+    engine = _engine()
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO fin_funding_account (customer_id, available_balance)"
+                    " VALUES (:id, :balance)"
+                ),
+                {"id": customer_id, "balance": JOURNEY_BALANCE},
+            )
+    finally:
+        engine.dispose()
+
+
 def _chat(client: TestClient, headers: dict[str, str], message: str) -> dict:
     response = client.post(CHAT_PATH, headers=headers, json={"message": message})
     assert response.status_code == 200, response.text
@@ -214,13 +236,15 @@ def _customer_id_by_username(username: str) -> int | None:
         return session.scalar(select(Customer.id).where(Customer.username == username))
 
 
-# 清理顺序即外键依赖顺序（与回放模式测试同一份清单，另加方案请求表）。
+# 清理顺序即外键依赖顺序（与回放模式测试同一份清单，另加方案请求表与资金账户）。
 _CUSTOMER_CHILD_TABLES = (
     "biz_advisory_request",
     "biz_work_order",
     "fin_risk_alert",
     "biz_risk_focus",
     "fin_transaction",
+    "fin_transfer",
+    "fin_funding_account",
     "fin_holdings",
     "fin_suitability_decision",
     "fin_risk_assessment",
@@ -234,6 +258,34 @@ def _delete_customer(customer_id: int) -> None:
     engine = _engine()
     try:
         with engine.begin() as connection:
+            # 操作建议那一侧：留言 -> 留痕 -> 审核记录 -> 载荷。审核记录按「内容类型 +
+            # 内容引用」定位——它的 content_ref 指向载荷表、draft_id 为空，按 draft_id
+            # 清理会一条都删不掉，而待审队列会把它们照样列出来。
+            for table, key in (
+                ("biz_advisory_review_comment", "review_id"),
+                ("biz_advisory_review_audit", "review_id"),
+            ):
+                connection.execute(
+                    text(
+                        f"DELETE FROM {table} WHERE {key} IN ("
+                        " SELECT id FROM biz_advisory_review"
+                        " WHERE content_type = '操作建议' AND content_ref IN ("
+                        "  SELECT id FROM biz_operation_advice_draft WHERE customer_id = :id))"
+                    ),
+                    {"id": customer_id},
+                )
+            connection.execute(
+                text(
+                    "DELETE FROM biz_advisory_review"
+                    " WHERE content_type = '操作建议' AND content_ref IN ("
+                    "  SELECT id FROM biz_operation_advice_draft WHERE customer_id = :id)"
+                ),
+                {"id": customer_id},
+            )
+            connection.execute(
+                text("DELETE FROM biz_operation_advice_draft WHERE customer_id = :id"),
+                {"id": customer_id},
+            )
             connection.execute(
                 text(
                     "DELETE FROM biz_advisory_review_comment WHERE review_id IN ("
@@ -319,20 +371,29 @@ def test_full_customer_journey_for_both_personas(journey_client: TestClient):
     knowledge_id = upload.json()["data"]["knowledge_id"]
 
     try:
-        # 统一入口按 Agent 类型列出四个 Agent；旅程随后就按它给出的入口路由，
-        # 把四个 Agent 逐一打到真实链路上。
+        # 统一入口按 Agent 类型列出五个 Agent；旅程随后就按它给出的入口路由，
+        # 把五个 Agent 逐一打到真实链路上。
         agents = client.get("/api/agents")
         assert agents.status_code == 200, agents.text
         entries = {entry["agent_type"]: entry for entry in agents.json()["data"]}
-        assert set(entries) == {"customer_service", "data_analysis", "advisory", "risk_monitoring"}
+        assert set(entries) == {
+            "customer_service",
+            "data_analysis",
+            "advisory",
+            "operation_advice",
+            "risk_monitoring",
+        }
         assert entries["customer_service"]["identity_domain"] == "customer"
         assert entries["advisory"]["identity_domain"] == "internal"
+        assert entries["operation_advice"]["identity_domain"] == "internal"
         assert entries["customer_service"]["tools"] == ["knowledge_search"]
         assert entries["advisory"]["content_classification_default"] == "投顾内容"
+        assert entries["operation_advice"]["content_classification_default"] == "投顾内容"
         # 注册表给出的就是旅程实际调用的路由——漂移即失败。
         assert entries["customer_service"]["entry_path"] == CHAT_PATH
         assert entries["data_analysis"]["entry_path"] == ANALYTICS_PATH
         assert entries["advisory"]["entry_path"] == ADVISORY_PLAN_PATH
+        assert entries["operation_advice"]["entry_path"] == OPERATION_ADVICE_PATH
         assert entries["risk_monitoring"]["entry_path"] == RISK_QUERY_PATH
 
         for persona_factory, expected_level in (
@@ -349,14 +410,20 @@ def test_full_customer_journey_for_both_personas(journey_client: TestClient):
                 entries=entries,
             )
 
-        # 四个 Agent 都已在本旅程中被打到过（各自响应里的 Agent 签名在旅程内断言），
-        # 响应时间统计按 agent_type 分组，四个都在场。
+        # 五个 Agent 都已在本旅程中被打到过（各自响应里的 Agent 签名在旅程内断言），
+        # 响应时间统计按 agent_type 分组，五个都在场。
         times = client.get(
             "/api/internal/traces/agent-response-times", headers=advisor
         )
         assert times.status_code == 200, times.text
         recorded = {row["agent_type"] for row in times.json()["data"]["agents"]}
-        assert recorded >= {"customer_service", "data_analysis", "advisory", "risk_monitoring"}
+        assert recorded >= {
+            "customer_service",
+            "data_analysis",
+            "advisory",
+            "operation_advice",
+            "risk_monitoring",
+        }
     finally:
         for persona_factory in (_private_banking_customer, _regular_customer):
             customer_id = _customer_id_by_username(persona_factory(suffix)["username"])
@@ -378,6 +445,7 @@ def _walk_full_journey(
 ) -> None:
     is_private_banking_customer = persona["customer_level"] == "私行"
     advisory_plan_path = entries["advisory"]["entry_path"]
+    operation_advice_path = entries["operation_advice"]["entry_path"]
 
     # ---- 开户：客户经理为新客户开户，初始画像只有开户时采集的自述信息 ----
     account = _open_account(client, persona)
@@ -385,6 +453,7 @@ def _walk_full_journey(
     assert account["username"] == persona["username"]
     assert account["customer_level"] == persona["customer_level"]
     assert account["status"] == "正常"
+    _fund_customer_account(customer_id)
 
     # ---- 登录；两个身份域互相不可见（护栏 2） ----
     customer = _customer_login(client, persona["username"])
@@ -544,6 +613,28 @@ def _walk_full_journey(
     assert delivered["allocation_suggestion"] == edited_allocation
     assert delivered["allocation_suggestion"] != original_allocation
     assert delivered["advisor_name"]
+
+    # ---- 业务操作 Agent：客户经理为名下客户发起一条操作建议（第五份配置） ----
+    advice_response = client.post(
+        operation_advice_path.format(customer_id=customer_id),
+        headers=_employee_headers(client, MANAGER),
+        json={"direction": "申购"},
+    )
+    assert advice_response.status_code == 200, advice_response.text
+    advice = advice_response.json()["data"]
+    # 单笔操作建议也是投顾内容：未经放行进不了客户可见集合（护栏 5 的第二个出口）。
+    assert advice["content_classification"] == "投顾内容"
+    assert advice["direction"] == "申购"
+    assert advice["reason"]
+    # 产品全部来自候选池（护栏 1 的延续）：客户可见的产品清单就是候选池。
+    assert advice["product_code"] in codes
+
+    # 理财顾问没有发起入口：发起与放行不落进同一个人手里。
+    assert client.post(
+        operation_advice_path.format(customer_id=customer_id),
+        headers=advisor,
+        json={"direction": "申购"},
+    ).status_code == 403
 
     # ---- 交易：真实交易触发风控规则，产生分级预警 ----
     in_level_code = "F000005" if is_private_banking_customer else "F000001"

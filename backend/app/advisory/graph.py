@@ -23,12 +23,8 @@ from app.advisory.draft import DraftContent, record_draft
 from app.advisory.final import FinalContent, record_final
 from app.advisory.pipeline import CONTENT_TYPE_PLAN, register_resume_graph
 from app.advisory.reasons import build_reason
-from app.advisory.review_status import (
-    ACTION_RELEASE,
-    STATUS_PENDING,
-    STATUS_REJECTED,
-    STATUS_RELEASED,
-)
+from app.advisory.review import record_decision
+from app.advisory.review_status import ACTION_RELEASE, STATUS_PENDING
 from app.advisory.runtime import ADVISORY_CHECKPOINTER
 from app.advisory.scoring import TERM_HORIZON_DAYS, CandidateInput, rank_candidates
 from app.advisory.warnings import (
@@ -40,7 +36,7 @@ from app.agent.config import ADVISORY_CONFIG
 from app.customer_assets.look_through import portfolio_industry_exposure
 from app.customer_assets.service import list_held_product_codes
 from app.customer_profile.service import get_internal_profile
-from app.db.models import AdvisoryReview, AdvisoryReviewAudit, Product
+from app.db.models import AdvisoryReview, Product
 from app.exceptions import AppError
 from app.suitability.service import get_candidate_pool
 
@@ -223,30 +219,24 @@ def build_graph(db: Session, cache: redis.Redis):
                     released_at=outcome["now"],
                 ),
             )
-            review.status = STATUS_RELEASED
-            db.add(
-                AdvisoryReviewAudit(
-                    review_id=review.id,
-                    advisor_id=outcome["advisor_id"],
-                    action=outcome["action"],
-                    reason=None,
-                    decided_at=outcome["now"],
-                )
+            record_decision(
+                db,
+                review=review,
+                action=outcome["action"],
+                advisor_id=outcome["advisor_id"],
+                reason=None,
+                now=outcome["now"],
             )
-            db.commit()
             return {"result": {"final_id": final.id}}
 
-        review.status = STATUS_REJECTED
-        db.add(
-            AdvisoryReviewAudit(
-                review_id=review.id,
-                advisor_id=outcome["advisor_id"],
-                action=outcome["action"],
-                reason=outcome["reason"],
-                decided_at=outcome["now"],
-            )
+        record_decision(
+            db,
+            review=review,
+            action=outcome["action"],
+            advisor_id=outcome["advisor_id"],
+            reason=outcome["reason"],
+            now=outcome["now"],
         )
-        db.commit()
         return {"result": {"rejected": True}}
 
     graph.add_node("load_profile", load_profile_node)

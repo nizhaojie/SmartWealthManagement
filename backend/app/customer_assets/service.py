@@ -129,14 +129,22 @@ def _risk_level_conclusion(db: Session, *, customer_id: int) -> tuple[str | None
     return result["risk_level"], result["valid_until"]
 
 
+def list_holding_shares(db: Session, *, customer_id: int) -> dict[str, Decimal]:
+    """持仓产品代码 → 份额（只含「持有中」）。
+
+    赎回建议要按份额算成交金额，因此需要数值形式；呈现用的份额字符串由
+    `get_assets` 负责，两者读的是同一批行。
+    """
+    rows = db.execute(
+        select(Product.product_code, Holding.shares)
+        .join(Product, Product.id == Holding.product_id)
+        .where(Holding.customer_id == customer_id, Holding.status == HELD_STATUS)
+    ).all()
+    return {product_code: shares for product_code, shares in rows}
+
+
 def list_held_product_codes(db: Session, *, customer_id: int) -> set[str]:
-    return set(
-        db.scalars(
-            select(Product.product_code)
-            .join(Holding, Holding.product_id == Product.id)
-            .where(Holding.customer_id == customer_id, Holding.status == HELD_STATUS)
-        ).all()
-    )
+    return set(list_holding_shares(db, customer_id=customer_id))
 
 
 def get_assets(db: Session, *, customer_id: int) -> dict:

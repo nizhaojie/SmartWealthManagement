@@ -5,7 +5,7 @@ from app.agent.classification import ADVISORY_CONTENT, FACTUAL_CONTENT
 
 @dataclass(frozen=True)
 class AgentConfig:
-    # ADR-0007：四个 Agent 共用一套 LangGraph 运行时，各自只是这里的一份配置。
+    # ADR-0007：五个 Agent 共用一套 LangGraph 运行时，各自只是这里的一份配置。
     name: str
     tools: tuple[str, ...]
     content_classification_default: str
@@ -35,6 +35,23 @@ ADVISORY_CONFIG = AgentConfig(
     # 调用了推荐类工具即产出投顾内容，因此默认分类是投顾内容，必须经理财顾问审核。
     content_classification_default=ADVISORY_CONTENT,
     # 投顾助手不做知识库检索，retrieval_top_k 保持缺省。
+)
+
+# 业务操作 Agent（ADR-0017）：客户经理为名下客户提建议的手段。它与投顾助手是两份
+# 配置而不是一份——分工在产物：投顾助手出配置方案，它出「一个产品、一个方向、一个
+# 金额、一条理由」的单笔操作建议。工具集也只声明这条产物需要的能力：候选池、客户
+# 自己的持仓与资金账户、建议生成；浏览画像、配置比例、收益预测都不在其中。
+OPERATION_ADVICE_CONFIG = AgentConfig(
+    name="operation_advice",
+    tools=(
+        "candidate_pool_query",
+        "customer_holdings_and_balance_query",
+        "operation_advice_generation",
+    ),
+    # 操作建议是投顾内容（CONTEXT「操作建议」），因此默认分类是投顾内容，必须经
+    # 理财顾问放行才能送达客户——由谁发起不改变这条约束。
+    content_classification_default=ADVISORY_CONTENT,
+    # 业务操作 Agent 与投顾助手都不做知识库检索，retrieval_top_k 保持缺省。
 )
 
 # 风控监测 Agent 可查的语义视图：预警统计。它与数据分析 Agent 看的是同一张视图

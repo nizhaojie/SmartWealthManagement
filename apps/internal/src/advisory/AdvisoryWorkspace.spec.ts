@@ -1,4 +1,6 @@
-// 顾问回看自己决定过的内容：历史表每行都能点回审核页，放行与驳回记录一视同仁。
+// 顾问的队列与历史：两类内容（方案 / 操作建议）合并在一张表里，各带类型标注，
+// 各自的载荷摘要按类型给；「查看」跳到对应的审核页。历史表每行都能点回审核页，
+// 放行与驳回记录一视同仁。
 import ElementPlus from "element-plus";
 import { createPinia, setActivePinia, type Pinia } from "pinia";
 import { flushPromises, mount, type VueWrapper } from "@vue/test-utils";
@@ -6,10 +8,39 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createMemoryHistory, createRouter, type Router } from "vue-router";
 import { stubApiFetch } from "../testing";
 import AdvisoryWorkspace from "./AdvisoryWorkspace.vue";
-import type { AdvisoryHistoryEntry } from "./types";
+import type { AdvisoryHistoryEntry, PendingReview } from "./types";
+
+const PENDING_REVIEWS: PendingReview[] = [
+  {
+    content_type: "方案",
+    content_ref: 7,
+    draft_id: 7,
+    customer_id: 9,
+    customer_name: "王小明",
+    status: "待审",
+    tilt: "均衡",
+    generated_at: "2026-09-18T10:00:00",
+    waiting_seconds: 90,
+  },
+  {
+    content_type: "操作建议",
+    content_ref: 21,
+    customer_id: 10,
+    customer_name: "李小红",
+    status: "待审",
+    product_code: "F000001",
+    product_name: "稳健增利一号",
+    direction: "申购",
+    amount: "200000.00",
+    generated_at: "2026-09-18T09:00:00",
+    waiting_seconds: 3600,
+  },
+];
 
 const HISTORY: AdvisoryHistoryEntry[] = [
   {
+    content_type: "方案",
+    content_ref: 7,
     draft_id: 7,
     customer_id: 9,
     customer_name: "王小明",
@@ -18,6 +49,8 @@ const HISTORY: AdvisoryHistoryEntry[] = [
     decided_at: "2026-09-18T11:00:00",
   },
   {
+    content_type: "方案",
+    content_ref: 8,
     draft_id: 8,
     customer_id: 10,
     customer_name: "李小红",
@@ -31,9 +64,15 @@ let pinia: Pinia;
 let router: Router;
 let wrapper: VueWrapper | null = null;
 
-async function mountWorkspace(history: AdvisoryHistoryEntry[] = HISTORY): Promise<VueWrapper> {
+async function mountWorkspace(
+  history: AdvisoryHistoryEntry[] = HISTORY,
+  pendingReviews: PendingReview[] = [],
+): Promise<VueWrapper> {
   stubApiFetch((url) => {
     if (url.includes("/api/internal/advisory/history")) return { history };
+    if (url.includes("/api/internal/advisory/queue")) {
+      return { pending_requests: [], pending_reviews: pendingReviews };
+    }
     return undefined;
   });
 
@@ -45,6 +84,11 @@ async function mountWorkspace(history: AdvisoryHistoryEntry[] = HISTORY): Promis
     routes: [
       { path: "/advisory", name: "advisory", component: AdvisoryWorkspace },
       { path: "/advisory/reviews/:draftId", name: "advisory-review", component: { template: "<div />" } },
+      {
+        path: "/advisory/operation-advice/:adviceId",
+        name: "operation-advice-review",
+        component: { template: "<div />" },
+      },
     ],
   });
   await router.push("/advisory");
@@ -100,5 +144,55 @@ describe("投顾工作台的历史记录", () => {
 
     expect(page.find('[data-testid="history-table"]').exists()).toBe(false);
     expect(page.findAll('[data-testid="open-history-review"]')).toHaveLength(0);
+  });
+});
+
+describe("待审队列合并两类内容", () => {
+  it("方案与操作建议同表渲染，各行带自己的类型标注", async () => {
+    const page = await mountWorkspace(HISTORY, PENDING_REVIEWS);
+
+    const rows = page.get('[data-testid="pending-reviews-table"]').findAll("tbody tr");
+    expect(rows).toHaveLength(2);
+
+    const types = page.findAll('[data-testid="pending-review-type"]').map((tag) => tag.text());
+    expect(types).toEqual(["方案", "操作建议"]);
+  });
+
+  it("摘要按类型给：方案说生成侧重，操作建议说产品、方向与金额", async () => {
+    const page = await mountWorkspace(HISTORY, PENDING_REVIEWS);
+
+    const rows = page.get('[data-testid="pending-reviews-table"]').findAll("tbody tr");
+    expect(rows[0].text()).toContain("均衡");
+    expect(rows[1].text()).toContain("稳健增利一号");
+    expect(rows[1].text()).toContain("申购");
+    expect(rows[1].text()).toContain("200,000.00");
+  });
+
+  it("等待时长按各自的起点现算，不因为类型不同而换口径", async () => {
+    const page = await mountWorkspace(HISTORY, PENDING_REVIEWS);
+
+    const rows = page.get('[data-testid="pending-reviews-table"]').findAll("tbody tr");
+    expect(rows[0].text()).toContain("1 分钟");
+    expect(rows[1].text()).toContain("1 小时 0 分钟");
+  });
+
+  it("操作建议那一行跳到它自己的审核页", async () => {
+    const page = await mountWorkspace(HISTORY, PENDING_REVIEWS);
+
+    await page.findAll('[data-testid="open-review"]')[1].trigger("click");
+    await flushPromises();
+
+    expect(router.currentRoute.value.name).toBe("operation-advice-review");
+    expect(router.currentRoute.value.params.adviceId).toBe("21");
+  });
+
+  it("方案那一行仍然跳方案审核页", async () => {
+    const page = await mountWorkspace(HISTORY, PENDING_REVIEWS);
+
+    await page.findAll('[data-testid="open-review"]')[0].trigger("click");
+    await flushPromises();
+
+    expect(router.currentRoute.value.name).toBe("advisory-review");
+    expect(router.currentRoute.value.params.draftId).toBe("7");
   });
 });

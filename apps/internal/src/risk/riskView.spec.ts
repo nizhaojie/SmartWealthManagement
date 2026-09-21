@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { ACCOUNT_MANAGER, ADVISOR, RISK_OFFICER } from "../auth/identity";
-import { canDeriveWorkOrder, canDispose, levelTagType, sortAlerts, statusTagType } from "./riskView";
+import {
+  alertSourceNote,
+  alertSourceTagType,
+  canDeriveWorkOrder,
+  canDispose,
+  levelTagType,
+  sortAlerts,
+  statusTagType,
+} from "./riskView";
 import type { AlertSummary } from "./types";
 
 function alert(id: number, confidence: number): AlertSummary {
@@ -15,6 +23,7 @@ function alert(id: number, confidence: number): AlertSummary {
     rule_count: 1,
     transaction_ids: [],
     status: "未处理",
+    source: "客户发起",
     created_at: "2026-09-18T10:00:00",
     work_order_id: null,
     work_order_status: null,
@@ -56,5 +65,17 @@ describe("预警排序与标签", () => {
     expect(statusTagType("已排除")).toBe("info");
     expect(statusTagType("已升级")).toBe("success");
     expect(statusTagType("未处理")).toBe("warning");
+  });
+});
+
+describe("预警来源的标注", () => {
+  it("内部补录用警示色，客户发起用中性色", () => {
+    expect(alertSourceTagType("内部补录")).toBe("warning");
+    expect(alertSourceTagType("客户发起")).toBe("info");
+  });
+
+  it("只有内部补录需要补充说明：它没过业务校验", () => {
+    expect(alertSourceNote("内部补录")).toContain("未经适当性与余额校验");
+    expect(alertSourceNote("客户发起")).toBeNull();
   });
 });

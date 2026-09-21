@@ -114,8 +114,12 @@ def status_of(*, decision: str | None, released_at: datetime, now: datetime) -> 
     return STATUS_AWAITING
 
 
-def _released_at_by_review(db: Session, review_ids: list[int]) -> dict[int, datetime]:
-    """审核记录 → 放行时刻，取自放行留痕（一次查完这批）。"""
+def released_at_by_review(db: Session, review_ids: list[int]) -> dict[int, datetime]:
+    """审核记录 → 放行时刻，取自放行留痕（一次查完这批）。
+
+    客户侧的读取与内部侧的进度表读的是同一份事实，因此这个查询是公开的：两处各写
+    一份的话，「送达时间」迟早会有一处改口径，而那一处看起来仍然完全正常。
+    """
     if not review_ids:
         return {}
     rows = db.execute(
@@ -128,7 +132,7 @@ def _released_at_by_review(db: Session, review_ids: list[int]) -> dict[int, date
 
 
 def _released_at(db: Session, review: AdvisoryReview) -> datetime:
-    moment = _released_at_by_review(db, [review.id]).get(review.id)
+    moment = released_at_by_review(db, [review.id]).get(review.id)
     if moment is None:
         # 已放行却没有放行留痕：`record_decision` 一次提交里同时写两者，这个状态产生不了。
         # 宁可当场报错，也不要静默地把一条读不出有效期的建议当成「还有效」。
@@ -175,9 +179,10 @@ def _delivered_advice(
     return row
 
 
-def _decisions_by_advice(
+def decisions_by_advice(
     db: Session, advice_ids: list[int]
 ) -> dict[int, OperationAdviceDecision]:
+    """这批建议各自的客户决定（一次查完）。内部侧的进度表读的是同一批事实。"""
     if not advice_ids:
         return {}
     rows = db.scalars(
@@ -188,7 +193,7 @@ def _decisions_by_advice(
     return {row.advice_id: row for row in rows}
 
 
-def _product_names(db: Session, product_codes: set[str]) -> dict[str, str | None]:
+def product_names(db: Session, product_codes: set[str]) -> dict[str, str | None]:
     """产品代码 → 名称。产品不在目录里只少一个名字，不让这条建议整行消失。"""
     if not product_codes:
         return {}
@@ -239,7 +244,7 @@ def _serialize_one(
 ) -> dict:
     return _serialize(
         draft=draft,
-        product_name=_product_names(db, {draft.product_code}).get(draft.product_code),
+        product_name=product_names(db, {draft.product_code}).get(draft.product_code),
         released_at=released_at,
         decision=decision,
         now=now,
@@ -253,9 +258,9 @@ def list_my_advice(db: Session, *, customer_id: int, now: datetime) -> dict:
     """
     rows = _delivered_reviews(db, customer_id=customer_id)
     advice_ids = [draft.id for _review, draft in rows]
-    decisions = _decisions_by_advice(db, advice_ids)
-    released = _released_at_by_review(db, [review.id for review, _draft in rows])
-    names = _product_names(db, {draft.product_code for _review, draft in rows})
+    decisions = decisions_by_advice(db, advice_ids)
+    released = released_at_by_review(db, [review.id for review, _draft in rows])
+    names = product_names(db, {draft.product_code for _review, draft in rows})
 
     items = []
     for review, draft in rows:
@@ -284,7 +289,7 @@ def get_my_advice(db: Session, *, advice_id: int, customer_id: int, now: datetim
         db,
         draft=draft,
         released_at=_released_at(db, review),
-        decision=_decisions_by_advice(db, [draft.id]).get(draft.id),
+        decision=decisions_by_advice(db, [draft.id]).get(draft.id),
         now=now,
     )
 
@@ -347,7 +352,7 @@ def decide(
 
     review, draft = _delivered_advice(db, advice_id=advice_id, customer_id=customer_id)
     released_at = _released_at(db, review)
-    if _decisions_by_advice(db, [draft.id]).get(draft.id) is not None:
+    if decisions_by_advice(db, [draft.id]).get(draft.id) is not None:
         raise AppError(409, ALREADY_DECIDED_MESSAGE)
     if now >= expires_at(released_at):
         # 过期即终态：接受与拒绝都不再受理——建议已经失效，再记一个决定没有意义。

@@ -3,6 +3,7 @@ import AdvisoryReviewPage from "../advisory/AdvisoryReviewPage.vue";
 import LoginPage from "../auth/LoginPage.vue";
 import AlertDetailPage from "../risk/AlertDetailPage.vue";
 import LandingPage from "../shell/LandingPage.vue";
+import AdviceReviewPage from "../operation-advice/AdviceReviewPage.vue";
 import ModuleView from "../shell/ModuleView.vue";
 import WorkbenchShell from "../shell/WorkbenchShell.vue";
 import { MODULES } from "../shell/modules";
@@ -28,6 +29,15 @@ const detailRoutes: RouteRecordRaw[] = [
     name: "advisory-review",
     component: AdvisoryReviewPage,
     meta: { moduleId: "advisory", pageLabel: "审核" },
+  },
+  {
+    // 操作建议的审核页：与方案审核页并列，载荷不同所以不是同一个组件（ADR-0020）。
+    // 客户经理也从这里打开它（入口在客户关系模块的进度表），因此它同样绕过
+    // ModuleView 的角色过滤，能不能看由后端 403 决定。
+    path: "advisory/operation-advice/:adviceId",
+    name: "operation-advice-review",
+    component: AdviceReviewPage,
+    meta: { moduleId: "advisory", pageLabel: "操作建议审核" },
   },
   {
     path: "risk-monitoring/alerts/:alertId",

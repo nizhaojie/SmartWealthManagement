@@ -1,5 +1,5 @@
 import { RISK_OFFICER, type EmployeeRole } from "../auth/identity";
-import type { AlertLevel, AlertStatus, AlertSummary } from "./types";
+import type { AlertLevel, AlertSource, AlertStatus, AlertSummary } from "./types";
 
 export type AlertSort = "created_desc" | "confidence_desc" | "confidence_asc";
 
@@ -8,6 +8,24 @@ export const ALERT_SORT_OPTIONS: { value: AlertSort; label: string }[] = [
   { value: "confidence_desc", label: "按置信度（高到低）" },
   { value: "confidence_asc", label: "按置信度（低到高）" },
 ];
+
+/**
+ * 预警来源的呈现：内部补录用警示色。
+ *
+ * 这个区别不是装饰——客户发起的交易过了适当性与余额校验，内部补录的没有（它只对
+ * 风控专员开放）。风控专员要在一眼扫过时就知道「这条能不能信」。
+ */
+export function alertSourceTagType(source: AlertSource): "info" | "warning" {
+  return source === "内部补录" ? "warning" : "info";
+}
+
+/**
+ * 来源的补充说明：只有内部补录需要解释，因为它是反直觉的那一种——一笔没经过适当性
+ * 与余额校验的交易也进了监测。客户发起不必解释「客户发起的交易是客户发起的」。
+ */
+export function alertSourceNote(source: AlertSource): string | null {
+  return source === "内部补录" ? "未经适当性与余额校验" : null;
+}
 
 /** 检查器里的模块筛选摘要由各页签写回来。 */
 export type TabSummary = {

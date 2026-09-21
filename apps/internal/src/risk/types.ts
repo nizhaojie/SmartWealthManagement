@@ -31,6 +31,15 @@ export type AlertRuleHit = {
   evidence: string;
 };
 
+/**
+ * 预警的来源：**客户发起 / 内部补录**，依据是关联交易有没有经办员工（Q22）。
+ *
+ * 它决定这条预警值不值得信：客户发起的交易过了适当性与余额校验，内部补录的没有
+ * ——那是一条只对风控专员开放的口子。
+ */
+export const ALERT_SOURCES = ["客户发起", "内部补录"] as const;
+export type AlertSource = (typeof ALERT_SOURCES)[number];
+
 export type AlertSummary = {
   id: number;
   customer_id: number;
@@ -42,6 +51,7 @@ export type AlertSummary = {
   rule_count: number;
   transaction_ids: number[];
   status: AlertStatus;
+  source: AlertSource;
   created_at: string;
   work_order_id: number | null;
   work_order_status: WorkOrderStatus | null;
@@ -93,6 +103,7 @@ export type AlertDetail = {
   transaction_ids: number[];
   trigger_detail: string;
   status: AlertStatus;
+  source: AlertSource;
   handler_id: number | null;
   handle_result: string | null;
   handled_by_name: string;

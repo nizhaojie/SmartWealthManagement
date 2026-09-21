@@ -38,6 +38,7 @@ const ALERT_DETAIL = {
   transaction_ids: [11],
   trigger_detail: "命中单笔大额转账",
   status: "未处理",
+  source: "客户发起",
   handler_id: null,
   handle_result: null,
   handled_by_name: "",
@@ -165,5 +166,25 @@ describe("预警详情", () => {
       String(call[0]).includes("/exclude"),
     )?.[1] as RequestInit;
     expect(JSON.parse(String(init.body))).toEqual({ reason: "客户已确认" });
+  });
+});
+
+// 来源标注（issue 09）：这条预警值不值得信，取决于那笔交易是谁发起的。
+describe("预警来源", () => {
+  it("客户自助发起的交易标成客户发起", async () => {
+    const page = await mountPage(RISK_OFFICER);
+
+    expect(page.get('[data-testid="alert-source"]').text()).toContain("客户发起");
+  });
+
+  it("内部补录的交易标成内部补录，并点明它没过业务校验", async () => {
+    const page = await mountPage(RISK_OFFICER, {
+      ...ALERT_DETAIL,
+      source: "内部补录",
+    });
+
+    const source = page.get('[data-testid="alert-source"]');
+    expect(source.text()).toContain("内部补录");
+    expect(source.text()).toContain("未经适当性与余额校验");
   });
 });

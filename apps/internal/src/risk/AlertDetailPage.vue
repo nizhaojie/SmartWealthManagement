@@ -9,7 +9,15 @@ import { useAuthStore } from "../stores/auth";
 import { useCurrentCustomerStore } from "../stores/currentCustomer";
 import { workOrderTagType } from "../work-orders/workOrderView";
 import { deriveWorkOrder, escalateAlert, excludeAlert, getAlert } from "./api";
-import { canDeriveWorkOrder, canDispose, confidenceText, levelTagType, statusTagType } from "./riskView";
+import {
+  alertSourceNote,
+  alertSourceTagType,
+  canDeriveWorkOrder,
+  canDispose,
+  confidenceText,
+  levelTagType,
+  statusTagType,
+} from "./riskView";
 import type { AlertDetail } from "./types";
 
 /**
@@ -142,6 +150,16 @@ watch(alertId, load, { immediate: true });
           置信度 {{ confidenceText(detail.confidence) }}（仅用于排序与分级展示）
         </span>
       </div>
+
+      <p class="alert-detail__source" data-testid="alert-source">
+        来源
+        <el-tag :type="alertSourceTagType(detail.source)" size="small">
+          {{ detail.source }}
+        </el-tag>
+        <span v-if="alertSourceNote(detail.source)" class="alert-detail__source-note">
+          {{ alertSourceNote(detail.source) }}
+        </span>
+      </p>
 
       <p v-if="detail.handled_by_name" class="alert-detail__handler" data-testid="handled-by">
         处置人 {{ detail.handled_by_name }} · {{ detail.handle_result ?? "—" }}
@@ -296,11 +314,22 @@ watch(alertId, load, { immediate: true });
 }
 
 .alert-detail__confidence,
-.alert-detail__handler {
+.alert-detail__handler,
+.alert-detail__source {
   margin: 0;
   color: var(--wm-text-muted);
   font-size: 0.8rem;
   font-variant-numeric: tabular-nums;
+}
+
+.alert-detail__source {
+  display: flex;
+  align-items: center;
+  gap: var(--wm-space-2);
+}
+
+.alert-detail__source-note {
+  color: var(--wm-text-muted);
 }
 
 .alert-detail__hint,

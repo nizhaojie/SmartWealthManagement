@@ -9,7 +9,8 @@ import CustomerInspector from "../inspector/CustomerInspector.vue";
 import { useInspector } from "../shell/pageSlots";
 import { useCurrentCustomerStore } from "../stores/currentCustomer";
 import { generatePlan, getMyHistory, getQueue } from "./api";
-import type { AdvisoryHistoryEntry, AdvisoryQueue } from "./types";
+import { reviewSummaryLabel, reviewTarget } from "./reviewView";
+import type { AdvisoryHistoryEntry, AdvisoryQueue, ContentType } from "./types";
 
 // 生成侧重是顾问对这次生成的口径选择，不是客户属性。
 const TILT_OPTIONS = ["均衡", "收益优先", "流动性优先"] as const;
@@ -106,8 +107,10 @@ async function generateDirect(): Promise<void> {
   }
 }
 
-function openReview(draftId: number): void {
-  void router.push({ name: "advisory-review", params: { draftId } });
+// 待审队列与历史记录用的是同一对标识（内容类型 + 内容引用），因此打开它们是同一件事：
+// 两类内容各有自己的审核页，跳哪一张由类型决定（见 reviewView 的 reviewTarget）。
+function openReview(row: { content_type: ContentType; content_ref: number }): void {
+  void router.push(reviewTarget(row.content_type, row.content_ref));
 }
 
 useInspector(() => ({ component: CustomerInspector }));
@@ -187,8 +190,15 @@ onMounted(loadAll);
       <p v-if="!queue.pending_reviews.length" class="advisory__empty">暂无待审核内容</p>
       <el-table v-else :data="queue.pending_reviews" data-testid="pending-reviews-table">
         <el-table-column label="客户" prop="customer_name" />
+        <el-table-column label="类型" width="110">
+          <template #default="{ row }">
+            <el-tag size="small" data-testid="pending-review-type">{{ row.content_type }}</el-tag>
+          </template>
+        </el-table-column>
         <el-table-column label="状态" prop="status" width="110" />
-        <el-table-column label="生成侧重" prop="tilt" width="120" />
+        <el-table-column label="内容摘要" min-width="200">
+          <template #default="{ row }">{{ reviewSummaryLabel(row) }}</template>
+        </el-table-column>
         <el-table-column label="等待时长" width="160">
           <template #default="{ row }">{{ formatWaiting(row.waiting_seconds) }}</template>
         </el-table-column>
@@ -198,7 +208,7 @@ onMounted(loadAll);
               size="small"
               name="open-review"
               data-testid="open-review"
-              @click="openReview(row.draft_id)"
+              @click="openReview(row)"
             >
               查看
             </el-button>
@@ -211,6 +221,11 @@ onMounted(loadAll);
       <p v-if="!history.length" class="advisory__empty">还没有审核过的记录</p>
       <el-table v-else :data="history" data-testid="history-table">
         <el-table-column label="客户" prop="customer_name" />
+        <el-table-column label="类型" width="110">
+          <template #default="{ row }">
+            <el-tag size="small" data-testid="history-type">{{ row.content_type }}</el-tag>
+          </template>
+        </el-table-column>
         <el-table-column label="操作" prop="action" width="100" />
         <el-table-column label="驳回理由" prop="reason" min-width="200">
           <template #default="{ row }">{{ row.reason ?? "—" }}</template>
@@ -224,7 +239,7 @@ onMounted(loadAll);
               size="small"
               name="open-history-review"
               data-testid="open-history-review"
-              @click="openReview(row.draft_id)"
+              @click="openReview(row)"
             >
               查看
             </el-button>

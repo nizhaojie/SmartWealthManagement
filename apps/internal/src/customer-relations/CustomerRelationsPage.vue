@@ -5,12 +5,13 @@ import { PageHeader, PanelCard } from "@wealth/shared";
 import { listCustomers } from "../customers/api";
 import type { CustomerListItem } from "../customers/types";
 import { errorMessage } from "../format";
+import CustomerAdviceSection from "../operation-advice/CustomerAdviceSection.vue";
 import { actionButton } from "../shell/actionButton";
 import { useTopbarActions } from "../shell/pageSlots";
 import OpenAccountForm from "./OpenAccountForm.vue";
 
 /**
- * 客户关系（本 slice 从占位页实做）：名下客户列表 + 开户。
+ * 客户关系（本 slice 从占位页实做）：名下客户列表 + 发起操作建议 + 开户。
  * 模块描述里删掉了「服务记录」——后端没有这个接口，界面不承诺它。
  * 这个模块没有检查器，第三栏塌成两栏。
  */
@@ -69,6 +70,8 @@ onMounted(loadCustomers);
         </el-table-column>
       </el-table>
     </PanelCard>
+
+    <CustomerAdviceSection :customers="customers" />
 
     <OpenAccountForm @created="onCreated" />
   </div>

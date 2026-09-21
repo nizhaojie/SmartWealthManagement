@@ -3,7 +3,8 @@
 `CONTEXT.md`「客户经理」：可以为名下客户发起操作建议——它只发起，放行是理财顾问的
 事。因此发起路由只对客户经理开放（归属校验在 `app.operation_advice.service`），
 放行与驳回只对理财顾问开放。生成本身在业务操作 Agent 里、审核在审核流水线上，
-这里只做参数拼装。
+这里只做参数拼装。发起前的那一问（能选哪些产品、区间是多少）也是只给客户经理的
+读取，同样在归属上收紧（`{customer_id}/operation-advice-options`）。
 
 读取这一侧与方案同一条口径（`app.api.advisory`）：**理财顾问不受限，客户经理只能看
 自己名下客户的**（`app.advisory.access.ensure_can_view`），两类角色都能看能留言，
@@ -28,6 +29,7 @@ from app.db.session import get_session
 from app.http import ok
 from app.operation_advice.console import list_for_customer, serialize_review_status
 from app.operation_advice.draft import get_draft, serialize_draft
+from app.operation_advice.options import advice_options, serialize_advice_options
 from app.operation_advice.review import reject_advice, release_advice
 from app.operation_advice.schemas import (
     OperationAdviceCommentRequest,
@@ -84,6 +86,28 @@ def create_operation_advice(
             now=_now(),
         )
     )
+
+
+@router.get("/{customer_id}/operation-advice-options")
+def get_operation_advice_options(
+    customer_id: int,
+    direction: str,
+    employee: Employee = Depends(require_employee_role(ACCOUNT_MANAGER)),
+    db: Session = Depends(get_session),
+):
+    """发起前要看得见的东西：这位客户在这个方向下能选哪些产品、每只的区间是多少。
+
+    与候选池端点分开：候选池是**与方向无关**的合规事实（适当性硬过滤的结果，见
+    `CONTEXT.md`），而这里是叠加了方向过滤与金额区间的那个问题，让它同时回答两个
+    问题的话，总有一天要按调用方分叉。组装只有一处（`app.operation_advice.options`），
+    发起受理的校验要读同一份计算。
+
+    角色与归属是两道独立的门：角色在依赖里（只给客户经理，与发起同一道），归属在这里
+    ——放开其中一道不会顺带放开另一道。
+    """
+    ensure_can_view(db, employee, customer_id)
+    options = advice_options(db, customer_id=customer_id, direction=direction, now=_now())
+    return ok(serialize_advice_options(direction, options))
 
 
 @router.get("/{customer_id}/operation-advice")

@@ -131,6 +131,7 @@
 - [ ] 回放模式预置数据（见 ADR-0008）
 - [ ] 前端从零重做（`frontend-rebuild`：按 `02-企业浅色.html` 重写两端骨架与页面，取代 `frontend-restyle`）
 - [ ] 答辩材料：PPT、API 文档、数据库文档、架构说明
+- [x] 端到端演示脚本：`docs/demo-script.md`（`operation-advice-and-customer-trading` 的验收标准、重度预警的讲法与断言索引）
 - [ ] 会议纪要补齐（评分表 -5，成本近零）
 
 ## 待办的登记项

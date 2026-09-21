@@ -19,7 +19,18 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, delete, select
 from sqlalchemy.orm import Session as OrmSession
 
-from app.db.models import Customer, FundingAccount, Holding, Product, RiskAlert, Transaction
+from app.db.models import (
+    Customer,
+    CustomerProfile,
+    FundingAccount,
+    Holding,
+    Product,
+    ProfileTag,
+    RiskAlert,
+    RiskAssessment,
+    RiskFocus,
+    Transaction,
+)
 from app.settings import get_settings
 
 SEEDED_PASSWORD = "Test@1234"
@@ -81,6 +92,27 @@ def _trade(
     client: TestClient, username: str, path: str, body: dict
 ):
     return client.post(path, headers=_headers(client, username), json=body)
+
+
+def _questionnaire_answers(target: str) -> dict[str, str]:
+    """全选第一项 = 16 分（C1）；全选最后一项 = 64 分（C5）。"""
+    from app.risk_assessment.questionnaire import QUESTIONS
+
+    answers: dict[str, str] = {}
+    for question in QUESTIONS:
+        index = 0 if target == "C1" else -1
+        answers[question.id] = question.options[index].id
+    return answers
+
+
+def _take_the_assessment(client: TestClient, username: str, target: str) -> None:
+    response = client.post(
+        "/api/customer/risk-assessment",
+        headers=_headers(client, username),
+        json={"answers": _questionnaire_answers(target)},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["data"]["risk_level"] == target
 
 
 def _available_balance(client: TestClient, username: str) -> str:
@@ -201,13 +233,57 @@ def _restore_seeded_state(auth_client: TestClient) -> Iterator[None]:
         engine.dispose()
 
 
+def _purge_customer(customer_id: int) -> None:
+    """删掉这位客户名下的一切，顺序即外键依赖顺序。
+
+    成交留下的持仓与流水、风评写回的画像与标签都要一起走：不删干净，下一轮 seed 的
+    「5 位客户 / 5 份风评」会数出多余的行，而残留的持仓还会挡住客户那一行的删除。
+    """
+    engine = _engine()
+    try:
+        with OrmSession(engine) as session:
+            session.execute(delete(RiskAlert).where(RiskAlert.customer_id == customer_id))
+            # 预警广播的订阅方会为这位客户写下风险关注（`biz_risk_focus`），它指着客户。
+            session.execute(delete(RiskFocus).where(RiskFocus.customer_id == customer_id))
+            session.execute(delete(Transaction).where(Transaction.customer_id == customer_id))
+            session.execute(delete(Holding).where(Holding.customer_id == customer_id))
+            session.execute(
+                delete(RiskAssessment).where(RiskAssessment.customer_id == customer_id)
+            )
+            session.execute(delete(ProfileTag).where(ProfileTag.customer_id == customer_id))
+            session.execute(
+                delete(CustomerProfile).where(CustomerProfile.customer_id == customer_id)
+            )
+            session.execute(
+                delete(FundingAccount).where(FundingAccount.customer_id == customer_id)
+            )
+            session.execute(delete(Customer).where(Customer.id == customer_id))
+            session.commit()
+    finally:
+        engine.dispose()
+
+
 @pytest.fixture
 def unassessed_customer(auth_client: TestClient) -> Iterator[str]:
     """一位从未提交过风险测评的客户。
 
     开户时画像上写下的等级是占位，不是测评结论，因此这位客户在这里没有
     `fin_risk_assessment` 记录——判定「做没做过风评」的唯一依据就是有没有这条记录。
+
+    画像本身必须有（与 `app.customer_onboarding.open_account` 一致）：风评提交时结论要
+    写回画像，缺那一行的话，客户按提示做完风评只会再撞上一个 404——引导的出口自己堵住了。
+
+    测试库跨运行持久，而账号是固定的：先把上一轮中断留下的同名客户清掉，再建。
     """
+    engine = _engine()
+    with OrmSession(engine) as session:
+        leftover = session.scalar(
+            select(Customer.id).where(Customer.username == UNASSESSED_USERNAME)
+        )
+    engine.dispose()
+    if leftover is not None:
+        _purge_customer(int(leftover))
+
     engine = _engine()
     with OrmSession(engine) as session:
         template = session.scalar(select(Customer).where(Customer.username == CUSTOMER_LOW))
@@ -229,17 +305,26 @@ def unassessed_customer(auth_client: TestClient) -> Iterator[str]:
         session.add(
             FundingAccount(customer_id=customer_id, available_balance=Decimal("500000.00"))
         )
+        session.add(
+            CustomerProfile(
+                customer_id=customer_id,
+                risk_level="C1",
+                risk_score=0,
+                investment_experience="0-1年",
+                annual_income_range="10-30万",
+                total_assets=Decimal("300000.00"),
+                target_allocation={},
+                product_preference={},
+                confidence_score=Decimal("0.30"),
+                computed_at=datetime(2024, 1, 1, 9, 0, 0),
+            )
+        )
         session.commit()
+    engine.dispose()
     try:
         yield UNASSESSED_USERNAME
     finally:
-        with OrmSession(engine) as session:
-            session.execute(
-                delete(FundingAccount).where(FundingAccount.customer_id == customer_id)
-            )
-            session.execute(delete(Customer).where(Customer.id == customer_id))
-            session.commit()
-        engine.dispose()
+        _purge_customer(customer_id)
 
 
 def test_a_purchase_records_shares_cost_and_balance_together(auth_client: TestClient):
@@ -423,6 +508,33 @@ def test_a_customer_who_never_took_the_assessment_is_asked_to_take_one(
     assert message == "请先完成风险测评"
     assert "风险等级" not in message
     assert _no_trade_was_recorded(engine)
+    engine.dispose()
+
+
+def test_the_same_customer_can_trade_after_taking_the_assessment(
+    auth_client: TestClient, unassessed_customer: str
+):
+    """未测评被拒绝 → 做完风评 → 同一笔交易当场就能成。
+
+    拒绝只是这条引导的一半：客户按提示做完风评之后，那一笔必须真的走得通。留一个
+    「过不去的门槛」等于让客户反复重试同一件注定失败的事，而且他看不出是系统的问题
+    还是自己的问题——失败形态与「稍后再试」一模一样。
+    """
+    engine = _engine()
+    body = {"product_code": PRODUCT_R1, "amount": "1000.00"}
+
+    refused = _trade(auth_client, unassessed_customer, PURCHASE_PATH, body)
+    assert refused.status_code == 403
+    assert refused.json()["message"] == "请先完成风险测评"
+
+    _take_the_assessment(auth_client, unassessed_customer, "C1")
+
+    accepted = _trade(auth_client, unassessed_customer, PURCHASE_PATH, body)
+    assert accepted.status_code == 200, accepted.text
+    data = accepted.json()["data"]
+    assert data["transaction"]["transaction_type"] == "申购"
+    # 校验过了就当场成交：余额扣减 = 1000 + 手续费 2.50。
+    assert data["available_balance"] == "498997.50"
     engine.dispose()
 
 

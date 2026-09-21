@@ -720,24 +720,46 @@ class AdvisoryDraft(Base):
 
 
 class AdvisoryReview(Base):
-    """AI 原稿的审核状态与并发锁；同一份原稿最多一条审核记录。
+    """一份投顾内容的审核状态与并发锁；同一份内容最多一条审核记录。
 
-    `thread_id` 是生成流程在 LangGraph 运行时上的线程标识——放行或驳回时
-    靠它找到那次运行、把它从中断处恢复（ADR-0007），不是自己维护的状态机。
+    这是**所有投顾内容**共用的审核记录（ADR-0020），不是方案专用的：`content_type`
+    标注审的是哪一类内容，`content_ref` 指向该类内容的载荷记录（方案指
+    `biz_advisory_draft.id`，操作建议指 `biz_operation_advice_draft.id`）。两类内容
+    的载荷字段差别太大，所以载荷分表、审核记录共用——加锁加在这条记录上，两类内容
+    因此共用同一套并发保护。
+
+    `thread_id` 是生成流程在 LangGraph 运行时上的线程标识——放行或驳回时靠它找到
+    那次运行、把它从中断处恢复（ADR-0007），不是自己维护的状态机；恢复用哪张图由
+    `content_type` 决定（见 app.advisory.pipeline）。
+
+    `draft_id` 是方案特有的列，留着是为了不改既有 API 路径；操作建议的审核记录上
+    它是空的。
     """
 
     __tablename__ = "biz_advisory_review"
     __table_args__ = (
+        Index("uq_advisory_review_content", "content_type", "content_ref", unique=True),
         CheckConstraint(
             "status IN ('待审','处理中','已放行','已驳回')",
             name="ck_advisory_review_status",
+        ),
+        CheckConstraint(
+            "content_type IN ('方案','操作建议')",
+            name="ck_advisory_review_content_type",
         ),
         {"comment": "投顾内容审核状态"},
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    draft_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("biz_advisory_draft.id"), unique=True, comment="对应的 AI 原稿"
+    content_type: Mapped[str] = mapped_column(String(32), comment="内容类型")
+    content_ref: Mapped[int] = mapped_column(
+        BigInteger, comment="内容引用（该类型载荷记录的主键）"
+    )
+    draft_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey("biz_advisory_draft.id"),
+        unique=True,
+        comment="对应的 AI 原稿（方案专用，操作建议为空）",
     )
     thread_id: Mapped[str] = mapped_column(
         String(64), unique=True, comment="生成流程在运行时上的线程标识"
@@ -827,6 +849,50 @@ class AdvisoryFinal(Base):
     allocation_suggestion: Mapped[dict] = mapped_column(JSON, comment="顾问确认后的配置建议")
     warnings: Mapped[list] = mapped_column(JSON, comment="顾问确认后的画像警示")
     released_at: Mapped[datetime] = mapped_column(DateTime, comment="放行时间")
+    create_time: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class OperationAdviceDraft(Base):
+    """操作建议的 AI 原稿；同样没有 update_time——落库后不可修改。
+
+    载荷与方案分表（ADR-0020）：方案特有的候选池快照、配置建议、画像警示在这里
+    一个都没有，操作建议只有「一个产品、一个方向、一个金额、一条理由」。一次只
+    对应一个产品一个方向，所以方向与产品各是一列，不是一段 JSON；金额必填，因此
+    非空且带 `amount > 0` 约束。
+
+    发起人是客户经理（`manager_id`），放行仍只开放给理财顾问——发起与放行是两件事。
+    """
+
+    __tablename__ = "biz_operation_advice_draft"
+    __table_args__ = (
+        Index("ix_operation_advice_draft_customer_id", "customer_id"),
+        CheckConstraint(
+            "direction IN ('申购','赎回')",
+            name="ck_operation_advice_draft_direction",
+        ),
+        CheckConstraint("amount > 0", name="ck_operation_advice_draft_amount_positive"),
+        CheckConstraint(
+            "content_classification IN ('投顾内容','事实性内容')",
+            name="ck_operation_advice_draft_content_classification",
+        ),
+        {"comment": "操作建议原稿"},
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    customer_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("sys_customer.id"), comment="客户标识"
+    )
+    manager_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("sys_employee.id"), comment="发起这条建议的客户经理"
+    )
+    # 与方案的候选产品一样只存产品代码，不存产品名称：名称是 fin_product 的属性，
+    # 存一份副本就会在改名时留下两种口径。
+    product_code: Mapped[str] = mapped_column(String(32), comment="建议的产品代码")
+    direction: Mapped[str] = mapped_column(String(8), comment="操作方向")
+    amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), comment="建议金额")
+    reason: Mapped[str] = mapped_column(Text, comment="建议理由")
+    content_classification: Mapped[str] = mapped_column(String(32), comment="内容分类")
+    generated_at: Mapped[datetime] = mapped_column(DateTime, comment="生成时间")
     create_time: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 

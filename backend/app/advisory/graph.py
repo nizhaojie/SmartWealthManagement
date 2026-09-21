@@ -21,6 +21,7 @@ from app.advisory.allocation import suggest_allocation
 from app.advisory.concentration import concentration_warnings
 from app.advisory.draft import DraftContent, record_draft
 from app.advisory.final import FinalContent, record_final
+from app.advisory.pipeline import CONTENT_TYPE_PLAN, register_resume_graph
 from app.advisory.reasons import build_reason
 from app.advisory.review_status import (
     ACTION_RELEASE,
@@ -176,7 +177,15 @@ def build_graph(db: Session, cache: redis.Redis):
             ),
         )
         db.add(
-            AdvisoryReview(draft_id=draft.id, thread_id=state["thread_id"], status=STATUS_PENDING)
+            AdvisoryReview(
+                # 审核记录是所有投顾内容共用的，所以这里要标明这是哪一类内容、
+                # 内容在哪：方案的载荷就是这份 AI 原稿，两个标识因此指向同一个 id。
+                content_type=CONTENT_TYPE_PLAN,
+                content_ref=draft.id,
+                draft_id=draft.id,
+                thread_id=state["thread_id"],
+                status=STATUS_PENDING,
+            )
         )
         db.commit()
         return {"draft_id": draft.id}
@@ -262,3 +271,8 @@ def build_graph(db: Session, cache: redis.Redis):
     graph.add_edge("finalize", END)
 
     return graph.compile(checkpointer=ADVISORY_CHECKPOINTER)
+
+
+# 这张图是「方案」这一类内容的恢复运行时：审核记录上的 thread_id 指向它的一次运行，
+# 放行/驳回时由 app.advisory.review 按内容类型查表拿到它（见 app.advisory.pipeline）。
+register_resume_graph(CONTENT_TYPE_PLAN, build_graph)

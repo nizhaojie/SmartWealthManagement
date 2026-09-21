@@ -1,13 +1,16 @@
-"""业务操作 Agent 与操作建议原稿（issue 06）。
+"""业务操作 Agent 与操作建议原稿（issue 06、ADR-0021）。
 
 Seam：后端 HTTP 层。客户经理为名下客户发起建议，生成走真实链路——候选池（适当性
-硬过滤）、客户持仓与资金账户、排序、理由、审核中断、原稿落库，断言落在响应、库里的
+硬过滤）、客户持仓与资金账户、理由、审核中断、原稿落库，断言落在响应、库里的
 原稿与审核记录上。
 
-本文件盯住四件事：
+本文件盯住五件事：
 
 - **发起权**：只有客户经理能发起，且只对名下客户（`CONTEXT.md`「客户经理」）；
-- **候选池是唯一的选品范围**：建议里的产品一定在客户的候选池内（护栏 1 的延续）；
+- **产品与金额 / 份额由发起人给、原样采用**：图里不再选品，草案里的那只与那个数
+  就是提交上来的那只与那个数（ADR-0021）；
+- **受理校验与可选项是同一份计算**：候选池之外的产品、已持有做申购、未持有做赎回、
+  低于起投、超余额、份额越界，一律在图编译之前被拒绝（护栏 1 的延续）；
 - **三条硬边界**：一次一个产品一个方向、金额必填、理由里没有收益预测与配置比例表述；
 - **原稿只写不改**：落库后没有 update 路径，与方案的 AI 原稿同一条约束。
 """
@@ -587,8 +590,10 @@ def test_a_redemption_advice_carries_the_chosen_shares(
     finally:
         engine.dispose()
     assert Decimal(advice["amount"]) == (chosen * nav).quantize(Decimal("0.01"))
+    # 理由是「从 1200.0000 份里赎回 600.0000 份」：持仓与这次赎回的份额是两个数，
+    # 印成一个就把「客户持有多少」写错了（部分赎回时两者不相等）。
+    assert "1200.0000" in advice["reason"]
     assert str(chosen) in advice["reason"]
-    assert advice["reason"]
 
     # 落库：份额与请求里完全一致——接受侧从此按这个数执行。
     draft = _stored_draft(advice["id"])
@@ -605,6 +610,29 @@ def test_a_redemption_advice_needs_a_holding_in_the_pool(
         auth_client,
         customer_id=customer_of_manager["id"],
         body={"direction": "赎回", "product_code": "F000003", "shares": "100.0000"},
+    )
+
+    assert refused.status_code == 400
+    assert "持仓" in refused.json()["message"]
+
+
+def test_a_product_the_customer_does_not_hold_cannot_be_redeemed(
+    auth_client: TestClient, customer_of_manager: dict
+):
+    """赎回的方向资格：持有的那只选得动，池内没持有的另一只提交上来仍被拒绝。"""
+    customer_id = customer_of_manager["id"]
+    _add_holding(customer_id, product_code="F000003", shares=Decimal("1200.0000"))
+
+    redeemable = {
+        option["product_code"]
+        for option in _options(auth_client, customer_id=customer_id, direction="赎回")
+    }
+    assert redeemable == {"F000003"}
+
+    refused = _start_advice(
+        auth_client,
+        customer_id=customer_id,
+        body={"direction": "赎回", "product_code": "F000004", "shares": "100.0000"},
     )
 
     assert refused.status_code == 400

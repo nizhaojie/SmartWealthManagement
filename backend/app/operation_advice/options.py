@@ -46,6 +46,16 @@ MISSING_AMOUNT_MESSAGE = "申购必须给出金额"
 MISSING_SHARES_MESSAGE = "赎回必须给出份额"
 
 
+def not_in_options_message(direction: str) -> str:
+    """「这个方向下没有这只产品」的文案：受理校验与图里加载产品的那一步共用。
+
+    两种失败的原因在这一层是同一件事——产品不在该方向的可选项里：候选池外的、
+    已持有的（申购）、没持有的（赎回）都落在它上面。按方向分成两句，是因为经理要
+    知道自己填错了哪一头。
+    """
+    return NO_CANDIDATE_MESSAGE if direction == PURCHASE else NO_HOLDING_MESSAGE
+
+
 def _product_rows(db: Session, product_codes: Sequence[str]) -> dict[str, Product]:
     """产品代码 → 产品行：起投金额、期限与费率都在行上，池里的摘要没有这些。"""
     rows = db.scalars(select(Product).where(Product.product_code.in_(product_codes))).all()
@@ -170,9 +180,7 @@ def resolve_advice_choice(
         None,
     )
     if option is None:
-        raise AppError(
-            400, NO_CANDIDATE_MESSAGE if direction == PURCHASE else NO_HOLDING_MESSAGE
-        )
+        raise AppError(400, not_in_options_message(direction))
 
     if direction == PURCHASE:
         if amount is None:

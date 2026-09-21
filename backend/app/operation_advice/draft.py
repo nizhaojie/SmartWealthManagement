@@ -34,7 +34,8 @@ class DraftContent(TypedDict):
     direction: str
     amount: Decimal
     # 赎回时是发起人选定的份额，申购时为空。**为空表示「全部赎回」**：那是改动之前
-    # 落库的行，接受侧遇到空值仍按当下的全部持仓成交（`app.operation_advice.decision`）。
+    # 落库的行——当时只存金额，成交的是接受那一刻的全部持仓；新行一律带份额，
+    # 别给新行写空值（那会把这条旧语义重新激活，而演示里看不出来）。
     redeemed_shares: Decimal | None
     reason: str
     content_classification: str

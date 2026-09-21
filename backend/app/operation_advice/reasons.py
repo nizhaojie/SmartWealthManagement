@@ -43,16 +43,21 @@ def purchase_reason(
 def redemption_reason(
     *,
     product: dict,
+    held_shares: Decimal,
     shares: Decimal,
     amount: Decimal,
 ) -> str:
     """赎回理由：客户当前的持仓事实 + 这次赎回的份额与金额。
 
     这里不写「因为客户需要现金」之类的动机——动机不在 Agent 能查到的事实里，
-    编一句出来就是把不可核对的话塞进审核材料。选哪只产品赎回由服务端在候选池内
-    排序决定（复用投顾助手的排序），顾问看到的是它的持仓依据。
+    编一句出来就是把不可核对的话塞进审核材料。选哪只产品、赎回多少由发起人选定
+    （ADR-0021），顾问看到的是它对应的持仓依据。
+
+    **持仓份额与赎回份额是两个数**：允许部分赎回之后它们不再相等，写成一个数就会
+    把「客户持有多少」印成「这次赎回多少」——一句不成立的话，而它正是顾问要逐项
+    核对的那类句子。
     """
     return (
-        f"客户当前持有 {_product_text(product)}{_money_text(shares)} 份；"
-        f"建议全部赎回，赎回金额 {_money_text(amount)} 元，赎回后该持仓清零。"
+        f"客户当前持有 {_product_text(product)}{_money_text(held_shares)} 份；"
+        f"建议赎回 {_money_text(shares)} 份，赎回金额 {_money_text(amount)} 元。"
     )

@@ -35,15 +35,12 @@ from app.advisory.review import get_review_by_content, record_decision
 from app.advisory.review_status import ACTION_RELEASE, STATUS_PENDING
 from app.advisory.runtime import ADVISORY_CHECKPOINTER
 from app.agent.config import OPERATION_ADVICE_CONFIG
+from app.customer_assets.service import list_holding_shares
 from app.db.models import AdvisoryReview, Product
 from app.exceptions import AppError
 from app.funding_account.service import get_available_balance_value
 from app.operation_advice.draft import DraftContent, record_draft
-from app.operation_advice.options import (
-    NO_CANDIDATE_MESSAGE,
-    NO_HOLDING_MESSAGE,
-    product_elements,
-)
+from app.operation_advice.options import not_in_options_message, product_elements
 from app.operation_advice.reasons import purchase_reason, redemption_reason
 from app.order_acceptance.service import PURCHASE, redemption_amount
 from app.suitability.service import get_candidate_pool
@@ -64,6 +61,8 @@ class OperationAdviceState(TypedDict, total=False):
     available_balance: Decimal
     product: dict
     redeemed_shares: Decimal
+    # 客户的持仓份额（赎回的理由要写「从多少份里赎回多少份」，与发起人给的份额是两个数）。
+    held_shares: Decimal
     reason: str
     draft_id: int
     review_outcome: dict
@@ -71,17 +70,17 @@ class OperationAdviceState(TypedDict, total=False):
 
 
 def _product_row(db: Session, state: OperationAdviceState) -> Product:
-    """按发起人给的代码加载产品行：净值（赎回的成交金额）与产品要素都在行上。"""
+    """按发起人给的代码加载产品行：净值（赎回的成交金额）与产品要素都在行上。
+
+    **这不是一次范围检查**——产品在不在该方向的可选项里，受理处已经判定过
+    （`app.operation_advice.options`）。走到这里还是查不到，只可能是目录在读池与
+    读行之间变了，按受理校验的同一套文案拒绝，而不是给出一条凭空的建议。
+    """
     row = db.scalar(
         select(Product).where(Product.product_code == state["product_code"])
     )
     if row is None:  # pragma: no cover - 受理校验刚在可选项里找到过它
-        # 只可能是目录在两次读之间变了。按「这个方向下没有这只产品」拒绝，而不是
-        # 给出一条凭空的建议——拒绝的理由与受理校验是同一套文案。
-        raise AppError(
-            400,
-            NO_CANDIDATE_MESSAGE if state["direction"] == PURCHASE else NO_HOLDING_MESSAGE,
-        )
+        raise AppError(400, not_in_options_message(state["direction"]))
     return row
 
 
@@ -112,6 +111,8 @@ def build_graph(db: Session, cache: redis.Redis):
 
         申购采用的金额就是发起人填的那个数；赎回给出的是份额，成交金额由它算出来
         （份额 × 净值，与受理侧同一个 `redemption_amount`），两个数一起落进草案。
+        赎回还要读一次客户当前的持仓份额：理由要写「从多少份里赎回多少份」，那是
+        客户自己的事实，与发起人填的份额不是同一个数（部分赎回时两者不相等）。
         """
         row = _product_row(db, state)
         if state["direction"] == PURCHASE:
@@ -121,6 +122,9 @@ def build_graph(db: Session, cache: redis.Redis):
             "product": product_elements(row),
             "amount": redemption_amount(row, shares),
             "redeemed_shares": shares,
+            "held_shares": list_holding_shares(db, customer_id=state["customer_id"]).get(
+                state["product_code"], Decimal("0")
+            ),
         }
 
     def build_reason_node(state: OperationAdviceState) -> dict:
@@ -134,6 +138,7 @@ def build_graph(db: Session, cache: redis.Redis):
         else:
             reason = redemption_reason(
                 product=state["product"],
+                held_shares=state["held_shares"],
                 shares=state["redeemed_shares"],
                 amount=state["amount"],
             )
@@ -148,8 +153,9 @@ def build_graph(db: Session, cache: redis.Redis):
                 product_code=state["product"]["product_code"],
                 direction=state["direction"],
                 amount=state["amount"],
-                # 赎回带上发起人选定的份额（接受侧按它执行）；申购没有这一项。
-                # 只有改动之前的赎回行会是空值，那条语义由 `decision` 承接。
+                # 赎回写上发起人选定的份额——「赎回多少」从此在生成时就定下来；
+                # 这一列为空只服务改动之前落库的行（那时成交的是当下的全部持仓），
+                # 申购方向没有这一项。
                 redeemed_shares=state.get("redeemed_shares"),
                 reason=state["reason"],
                 content_classification=OPERATION_ADVICE_CONFIG.content_classification_default,

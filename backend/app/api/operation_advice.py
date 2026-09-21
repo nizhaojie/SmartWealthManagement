@@ -76,6 +76,8 @@ def create_operation_advice(
     db: Session = Depends(get_session),
     cache: redis.Redis = Depends(get_redis),
 ):
+    # 产品与金额 / 份额由发起人给（ADR-0021）；哪个数必填由方向决定，因此两个字段
+    # 都原样传下去，判定在服务端受理校验那一处。这里仍然只做参数拼装。
     return ok(
         generate_operation_advice(
             db,
@@ -83,6 +85,9 @@ def create_operation_advice(
             customer_id=customer_id,
             manager=employee,
             direction=body.direction,
+            product_code=body.product_code,
+            amount=body.amount,
+            shares=body.shares,
             now=_now(),
         )
     )

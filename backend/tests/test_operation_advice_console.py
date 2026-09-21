@@ -58,6 +58,7 @@ ADVISOR = "advisor1"
 RISK_OFFICER = "risk1"
 
 START_PATH = "/api/internal/customers/{customer_id}/operation-advice"
+OPTIONS_PATH = "/api/internal/customers/{customer_id}/operation-advice-options"
 ADVICE_PATH = "/api/internal/operation-advice/{advice_id}"
 REVIEW_PATH = "/api/internal/operation-advice/{advice_id}/review"
 COMMENTS_PATH = "/api/internal/operation-advice/{advice_id}/comments"
@@ -255,13 +256,42 @@ def customer_of_manager(auth_client: TestClient) -> Iterator[dict]:
         _delete_customer(customer_id)
 
 
+def _advice_body(client: TestClient, *, customer_id: int, direction: str) -> dict:
+    """一份合法的发起请求体：产品与金额 / 份额取自可选项端点。
+
+    发起受理读的是同一份计算（ADR-0021），测试因此拿同一组输入去发起，而不是写死
+    一只今天在池里的产品。
+    """
+    response = client.get(
+        OPTIONS_PATH.format(customer_id=customer_id),
+        headers=_employee_headers(client, MANAGER),
+        params={"direction": direction},
+    )
+    assert response.status_code == 200, response.text
+    options = response.json()["data"]["products"]
+    assert options, direction
+    if direction == "申购":
+        option = next(item for item in options if item["affordable"])
+        return {
+            "direction": direction,
+            "product_code": option["product_code"],
+            "amount": option["min_amount"],
+        }
+    option = options[0]
+    return {
+        "direction": direction,
+        "product_code": option["product_code"],
+        "shares": option["max_shares"],
+    }
+
+
 def _start_advice(
     client: TestClient, *, customer_id: int, direction: str = "申购", username: str = MANAGER
 ) -> dict:
     response = client.post(
         START_PATH.format(customer_id=customer_id),
         headers=_employee_headers(client, username),
-        json={"direction": direction},
+        json=_advice_body(client, customer_id=customer_id, direction=direction),
     )
     assert response.status_code == 200, response.text
     return response.json()["data"]

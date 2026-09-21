@@ -501,6 +501,9 @@ def test_the_advice_payload_does_not_carry_plan_specific_columns():
         "product_code",
         "direction",
         "amount",
+        # 赎回的份额数（ADR-0021）：它不是方案特有的字段，而是「一个金额」在赎回方向
+        # 的另一种表达——申购为空。
+        "redeemed_shares",
         "reason",
         "content_classification",
         "generated_at",

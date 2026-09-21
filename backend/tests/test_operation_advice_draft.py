@@ -61,6 +61,7 @@ ADVISOR = "advisor1"
 RISK_OFFICER = "risk1"
 
 OPERATION_ADVICE_PATH = "/api/internal/customers/{customer_id}/operation-advice"
+OPTIONS_PATH = "/api/internal/customers/{customer_id}/operation-advice-options"
 CANDIDATE_POOL_PATH = "/api/customer/candidate-pool"
 
 HELD_STATUS = "持有中"
@@ -263,12 +264,44 @@ def _assess(client: TestClient, headers: dict[str, str], target: str) -> None:
     assert response.json()["data"]["risk_level"] == target
 
 
-def _start_advice(client: TestClient, *, customer_id: int, direction: str, username: str = MANAGER):
+def _start_advice(
+    client: TestClient, *, customer_id: int, body: dict, username: str = MANAGER
+):
     return client.post(
         OPERATION_ADVICE_PATH.format(customer_id=customer_id),
         headers=_employee_headers(client, username),
-        json={"direction": direction},
+        json=body,
     )
+
+
+def _options(
+    client: TestClient, *, customer_id: int, direction: str, username: str = MANAGER
+) -> list[dict]:
+    response = client.get(
+        OPTIONS_PATH.format(customer_id=customer_id),
+        headers=_employee_headers(client, username),
+        params={"direction": direction},
+    )
+    assert response.status_code == 200, response.text
+    return response.json()["data"]["products"]
+
+
+def _purchase_body(client: TestClient, customer_id: int) -> dict:
+    """一份合法的申购请求体：第一只买得起的可选项 + 它的起投金额。
+
+    产品与金额都取自可选项端点——发起受理读的是同一份计算（ADR-0021），测试因此
+    不必写死一只今天在池里、明天可能不在的产品。
+    """
+    option = next(
+        item
+        for item in _options(client, customer_id=customer_id, direction="申购")
+        if item["affordable"]
+    )
+    return {
+        "direction": "申购",
+        "product_code": option["product_code"],
+        "amount": option["min_amount"],
+    }
 
 
 @pytest.fixture
@@ -324,6 +357,22 @@ def _stored_draft(draft_id: int) -> OperationAdviceDraft:
     return draft
 
 
+def _drafts_of(customer_id: int) -> list[OperationAdviceDraft]:
+    """这位客户名下的全部原稿：被拒绝的发起不该在这里留下任何一行。"""
+    engine = _engine()
+    try:
+        with OrmSession(engine) as session:
+            return list(
+                session.scalars(
+                    select(OperationAdviceDraft).where(
+                        OperationAdviceDraft.customer_id == customer_id
+                    )
+                ).all()
+            )
+    finally:
+        engine.dispose()
+
+
 # ---------------------------------------------------------------------------
 # 第五份 Agent 配置
 # ---------------------------------------------------------------------------
@@ -359,14 +408,18 @@ def test_the_registry_lists_the_operation_advice_agent(auth_client: TestClient):
 # ---------------------------------------------------------------------------
 
 
-def test_a_manager_gets_a_purchase_advice_for_their_customer(
+def test_the_chosen_purchase_is_adopted_as_is(
     auth_client: TestClient, customer_of_manager: dict
 ):
+    """发起人选的哪只、多少钱，建议里就是哪只、多少钱——Agent 不再改动它们（ADR-0021）。"""
     customer_id = customer_of_manager["id"]
-    pool = _candidate_pool(auth_client, customer_of_manager["headers"])
-    pool_codes = {item["product_code"] for item in pool}
+    pool_codes = {
+        item["product_code"]
+        for item in _candidate_pool(auth_client, customer_of_manager["headers"])
+    }
+    body = _purchase_body(auth_client, customer_id)
 
-    response = _start_advice(auth_client, customer_id=customer_id, direction="申购")
+    response = _start_advice(auth_client, customer_id=customer_id, body=body)
     assert response.status_code == 200, response.text
     advice = response.json()["data"]
 
@@ -374,25 +427,17 @@ def test_a_manager_gets_a_purchase_advice_for_their_customer(
     assert advice["content_classification"] == "投顾内容"
     assert advice["disclaimer"]
     assert advice["direction"] == "申购"
-    # 产品来自候选池——Agent 不越过适当性硬过滤挑产品（护栏 1 的延续）。
+    # 产品与金额原样采用，一个字都不改：「谁选的」不在这条链路上第二次发生。
+    assert advice["product_code"] == body["product_code"]
+    assert advice["amount"] == body["amount"]
+    # 产品仍在候选池内：范围本身一个字没变，只是检查从「Agent 顺手只挑池内的」
+    # 变成「人可能挑池外的、必须明确拒绝」（护栏 1 的延续，见下一条用例）。
     assert advice["product_code"] in pool_codes
     assert advice["product_name"]
-    # 金额必填且是产品要素算出来的数：起投金额，买得起。
     assert Decimal(advice["amount"]) > 0
-    product = next(item for item in pool if item["product_code"] == advice["product_code"])
-    engine = _engine()
-    try:
-        with OrmSession(engine) as session:
-            min_amount = session.scalar(
-                select(Product.min_amount).where(
-                    Product.product_code == product["product_code"]
-                )
-            )
-    finally:
-        engine.dispose()
-    assert Decimal(advice["amount"]) == min_amount
 
-    # 理由必填，且不越第三条硬边界：没有收益预测、没有配置比例表述。
+    # 理由必填，只引用候选池里的产品要素与客户自己的数字，且不越第三条硬边界：
+    # 没有收益预测、没有配置比例表述（既有断言的延续）。
     assert advice["reason"]
     for forbidden in ("预期", "年化", "%", "仓位", "比例"):
         assert forbidden not in advice["reason"]
@@ -402,11 +447,14 @@ def test_a_manager_gets_a_purchase_advice_for_their_customer(
         {"candidates", "allocation_suggestion", "warnings", "candidate_pool_snapshot"}
     )
 
-    # 落库：原稿与「内容类型 + 内容引用」指向它的审核记录。
+    # 落库：产品、金额与请求里完全一致；申购不带份额。
     draft = _stored_draft(advice["id"])
     assert draft.customer_id == customer_id
     assert draft.manager_id == _employee_id(MANAGER)
     assert draft.direction == "申购"
+    assert draft.product_code == body["product_code"]
+    assert draft.amount == Decimal(body["amount"])
+    assert draft.redeemed_shares is None
     assert draft.reason == advice["reason"]
 
     review = _stored_review(advice["id"])
@@ -428,10 +476,52 @@ def test_a_manager_gets_a_purchase_advice_for_their_customer(
     assert row["amount"] == advice["amount"]
 
 
+def test_a_product_outside_the_pool_is_rejected(
+    auth_client: TestClient, customer_of_manager: dict
+):
+    """护栏 1 的延续：选择权移交之后，范围检查落在「人可能挑池外的」这一侧。"""
+    customer_id = customer_of_manager["id"]
+    body = _purchase_body(auth_client, customer_id)
+
+    # F900002 在目录里但已停售，因此不在候选池内。
+    assert "F900002" not in {
+        item["product_code"]
+        for item in _candidate_pool(auth_client, customer_of_manager["headers"])
+    }
+    refused = _start_advice(
+        auth_client, customer_id=customer_id, body={**body, "product_code": "F900002"}
+    )
+
+    assert refused.status_code == 400
+    assert "可申购" in refused.json()["message"]
+    # 池外的产品连原稿都产不出：拒绝发生在图编译之前。
+    assert _drafts_of(customer_id) == []
+
+
+def test_a_held_product_cannot_be_purchased_again(
+    auth_client: TestClient, customer_of_manager: dict
+):
+    """申购的方向资格：已持有的产品不再出现在申购方向的可选项里，提交上来也被拒绝。"""
+    customer_id = customer_of_manager["id"]
+    _add_holding(customer_id, product_code="F000003", shares=Decimal("100.0000"))
+    body = _purchase_body(auth_client, customer_id)
+
+    assert "F000003" not in {
+        option["product_code"]
+        for option in _options(auth_client, customer_id=customer_id, direction="申购")
+    }
+    refused = _start_advice(
+        auth_client, customer_id=customer_id, body={**body, "product_code": "F000003"}
+    )
+
+    assert refused.status_code == 400
+    assert "可申购" in refused.json()["message"]
+
+
 def test_the_pool_for_a_conservative_customer_bounds_the_advice(
     auth_client: TestClient,
 ):
-    """C1 客户的候选池里只有 R1 产品，Agent 挑不出池外的产品。"""
+    """C1 客户的候选池里只有 R1 产品：池内那只提交得过，池外的被明确拒绝。"""
     suffix = uuid4().hex[:10]
     persona = _persona(suffix)
     account = _open_account(auth_client, persona)
@@ -443,24 +533,43 @@ def test_the_pool_for_a_conservative_customer_bounds_the_advice(
         pool = _candidate_pool(auth_client, headers)
         assert {item["product_code"] for item in pool} == {"F000001"}
 
-        response = _start_advice(auth_client, customer_id=customer_id, direction="申购")
-        assert response.status_code == 200, response.text
-        assert response.json()["data"]["product_code"] == "F000001"
+        body = _purchase_body(auth_client, customer_id)
+        assert body["product_code"] == "F000001"
+        accepted = _start_advice(auth_client, customer_id=customer_id, body=body)
+        assert accepted.status_code == 200, accepted.text
+        assert accepted.json()["data"]["product_code"] == "F000001"
+
+        # F000005 是 R5 的在售产品：对这位客户来说它在候选池外。
+        refused = _start_advice(
+            auth_client, customer_id=customer_id, body={**body, "product_code": "F000005"}
+        )
+        assert refused.status_code == 400, refused.text
+        assert "可申购" in refused.json()["message"]
     finally:
         _delete_customer(customer_id)
 
 
-def test_a_redemption_advice_targets_a_held_product_in_the_pool(
+def test_a_redemption_advice_carries_the_chosen_shares(
     auth_client: TestClient, customer_of_manager: dict
 ):
+    """赎回建议带发起人选定的份额——部分赎回也是一个具体的数（ADR-0021）。"""
     customer_id = customer_of_manager["id"]
     pool_codes = {
         item["product_code"]
         for item in _candidate_pool(auth_client, customer_of_manager["headers"])
     }
     _add_holding(customer_id, product_code="F000003", shares=Decimal("1200.0000"))
+    chosen = Decimal("600.0000")
 
-    response = _start_advice(auth_client, customer_id=customer_id, direction="赎回")
+    response = _start_advice(
+        auth_client,
+        customer_id=customer_id,
+        body={
+            "direction": "赎回",
+            "product_code": "F000003",
+            "shares": str(chosen),
+        },
+    )
     assert response.status_code == 200, response.text
     advice = response.json()["data"]
 
@@ -468,7 +577,7 @@ def test_a_redemption_advice_targets_a_held_product_in_the_pool(
     assert advice["product_code"] == "F000003"
     # 赎回的产品同样来自候选池（硬保证，不因方向不同而放宽）。
     assert advice["product_code"] in pool_codes
-    # 金额 = 份额 × 净值（成交口径），理由里带上持仓事实。
+    # 金额 = 份额 × 净值（成交口径），理由里带上这次赎回的份额。
     engine = _engine()
     try:
         with OrmSession(engine) as session:
@@ -477,33 +586,166 @@ def test_a_redemption_advice_targets_a_held_product_in_the_pool(
             )
     finally:
         engine.dispose()
-    assert Decimal(advice["amount"]) == (Decimal("1200.0000") * nav).quantize(
-        Decimal("0.01")
-    )
-    assert "1200.0000" in advice["reason"]
+    assert Decimal(advice["amount"]) == (chosen * nav).quantize(Decimal("0.01"))
+    assert str(chosen) in advice["reason"]
     assert advice["reason"]
+
+    # 落库：份额与请求里完全一致——接受侧从此按这个数执行。
+    draft = _stored_draft(advice["id"])
+    assert draft.product_code == "F000003"
+    assert draft.amount == Decimal(advice["amount"])
+    assert draft.redeemed_shares == chosen
 
 
 def test_a_redemption_advice_needs_a_holding_in_the_pool(
     auth_client: TestClient, customer_of_manager: dict
 ):
-    response = _start_advice(
-        auth_client, customer_id=customer_of_manager["id"], direction="赎回"
+    # 没有任何持仓：赎回方向的可选项是空的，提交哪一只都被拒绝。
+    refused = _start_advice(
+        auth_client,
+        customer_id=customer_of_manager["id"],
+        body={"direction": "赎回", "product_code": "F000003", "shares": "100.0000"},
     )
 
-    assert response.status_code == 400
-    assert "持仓" in response.json()["message"]
+    assert refused.status_code == 400
+    assert "持仓" in refused.json()["message"]
 
 
 def test_an_unknown_direction_is_rejected(
     auth_client: TestClient, customer_of_manager: dict
 ):
     response = _start_advice(
-        auth_client, customer_id=customer_of_manager["id"], direction="持有"
+        auth_client,
+        customer_id=customer_of_manager["id"],
+        body={"direction": "持有", "product_code": "F000001", "amount": "1000.00"},
     )
 
     assert response.status_code == 400
     assert response.json()["message"] == "未知的操作方向"
+
+
+# ---------------------------------------------------------------------------
+# 受理校验：发起人给的输入不合法就被拒绝
+# ---------------------------------------------------------------------------
+
+
+def test_an_amount_below_the_minimum_is_rejected(
+    auth_client: TestClient, customer_of_manager: dict
+):
+    customer_id = customer_of_manager["id"]
+    body = _purchase_body(auth_client, customer_id)
+    minimum = Decimal(body["amount"])
+
+    refused = _start_advice(
+        auth_client,
+        customer_id=customer_id,
+        body={**body, "amount": str(minimum - Decimal("0.01"))},
+    )
+
+    assert refused.status_code == 400
+    assert "起投" in refused.json()["message"]
+    # 请求只是被拒绝：没有落下一份原稿。
+    assert _drafts_of(customer_id) == []
+
+
+def test_an_amount_above_the_available_balance_is_rejected(
+    auth_client: TestClient, customer_of_manager: dict
+):
+    """上限由受理侧口径算：`purchase_cost(金额) > 可用余额` 即拒绝。"""
+    customer_id = customer_of_manager["id"]
+    option = next(
+        item
+        for item in _options(auth_client, customer_id=customer_id, direction="申购")
+        if item["affordable"]
+    )
+    ceiling = Decimal(option["max_amount"])
+
+    refused = _start_advice(
+        auth_client,
+        customer_id=customer_id,
+        body={
+            "direction": "申购",
+            "product_code": option["product_code"],
+            "amount": str(ceiling + Decimal("0.01")),
+        },
+    )
+
+    assert refused.status_code == 400
+    assert "余额" in refused.json()["message"]
+
+    # 上限本身是买得起的（与可选项端点同一份口径）：再提交一次就通过。
+    accepted = _start_advice(
+        auth_client,
+        customer_id=customer_id,
+        body={
+            "direction": "申购",
+            "product_code": option["product_code"],
+            "amount": str(ceiling),
+        },
+    )
+    assert accepted.status_code == 200, accepted.text
+
+
+def test_a_redemption_share_count_must_be_within_the_holding(
+    auth_client: TestClient, customer_of_manager: dict
+):
+    customer_id = customer_of_manager["id"]
+    held = Decimal("1200.0000")
+    _add_holding(customer_id, product_code="F000003", shares=held)
+    body = {"direction": "赎回", "product_code": "F000003"}
+
+    for shares in ("0.0000", "-1.0000", str(held + Decimal("0.0001"))):
+        refused = _start_advice(
+            auth_client, customer_id=customer_id, body={**body, "shares": shares}
+        )
+        assert refused.status_code == 400, (shares, refused.text)
+        assert "份额" in refused.json()["message"]
+
+    # 恰等于持仓份额提交得过（部分赎回与全部赎回都是发起人给的份额）。
+    accepted = _start_advice(
+        auth_client, customer_id=customer_id, body={**body, "shares": str(held)}
+    )
+    assert accepted.status_code == 200, accepted.text
+    assert _stored_draft(accepted.json()["data"]["id"]).redeemed_shares == held
+
+
+def test_a_request_without_the_chosen_number_is_rejected(
+    auth_client: TestClient, customer_of_manager: dict
+):
+    """哪个数必填由方向决定，缺了就是发起人的输入错了（不是请求体不成立）。"""
+    customer_id = customer_of_manager["id"]
+    body = _purchase_body(auth_client, customer_id)
+    _add_holding(customer_id, product_code="F000003", shares=Decimal("1200.0000"))
+
+    missing_amount = _start_advice(
+        auth_client,
+        customer_id=customer_id,
+        body={"direction": "申购", "product_code": body["product_code"]},
+    )
+    assert missing_amount.status_code == 400
+    assert "金额" in missing_amount.json()["message"]
+
+    missing_shares = _start_advice(
+        auth_client,
+        customer_id=customer_id,
+        body={"direction": "赎回", "product_code": "F000003"},
+    )
+    assert missing_shares.status_code == 400
+    assert "份额" in missing_shares.json()["message"]
+
+
+def test_a_request_without_a_product_is_rejected(
+    auth_client: TestClient, customer_of_manager: dict
+):
+    """产品是必填字段：没有它的请求体本身不成立（参数错误）。"""
+    refused = _start_advice(
+        auth_client,
+        customer_id=customer_of_manager["id"],
+        body={"direction": "申购", "amount": "1000.00"},
+    )
+
+    assert refused.status_code == 400
+    assert refused.json()["message"] == "参数错误"
 
 
 # ---------------------------------------------------------------------------
@@ -515,11 +757,12 @@ def test_only_the_owning_manager_can_start_an_advice(
     auth_client: TestClient, customer_of_manager: dict
 ):
     customer_id = customer_of_manager["id"]
+    body = _purchase_body(auth_client, customer_id)
 
     # 理财顾问与风控专员没有发起入口：发起与放行是两件事，放行才是他们的。
     for username in (ADVISOR, RISK_OFFICER):
         refused = _start_advice(
-            auth_client, customer_id=customer_id, direction="申购", username=username
+            auth_client, customer_id=customer_id, body=body, username=username
         )
         assert refused.status_code == 403, refused.text
 
@@ -527,35 +770,24 @@ def test_only_the_owning_manager_can_start_an_advice(
     other_manager = _start_advice(
         auth_client,
         customer_id=customer_id,
-        direction="申购",
+        body=body,
         username=OTHER_MANAGER,
     )
     assert other_manager.status_code == 403
     assert "名下" in other_manager.json()["message"]
 
-    engine = _engine()
-    try:
-        with OrmSession(engine) as session:
-            assert (
-                session.scalar(
-                    select(OperationAdviceDraft.id).where(
-                        OperationAdviceDraft.customer_id == customer_id
-                    )
-                )
-                is None
-            )
-    finally:
-        engine.dispose()
+    assert _drafts_of(customer_id) == []
 
     # 归属人自己发起成功——被拒绝的是别人，不是这条链路本身。
-    assert (
-        _start_advice(auth_client, customer_id=customer_id, direction="申购").status_code
-        == 200
-    )
+    assert _start_advice(auth_client, customer_id=customer_id, body=body).status_code == 200
 
 
 def test_an_unknown_customer_is_reported_as_missing(auth_client: TestClient):
-    response = _start_advice(auth_client, customer_id=99999999, direction="申购")
+    response = _start_advice(
+        auth_client,
+        customer_id=99999999,
+        body={"direction": "申购", "product_code": "F000001", "amount": "1000.00"},
+    )
 
     assert response.status_code == 404
     assert response.json()["message"] == "客户不存在"
@@ -575,11 +807,12 @@ def test_the_advice_draft_is_write_once(auth_client: TestClient, customer_of_man
     assert "update_time" not in OperationAdviceDraft.__table__.columns
     assert not any(name.startswith("update") for name in vars(draft_module))
 
+    body = _purchase_body(auth_client, customer_of_manager["id"])
     first = _start_advice(
-        auth_client, customer_id=customer_of_manager["id"], direction="申购"
+        auth_client, customer_id=customer_of_manager["id"], body=body
     )
     second = _start_advice(
-        auth_client, customer_id=customer_of_manager["id"], direction="申购"
+        auth_client, customer_id=customer_of_manager["id"], body=body
     )
     assert first.status_code == 200 and second.status_code == 200
     # 再生成一次是**追加**一条，不是改写上一条。
@@ -619,19 +852,20 @@ def test_the_advice_runtime_resumes_at_the_interrupt(
     """
     customer_id = customer_of_manager["id"]
     advisor_id = _employee_id(ADVISOR)
+    body = _purchase_body(auth_client, customer_id)
 
-    released_id = _start_advice(
-        auth_client, customer_id=customer_id, direction="申购"
-    ).json()["data"]["id"]
+    released_id = _start_advice(auth_client, customer_id=customer_id, body=body).json()[
+        "data"
+    ]["id"]
     _resume(
         released_id,
         {"action": ACTION_RELEASE, "advisor_id": advisor_id, "now": _now()},
     )
     assert _stored_review(released_id).status == STATUS_RELEASED
 
-    rejected_id = _start_advice(
-        auth_client, customer_id=customer_id, direction="申购"
-    ).json()["data"]["id"]
+    rejected_id = _start_advice(auth_client, customer_id=customer_id, body=body).json()[
+        "data"
+    ]["id"]
     _resume(
         rejected_id,
         {

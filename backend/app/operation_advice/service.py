@@ -9,10 +9,15 @@
 角色在入口的依赖里声明（`require_employee_role`），归属在这里判定——混在一起写的话，
 将来给别的角色开一个口子时，就会顺手把归属那一道也放开。归属的判定本身只有一份
 （`app.customer_scope`），这里只决定「不属于你」对外说成什么。
+
+**产品与金额 / 份额由发起人给，图之前先受理校验**（ADR-0021）：校验读的是可选项端点
+的同一份计算（`app.operation_advice.options`），因此「下拉里有的」与「提交得过」不会
+漂移。校验不进 `submit_transaction_event`（ADR-0018 不变）：那仍然是既成事实的入海口。
 """
 
 import time
 from datetime import datetime
+from decimal import Decimal
 from uuid import uuid4
 
 import redis
@@ -24,11 +29,13 @@ from app.customer_scope import is_under_management
 from app.db.models import Customer, Employee
 from app.exceptions import AppError
 from app.operation_advice.draft import get_draft, serialize_draft
-from app.operation_advice.graph import (
+from app.operation_advice.graph import OperationAdviceState, build_graph
+from app.operation_advice.options import (
     ALLOWED_DIRECTIONS,
     UNKNOWN_DIRECTION_MESSAGE,
-    build_graph,
+    resolve_advice_choice,
 )
+from app.order_acceptance.service import PURCHASE
 
 CUSTOMER_NOT_FOUND_MESSAGE = "客户不存在"
 NOT_YOUR_CUSTOMER_MESSAGE = "该客户不在你的名下，无权发起建议"
@@ -49,25 +56,46 @@ def generate_operation_advice(
     customer_id: int,
     manager: Employee,
     direction: str,
+    product_code: str,
+    amount: Decimal | None = None,
+    shares: Decimal | None = None,
     now: datetime,
 ) -> dict:
+    # 三道门按「谁在问、问的是谁、问得对不对」的顺序过：角色在入口的依赖里，方向与
+    # 归属在这里，发起人给的三个输入最后——被拒绝的是输入，不是这次请求本身。
     if direction not in ALLOWED_DIRECTIONS:
         raise AppError(400, UNKNOWN_DIRECTION_MESSAGE)
     _ensure_own_customer(db, manager=manager, customer_id=customer_id)
+    # 受理校验读的是可选项端点的**同一份计算**（ADR-0021）：产品必须在方向的可选项里，
+    # 金额 / 份额必须落在后端给出的区间内。不通过就到此为止——图根本不编译，因此图里
+    # 不会出现「Agent 又选了一次」的余地。
+    option, chosen = resolve_advice_choice(
+        db,
+        customer_id=customer_id,
+        direction=direction,
+        product_code=product_code,
+        amount=amount,
+        shares=shares,
+        now=now,
+    )
 
     graph = build_graph(db, cache)
     thread_id = uuid4().hex
     started = time.monotonic()
-    final_state = graph.invoke(
-        {
-            "customer_id": customer_id,
-            "manager_id": manager.id,
-            "direction": direction,
-            "now": now,
-            "thread_id": thread_id,
-        },
-        {"configurable": {"thread_id": thread_id}},
-    )
+    inputs: OperationAdviceState = {
+        "customer_id": customer_id,
+        "manager_id": manager.id,
+        "direction": direction,
+        "product_code": option["product_code"],
+        "now": now,
+        "thread_id": thread_id,
+    }
+    # 两个方向各只有一个数：申购是金额、赎回是份额（`chosen` 由方向决定是哪一个）。
+    if direction == PURCHASE:
+        inputs["amount"] = chosen
+    else:
+        inputs["shares"] = chosen
+    final_state = graph.invoke(inputs, {"configurable": {"thread_id": thread_id}})
 
     # 生成耗时进响应时间统计（与其余四个 Agent 同一张表）。
     debug_trace.record_response_time(

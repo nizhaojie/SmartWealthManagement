@@ -3,8 +3,9 @@
 与方案的 AI 原稿同一条约束（`app.advisory.draft`）：只提供 record 与 get，没有
 update——原稿落库后不可修改，是日后举证「审核是实质性的」的依据。
 
-载荷只有「一个产品、一个方向、一个金额、一条理由」（CONTEXT「操作建议」、ADR-0020）：
-候选池快照、配置建议、画像警示都是配置方案特有的，这里一个都不带（迁移 0026）。
+载荷只有「一个产品、一个方向、一个金额、一条理由」，赎回另带发起人选定的份额
+（CONTEXT「操作建议」、ADR-0020、ADR-0021）：候选池快照、配置建议、画像警示都是
+配置方案特有的，这里一个都不带（迁移 0026、0028）。
 产品只存代码、不存名称——名称是 `fin_product` 的属性，存一份副本就会在改名时
 留下两种口径，所以序列化时现查一次，产品不在目录里就少一个名字而不是整行消失
 （待审队列对操作建议也是这个口径，见 `app.advisory.queue`）。
@@ -32,6 +33,9 @@ class DraftContent(TypedDict):
     product_code: str
     direction: str
     amount: Decimal
+    # 赎回时是发起人选定的份额，申购时为空。**为空表示「全部赎回」**：那是改动之前
+    # 落库的行，接受侧遇到空值仍按当下的全部持仓成交（`app.operation_advice.decision`）。
+    redeemed_shares: Decimal | None
     reason: str
     content_classification: str
     generated_at: datetime

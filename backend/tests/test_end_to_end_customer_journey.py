@@ -615,10 +615,26 @@ def _walk_full_journey(
     assert delivered["advisor_name"]
 
     # ---- 业务操作 Agent：客户经理为名下客户发起一条操作建议（第五份配置） ----
+    # 产品与金额由发起人选定（ADR-0021）：先在可选项里挑一只（受理校验读的是同一份
+    # 计算），提交的这只就该被原样采用。
+    options = client.get(
+        f"/api/internal/customers/{customer_id}/operation-advice-options",
+        headers=_employee_headers(client, MANAGER),
+        params={"direction": "申购"},
+    )
+    assert options.status_code == 200, options.text
+    choice = next(
+        item for item in options.json()["data"]["products"] if item["affordable"]
+    )
+    advice_body = {
+        "direction": "申购",
+        "product_code": choice["product_code"],
+        "amount": choice["min_amount"],
+    }
     advice_response = client.post(
         operation_advice_path.format(customer_id=customer_id),
         headers=_employee_headers(client, MANAGER),
-        json={"direction": "申购"},
+        json=advice_body,
     )
     assert advice_response.status_code == 200, advice_response.text
     advice = advice_response.json()["data"]
@@ -626,14 +642,16 @@ def _walk_full_journey(
     assert advice["content_classification"] == "投顾内容"
     assert advice["direction"] == "申购"
     assert advice["reason"]
-    # 产品全部来自候选池（护栏 1 的延续）：客户可见的产品清单就是候选池。
+    # 产品仍是候选人选的，且仍在候选池内（护栏 1 的延续）：客户可见的产品清单就是候选池。
+    assert advice["product_code"] == choice["product_code"]
+    assert advice["amount"] == choice["min_amount"]
     assert advice["product_code"] in codes
 
     # 理财顾问没有发起入口：发起与放行不落进同一个人手里。
     assert client.post(
         operation_advice_path.format(customer_id=customer_id),
         headers=advisor,
-        json={"direction": "申购"},
+        json=advice_body,
     ).status_code == 403
 
     # ---- 交易：真实交易触发风控规则，产生分级预警 ----

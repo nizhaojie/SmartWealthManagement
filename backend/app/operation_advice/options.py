@@ -24,12 +24,26 @@ from app.customer_assets.service import list_holding_shares
 from app.db.models import Product
 from app.exceptions import AppError
 from app.funding_account.service import get_available_balance_value
-from app.operation_advice.graph import ALLOWED_DIRECTIONS, UNKNOWN_DIRECTION_MESSAGE
-from app.order_acceptance.service import PERCENT, PURCHASE, purchase_cost
+from app.order_acceptance.service import PERCENT, PURCHASE, REDEEM, purchase_cost
 from app.suitability.service import get_candidate_pool
 
 MONEY = Decimal("0.01")
 ZERO = Decimal("0.00")
+
+# 方向的合法取值与文案只有这一份：读取端点与发起受理都在这里判定（`advice_options`），
+# 受理侧的两条分支也按它分叉。
+ALLOWED_DIRECTIONS = (PURCHASE, REDEEM)
+UNKNOWN_DIRECTION_MESSAGE = "未知的操作方向"
+
+# 发起受理的拒绝文案。它们要说的是「**发起人选的不合法**」，不是「Agent 选不到」——
+# 选品权移交之后（ADR-0021），失败的原因只可能来自提交上来的那份输入。
+NO_CANDIDATE_MESSAGE = "所选产品不在该客户的可申购范围内"
+NOT_ENOUGH_BALANCE_MESSAGE = "可用余额不足以支付这次申购的金额与手续费"
+NO_HOLDING_MESSAGE = "所选产品不在该客户的可赎回持仓范围内"
+BELOW_MIN_AMOUNT_MESSAGE = "申购金额低于该产品的起投金额"
+INVALID_SHARES_MESSAGE = "赎回份额必须大于零且不超过当前持仓份额"
+MISSING_AMOUNT_MESSAGE = "申购必须给出金额"
+MISSING_SHARES_MESSAGE = "赎回必须给出份额"
 
 
 def _product_rows(db: Session, product_codes: Sequence[str]) -> dict[str, Product]:
@@ -55,11 +69,12 @@ def purchase_ceiling(product: Product, available_balance: Decimal) -> Decimal:
     return ceiling
 
 
-def _product_elements(product: Product) -> dict:
+def product_elements(product: Product) -> dict:
     """选项文案的五要素：产品名 + 代码 + 风险等级 + 期限 + 起投金额（Q13）。
 
     两个方向的选项都先铺这一层，差别只在后面接的那个区间——前端渲染的是同一组字段，
-    拼两遍的话，加一个要素时总有一边会被漏掉。
+    拼两遍的话，加一个要素时总有一边会被漏掉。理由（`app.operation_advice.reasons`）
+    要引用的产品要素也在这一层里，图按产品代码加载后拿它当 `product`，不再另拼一份。
     """
     return {
         "product_code": product.product_code,
@@ -73,7 +88,7 @@ def _product_elements(product: Product) -> dict:
 
 def _purchase_option(product: Product, available_balance: Decimal) -> dict:
     return {
-        **_product_elements(product),
+        **product_elements(product),
         "max_amount": purchase_ceiling(product, available_balance),
         # 买不起的项**仍然列出**（前端禁用并注明原因）：藏掉会让经理以为候选池里少了一只，
         # 而那只正是他要拿来跟客户解释的东西。判定与受理同一处口径。
@@ -83,7 +98,7 @@ def _purchase_option(product: Product, available_balance: Decimal) -> dict:
 
 def _redemption_option(product: Product, shares: Decimal) -> dict:
     return {
-        **_product_elements(product),
+        **product_elements(product),
         # 赎回的区间是份额，不是金额：客户侧自助赎回本来就按份额填（可部分赎回）。
         "max_shares": shares,
         # 赎回没有余额门槛——卖出不需要先有钱。这个方向的「选项成立」就是有份额可卖：
@@ -124,6 +139,56 @@ def advice_options(
     if direction == PURCHASE:
         return [_purchase_option(rows[code], available_balance) for code in eligible]
     return [_redemption_option(rows[code], held_shares[code]) for code in eligible]
+
+
+def resolve_advice_choice(
+    db: Session,
+    *,
+    customer_id: int,
+    direction: str,
+    product_code: str,
+    amount: Decimal | None = None,
+    shares: Decimal | None = None,
+    now: datetime,
+) -> tuple[dict, Decimal]:
+    """受理发起人给的三个输入，返回「选项 + 选定的那个数」（金额或份额）。
+
+    按 `product_code` 在 `advice_options` 的结果里找——读取端点与受理校验读的是同一份
+    计算，选品规则不会因为多一个入口而漂移（ADR-0021 的主要实现约束）。找不到就是
+    拒绝：候选池外的产品、已持有做申购、未持有做赎回，三种情况都落在「这个方向下没有
+    这只产品」上，因此两条方向的文案各自只有一句。
+
+    区间也直接用可选项里的两个数（`min_amount` / `max_amount`、`max_shares`）：它们是
+    受理侧成交口径算出来的（`purchase_cost` / 持仓份额），在这里再算一遍费率就是第二套
+    口径，而两套口径差一分钱的表现是「下拉里有这只产品，一提交被拒」。
+
+    金额与份额二选一由方向决定，因此缺失是**发起人的输入错了**，不是请求体不成立。
+    """
+    options = advice_options(db, customer_id=customer_id, direction=direction, now=now)
+    option = next(
+        (item for item in options if item["product_code"] == product_code),
+        None,
+    )
+    if option is None:
+        raise AppError(
+            400, NO_CANDIDATE_MESSAGE if direction == PURCHASE else NO_HOLDING_MESSAGE
+        )
+
+    if direction == PURCHASE:
+        if amount is None:
+            raise AppError(400, MISSING_AMOUNT_MESSAGE)
+        if amount < option["min_amount"]:
+            raise AppError(400, BELOW_MIN_AMOUNT_MESSAGE)
+        if amount > option["max_amount"]:
+            # 上限就是「再添一分钱就买不起」的那一分钱：超了它必然付不起金额与手续费。
+            raise AppError(400, NOT_ENOUGH_BALANCE_MESSAGE)
+        return option, amount
+
+    if shares is None:
+        raise AppError(400, MISSING_SHARES_MESSAGE)
+    if shares <= ZERO or shares > option["max_shares"]:
+        raise AppError(400, INVALID_SHARES_MESSAGE)
+    return option, shares
 
 
 def _serialize_option(option: dict, direction: str) -> dict:

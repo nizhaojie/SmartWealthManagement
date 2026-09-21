@@ -856,9 +856,9 @@ class OperationAdviceDraft(Base):
     """操作建议的 AI 原稿；同样没有 update_time——落库后不可修改。
 
     载荷与方案分表（ADR-0020）：方案特有的候选池快照、配置建议、画像警示在这里
-    一个都没有，操作建议只有「一个产品、一个方向、一个金额、一条理由」。一次只
-    对应一个产品一个方向，所以方向与产品各是一列，不是一段 JSON；金额必填，因此
-    非空且带 `amount > 0` 约束。
+    一个都没有，操作建议只有「一个产品、一个方向、一个金额、一条理由」，赎回另带
+    一个份额数（ADR-0021）。一次只对应一个产品一个方向，所以方向与产品各是一列，
+    不是一段 JSON；金额必填，因此非空且带 `amount > 0` 约束。
 
     发起人是客户经理（`manager_id`），放行仍只开放给理财顾问——发起与放行是两件事。
     """
@@ -871,6 +871,10 @@ class OperationAdviceDraft(Base):
             name="ck_operation_advice_draft_direction",
         ),
         CheckConstraint("amount > 0", name="ck_operation_advice_draft_amount_positive"),
+        CheckConstraint(
+            "redeemed_shares IS NULL OR redeemed_shares > 0",
+            name="ck_operation_advice_draft_redeemed_shares_positive",
+        ),
         CheckConstraint(
             "content_classification IN ('投顾内容','事实性内容')",
             name="ck_operation_advice_draft_content_classification",
@@ -890,6 +894,13 @@ class OperationAdviceDraft(Base):
     product_code: Mapped[str] = mapped_column(String(32), comment="建议的产品代码")
     direction: Mapped[str] = mapped_column(String(8), comment="操作方向")
     amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), comment="建议金额")
+    # 赎回时的份额（份额 × 净值 = 上面的金额）。**为空表示「全部赎回」**：那是改动
+    # 之前落库的行——当时只存金额，成交用的是接受那一刻的全部持仓份额。新写入的赎回
+    # 建议一律带份额，申购恒为空；别把可空读成「可选的全部赎回」，给新行写空值会让
+    # 接受侧那条旧分支被重新激活，而演示里看不出来（迁移 0028）。
+    redeemed_shares: Mapped[Decimal | None] = mapped_column(
+        Numeric(18, 4), nullable=True, comment="赎回份额（为空表示改动之前的全部赎回）"
+    )
     reason: Mapped[str] = mapped_column(Text, comment="建议理由")
     content_classification: Mapped[str] = mapped_column(String(32), comment="内容分类")
     generated_at: Mapped[datetime] = mapped_column(DateTime, comment="生成时间")

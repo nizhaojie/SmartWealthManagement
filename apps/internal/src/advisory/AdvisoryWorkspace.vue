@@ -90,6 +90,8 @@ async function confirmGenerate(): Promise<void> {
     });
     currentCustomer.setCustomer(dialogCustomerId.value);
     dialogOpen.value = false;
+    // 生成会立刻产生一条待审内容：刷新一次，角标不必等下一次进壳。
+    await queue.refresh();
     await router.push({ name: "advisory-review", params: { draftId: draft.id } });
   } catch (error) {
     generateError.value = errorMessage(error, "生成方案失败");
@@ -109,6 +111,7 @@ async function generateDirect(): Promise<void> {
       advisoryRequestId: null,
     });
     currentCustomer.setCustomer(directCustomerId.value);
+    await queue.refresh();
     await router.push({ name: "advisory-review", params: { draftId: draft.id } });
   } catch (error) {
     generateError.value = errorMessage(error, "生成方案失败");

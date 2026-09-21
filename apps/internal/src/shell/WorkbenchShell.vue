@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, onMounted } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { AppShell, type AppShellNavItem } from "@wealth/shared";
+import { useAdvisoryQueueStore } from "../advisory/queueStore";
 import { useAuthStore } from "../stores/auth";
 import { iconForModule } from "./moduleIcons";
 import { getModule, visibleModules } from "./modules";
@@ -11,6 +12,8 @@ import RiskAlertSummaryCard from "./RiskAlertSummaryCard.vue";
 const route = useRoute();
 const router = useRouter();
 const auth = useAuthStore();
+// 待审计数的唯一来源，与审核页卡片标题读的是同一份（见 advisory/queueStore）。
+const queue = useAdvisoryQueueStore();
 
 // 壳把两个注入通道交给页面；没有页面注入检查器时 AppShell 自动塌成两栏。
 const pageSlots = providePageSlots();
@@ -21,8 +24,18 @@ const navItems = computed<AppShellNavItem[]>(() =>
     label: module.label,
     name: `nav-${module.id}`,
     icon: iconForModule(module.id),
+    // 角标只挂「投顾助手」一项，而它本身只对理财顾问可见（modules.ts），
+    // 因此角色隔离跟着模块可见性走，不另加判断。
+    // 取数失败或计数为 0 时这里是 undefined：壳的 v-if 一并覆盖，不渲染 0。
+    badge: module.id === "advisory" ? queue.pendingReviewCount : undefined,
   })),
 );
+
+// 进壳就拉一次：角标不能等到顾问点进投顾助手才出现，那正是它要避免的事。
+// 之后只在审核动作成功后刷新——不加轮询，工作台开着不动时新内容不会自己冒出来。
+onMounted(() => {
+  void queue.refresh();
+});
 
 const currentModule = computed(() => getModule(route.meta.moduleId));
 const activeKey = computed(() => currentModule.value?.id ?? "");

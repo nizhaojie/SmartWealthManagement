@@ -5,6 +5,7 @@ import { ApiError, PageHeader, PanelCard } from "@wealth/shared";
 import AdvisoryCommentsPanel from "../advisory/AdvisoryCommentsPanel.vue";
 import ReviewDecisionPanel from "../advisory/ReviewDecisionPanel.vue";
 import { canReview, isDecided } from "../advisory/reviewView";
+import { useAdvisoryQueueStore } from "../advisory/queueStore";
 import type { AdvisoryComment } from "../advisory/types";
 import { ADVISOR } from "../auth/identity";
 import { errorMessage } from "../format";
@@ -40,6 +41,8 @@ const route = useRoute();
 const router = useRouter();
 const auth = useAuthStore();
 const currentCustomer = useCurrentCustomerStore();
+// 放行 / 驳回之后这条内容离开待审队列，壳上的角标要跟着掉。
+const queue = useAdvisoryQueueStore();
 
 const adviceId = computed(() => Number(route.params.adviceId));
 
@@ -119,6 +122,8 @@ async function submitRelease(): Promise<void> {
   try {
     await releaseAdvice(adviceId.value);
     review.value = { advice_id: adviceId.value, status: "已放行" };
+    // 动作成功之后才刷新：失败时内容仍在待审队列里，角标不该动。
+    await queue.refresh();
   } catch (error) {
     actionError.value = errorMessage(error, "放行失败");
   } finally {
@@ -132,6 +137,7 @@ async function submitReject(reason: string): Promise<void> {
   try {
     await rejectAdvice(adviceId.value, reason);
     review.value = { advice_id: adviceId.value, status: "已驳回" };
+    await queue.refresh();
   } catch (error) {
     actionError.value = errorMessage(error, "驳回失败");
   } finally {

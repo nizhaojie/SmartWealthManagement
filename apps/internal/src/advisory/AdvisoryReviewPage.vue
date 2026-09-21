@@ -20,6 +20,7 @@ import {
   rejectDraft,
 } from "./api";
 import { canReview, isDecided, toCandidatePayload } from "./reviewView";
+import { useAdvisoryQueueStore } from "./queueStore";
 import type {
   AdvisoryComment,
   AdvisoryDraft,
@@ -42,6 +43,8 @@ const route = useRoute();
 const router = useRouter();
 const auth = useAuthStore();
 const currentCustomer = useCurrentCustomerStore();
+// 放行 / 驳回之后这条内容离开待审队列，壳上的角标要跟着掉。
+const queue = useAdvisoryQueueStore();
 
 const draftId = computed(() => Number(route.params.draftId));
 
@@ -132,6 +135,8 @@ async function submitRelease(): Promise<void> {
       allocationSuggestion: { ...editedAllocation.value },
     });
     review.value = { draft_id: draftId.value, status: "已放行" };
+    // 动作成功之后才刷新：失败时内容仍在待审队列里，角标不该动。
+    await queue.refresh();
   } catch (error) {
     actionError.value = errorMessage(error, "放行失败");
   } finally {
@@ -145,6 +150,7 @@ async function submitReject(reason: string): Promise<void> {
   try {
     await rejectDraft(draftId.value, reason);
     review.value = { draft_id: draftId.value, status: "已驳回" };
+    await queue.refresh();
   } catch (error) {
     actionError.value = errorMessage(error, "驳回失败");
   } finally {

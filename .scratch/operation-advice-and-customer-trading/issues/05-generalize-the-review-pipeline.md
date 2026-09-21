@@ -39,11 +39,26 @@
 
 **操作建议载荷表只有「一个产品、一个方向、一个金额、一条理由」。** 候选池快照、配置建议、画像警示
 一个都不带（它们是配置方案特有的，ADR-0020 的 Consequences）；`direction IN ('申购','赎回')` 与
-`amount > 0` 落在表上，理由非空。业务操作 Agent 的生成入口是 #06 的活，本份只把载荷与流水线这一侧
-打通——测试直接落一条载荷与审核记录来钉住流水线本身。
+`amount > 0` 落在表上。**理由只做非空列、不做「非空串」约束**——那是写入侧的业务口径，与
+`fin_transfer` 的收款人姓名同一处（见迁移 0025 的注释），表结构管的是数据完整性。
+`content_classification` 留着，因为投顾内容带内容分类（disclaimer 按它给，ADR-0016），建议没有理由例外。
+业务操作 Agent 的生成入口是 #06 的活，本份只把载荷与流水线这一侧打通——测试直接落一条载荷与
+审核记录来钉住流水线本身。
+
+**待审队列对操作建议多返回一份载荷摘要**（产品代码与名称、方向、金额）：#05 只要求「各带类型标注」，
+但队列里只有 id 的那一行没人能用；摘要字段是队列契约的一部分，方案那一侧对应的是 `tilt`。审核页按
+类型渲染不同载荷仍是 #09 的活。
+
+**`content_type` 的取值落在 CheckConstraint 上**，与仓库里 status / action / direction / 内容分类的
+处理一致。代价是 ADR-0020 说的第三类内容（例如财富报告）除了建载荷表还要加一行迁移——它与新增一个
+审核状态、一个内容分类同价，换来的是脏类型进不了库。
 
 ### 与 #06 的交接
 
 `OperationAdviceDraft` 的写入方（record/get/序列化）与它的 LangGraph 运行时都属于 #06：它要在
 `app.advisory.pipeline` 里登记 `CONTENT_TYPE_OPERATION_ADVICE` 的恢复运行时，此后
 `claim_review` / `resume_review` 直接可用，不需要再写第二套加锁与恢复。
+
+登记之外还有一条**必须一并满足的契约**：那张图要用 `app.advisory.runtime` 的同一个 checkpointer
+（`ADVISORY_CHECKPOINTER`）编译——`has_pending_checkpoint` 查的就是它。用别的 checkpointer（哪怕是
+另一个 `MemorySaver()`）不会报错，只会让每次恢复都落到「审核状态已失效」上。

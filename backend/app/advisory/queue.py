@@ -39,6 +39,12 @@ def _waiting_seconds(now: datetime, since: datetime) -> float:
     return max(0.0, (now - since).total_seconds())
 
 
+def _ordered_entries(rows: list[tuple[datetime, dict]], *, newest_first: bool) -> list[dict]:
+    """按时刻排好序再丢掉排序键——它是收集时的临时坐标，不属于返回的行。"""
+    rows.sort(key=lambda row: row[0], reverse=newest_first)
+    return [entry for _moment, entry in rows]
+
+
 def list_queue(db: Session, now: datetime) -> dict:
     pending_requests = []
     request_rows = db.execute(
@@ -127,8 +133,7 @@ def _list_pending_reviews(db: Session, now: datetime) -> list[dict]:
             )
         )
 
-    rows.sort(key=lambda row: row[0])
-    return [entry for _created_at, entry in rows]
+    return _ordered_entries(rows, newest_first=False)
 
 
 def list_my_history(db: Session, advisor_id: int) -> list[dict]:
@@ -188,5 +193,4 @@ def list_my_history(db: Session, advisor_id: int) -> list[dict]:
             )
         )
 
-    rows.sort(key=lambda row: row[0], reverse=True)
-    return [entry for _decided_at, entry in rows]
+    return _ordered_entries(rows, newest_first=True)

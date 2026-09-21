@@ -11,6 +11,9 @@ import { getAssets, listTransactions } from "./assets/api";
 import { login as loginRequest, logout as logoutRequest } from "./auth/api";
 import { clearTokens, getAccessToken } from "./auth/tokenStore";
 import { forgetUsername } from "./auth/username";
+import { getFundingAccount } from "./funding/api";
+import { listMyAdvice } from "./operation-advice/api";
+import type { OperationAdvice } from "./operation-advice/types";
 import { getCandidatePool, listProducts } from "./products/api";
 import { getCurrentAssessment } from "./risk-assessment/api";
 import { router, routes } from "./router";
@@ -23,6 +26,8 @@ vi.mock("./assets/api", () => ({
   listTransactions: vi.fn(),
   getHoldingLookThrough: vi.fn(),
 }));
+vi.mock("./funding/api", () => ({ getFundingAccount: vi.fn() }));
+vi.mock("./operation-advice/api", () => ({ listMyAdvice: vi.fn(), decideAdvice: vi.fn() }));
 vi.mock("./risk-assessment/api", () => ({
   getCurrentAssessment: vi.fn(),
   getQuestionnaire: vi.fn(),
@@ -82,6 +87,8 @@ describe("客户应用·门控与路由", () => {
     vi.mocked(getCandidatePool).mockReset();
     vi.mocked(listAdvisoryRequests).mockReset();
     vi.mocked(listReleasedPlans).mockReset();
+    vi.mocked(listMyAdvice).mockReset();
+    vi.mocked(getFundingAccount).mockReset();
 
     vi.mocked(getCurrentAssessment).mockResolvedValue({ risk_level: "C1", valid_until: "2027-03-15" });
     vi.mocked(getAssets).mockResolvedValue({
@@ -101,6 +108,8 @@ describe("客户应用·门控与路由", () => {
     });
     vi.mocked(listAdvisoryRequests).mockResolvedValue({ requests: [] });
     vi.mocked(listReleasedPlans).mockResolvedValue({ plans: [] });
+    vi.mocked(listMyAdvice).mockResolvedValue({ advice: [] });
+    vi.mocked(getFundingAccount).mockResolvedValue({ available_balance: "100000.00" });
 
     await router.push("/login");
     await router.isReady();
@@ -212,7 +221,15 @@ describe("客户应用·门控与路由", () => {
     const wrapper = mountApp();
     await submitLogin(wrapper, "wangc1", "Test@1234");
 
-    for (const name of ["risk-assessment", "products", "assets", "advisory", "chat"] as const) {
+    for (const name of [
+      "risk-assessment",
+      "products",
+      "assets",
+      "trading",
+      "operation-advice",
+      "advisory",
+      "chat",
+    ] as const) {
       await wrapper.get(`button[name="nav-${name}"]`).trigger("click");
       await flushPromises();
       expect(router.currentRoute.value.path).toBe(`/${name}`);
@@ -231,19 +248,53 @@ describe("客户应用·门控与路由", () => {
     expect(wrapper.get('[data-testid="asset-summary"]').text()).toContain("20420.00");
   });
 
-  // 投顾内容的送达面有固定入口：侧栏第 5 项「我的方案」，没收到方案时也不留空白。
-  it("exposes 我的方案 as the fifth nav item and lands on its page", async () => {
+  // 投顾内容的送达面有固定入口：「我的方案」是资料库，「我的建议」是收件箱，两者不合并。
+  it("exposes 我的方案 as its own nav item and lands on its page", async () => {
     mockSuccessfulLogin();
     const wrapper = mountApp();
     await submitLogin(wrapper, "wangc1", "Test@1234");
 
-    expect(wrapper.findAll(".app-shell__nav-item")).toHaveLength(5);
+    expect(wrapper.findAll(".app-shell__nav-item")).toHaveLength(7);
 
     await wrapper.get('button[name="nav-advisory"]').trigger("click");
     await flushPromises();
 
     expect(router.currentRoute.value.path).toBe("/advisory");
     expect(wrapper.text()).toContain("还没有提交过方案请求");
+  });
+
+  // 待客户决定的建议不能等客户点进「我的建议」才被发现：侧栏角标要在首屏就出现。
+  it("shows the pending badge on 我的建议 and drops it when nothing is pending", async () => {
+    mockSuccessfulLogin();
+    const pending: OperationAdvice = {
+      id: 1,
+      product_code: "F000002",
+      product_name: "天玑债券基金",
+      direction: "申购",
+      amount: "50000.00",
+      reason: "你的债券配置偏低",
+      status: "待客户决定",
+      released_at: "2026-09-21T09:00:00",
+      expires_at: "2026-09-28T09:00:00",
+      decision: null,
+      decided_at: null,
+      disclaimer: null,
+    };
+    vi.mocked(listMyAdvice).mockResolvedValue({ advice: [pending] });
+    const wrapper = mountApp();
+    await submitLogin(wrapper, "wangc1", "Test@1234");
+    await flushPromises();
+
+    expect(wrapper.get('button[name="nav-operation-advice"]').get(".app-shell__nav-badge").text()).toBe(
+      "1",
+    );
+
+    // 没有待决定项时不渲染角标：0 与「还没加载」都不该显示一个数字。
+    vi.mocked(listMyAdvice).mockResolvedValue({ advice: [] });
+    await router.push("/operation-advice");
+    await flushPromises();
+
+    expect(wrapper.find(".app-shell__nav-badge").exists()).toBe(false);
   });
 
   it("returns to the previous view with the browser back button", async () => {

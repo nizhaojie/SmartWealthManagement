@@ -1,29 +1,48 @@
 <script setup lang="ts">
-import { computed } from "vue";
-import { ChatDotRound, Coin, Document, Filter, Odometer } from "@element-plus/icons-vue";
+import { computed, onMounted } from "vue";
+import { Bell, ChatDotRound, Coin, Document, Filter, Odometer, Wallet } from "@element-plus/icons-vue";
 import { useRoute, useRouter } from "vue-router";
 import { AppShell, type AppShellNavItem } from "@wealth/shared";
+import { useAdviceStore } from "../stores/advice";
 import { useAuthStore } from "../stores/auth";
 
 const route = useRoute();
 const router = useRouter();
 const auth = useAuthStore();
+const advice = useAdviceStore();
 
-const navItems: AppShellNavItem[] = [
+// 「交易」是客户主动做的事，「我的建议」是等他做决定的事（收件箱），「我的方案」是资料库
+// （只读回看）。三者在侧栏各占一项：合并任意两项，客户就不会发现还有东西在等他。
+const navItems = computed<AppShellNavItem[]>(() => [
   { key: "chat", label: "智能对话", name: "nav-chat", icon: ChatDotRound },
   { key: "risk-assessment", label: "风险测评", name: "nav-risk-assessment", icon: Odometer },
   { key: "products", label: "产品筛选", name: "nav-products", icon: Filter },
   { key: "assets", label: "我的资产", name: "nav-assets", icon: Coin },
+  { key: "trading", label: "交易", name: "nav-trading", icon: Wallet },
+  {
+    key: "operation-advice",
+    label: "我的建议",
+    name: "nav-operation-advice",
+    icon: Bell,
+    // 角标数由应用算出（待客户决定的条数），壳只负责渲染这个数字。
+    badge: advice.pendingCount,
+  },
   { key: "advisory", label: "我的方案", name: "nav-advisory", icon: Document },
-];
+]);
 
 // 导航键与路径首段同名（key 就是 `/${key}`）：详情路由的 name 与导航键不同
 // （advisory-plan vs advisory），按路径取键，进详情时侧栏仍停在「我的方案」。
 const activeKey = computed(() => route.path.split("/").filter(Boolean)[0] ?? "");
 // 顶栏左侧的页面标题：壳不认识模块名，key → 标题的映射留在应用里。
 const activeLabel = computed(
-  () => navItems.find((item) => item.key === activeKey.value)?.label ?? "",
+  () => navItems.value.find((item) => item.key === activeKey.value)?.label ?? "",
 );
+
+// 侧栏一出现就把待决定建议拉一次：角标不能等到客户点进「我的建议」才出现——
+// 那正是它要避免的事（客户错过待他决定的东西）。
+onMounted(() => {
+  void advice.refresh();
+});
 
 function onSelect(key: string): void {
   void router.push(`/${key}`);

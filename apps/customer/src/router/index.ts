@@ -4,10 +4,12 @@ import AdvisoryPlanPage from "../advisory/AdvisoryPlanPage.vue";
 import AssetsPage from "../assets/AssetsPage.vue";
 import LoginPage from "../auth/LoginPage.vue";
 import ChatPage from "../chat/ChatPage.vue";
+import AdvicePage from "../operation-advice/AdvicePage.vue";
 import ProductScreeningPage from "../products/ProductScreeningPage.vue";
 import RiskAssessmentWorkspace from "../risk-assessment/RiskAssessmentWorkspace.vue";
 import CustomerShell from "../shell/CustomerShell.vue";
 import { useAuthStore } from "../stores/auth";
+import TradingPage from "../trading/TradingPage.vue";
 
 export const routes: RouteRecordRaw[] = [
   { path: "/login", name: "login", component: LoginPage, meta: { public: true } },
@@ -20,6 +22,9 @@ export const routes: RouteRecordRaw[] = [
       { path: "risk-assessment", name: "risk-assessment", component: RiskAssessmentWorkspace },
       { path: "products", name: "products", component: ProductScreeningPage },
       { path: "assets", name: "assets", component: AssetsPage },
+      // 交易是写操作页面，独立于只读的资产页；建议是收件箱，独立于只读的「我的方案」。
+      { path: "trading", name: "trading", component: TradingPage },
+      { path: "operation-advice", name: "operation-advice", component: AdvicePage },
       { path: "advisory", name: "advisory", component: AdvisoryPlanPage },
       // 一份方案有自己的地址：列表与详情是两个可后退的页面，不是一个页面里的展开区。
       {

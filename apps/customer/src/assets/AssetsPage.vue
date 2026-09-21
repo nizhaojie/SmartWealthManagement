@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
+import { useRouter } from "vue-router";
 import { ApiError, PageHeader, PanelCard, StatCard } from "@wealth/shared";
+import { useAvailableBalance } from "../funding/useAvailableBalance";
 import { RISK_LEVEL_LABELS } from "../risk-assessment/grades";
 import ActualAllocationChart from "./ActualAllocationChart.vue";
 import HoldingLookThrough from "./HoldingLookThrough.vue";
@@ -13,9 +15,15 @@ import type { CustomerAssets, LookThrough } from "./types";
 const HOLDINGS_EMPTY_HINT =
   "你还没有持有任何产品。买入后这里会列出每一笔持仓的份额、成本、市值与盈亏。";
 
+const router = useRouter();
+
 const assets = ref<CustomerAssets | null>(null);
 const loading = ref(true);
 const errorMessage = ref("");
+
+// 可用余额与持仓总市值是两个概念（CONTEXT「资金账户」）：前者是这里能立即动用的钱，
+// 后者是已经变成产品的钱。只给总市值，客户会把「我有多少钱」读成「我能买多少」。
+const { balance, error: balanceError, load: loadBalance } = useAvailableBalance();
 
 const openedLookThrough = ref("");
 const lookThroughs = ref<Record<string, LookThrough>>({});
@@ -45,6 +53,10 @@ async function loadAssets(): Promise<void> {
   }
 }
 
+function goTrading(): void {
+  void router.push({ name: "trading" });
+}
+
 async function toggleLookThrough(productCode: string): Promise<void> {
   if (openedLookThrough.value === productCode) {
     openedLookThrough.value = "";
@@ -70,22 +82,33 @@ async function toggleLookThrough(productCode: string): Promise<void> {
   }
 }
 
-onMounted(loadAssets);
+onMounted(() => {
+  void Promise.all([loadAssets(), loadBalance()]);
+});
 </script>
 
 <template>
   <div class="assets">
-    <PageHeader title="我的资产" :breadcrumb="['客户视图', '我的资产']" />
+    <PageHeader title="我的资产" :breadcrumb="['客户视图', '我的资产']">
+      <template #actions>
+        <el-button name="go-trading" data-testid="go-trading" @click="goTrading">去交易</el-button>
+      </template>
+    </PageHeader>
 
     <p v-if="errorMessage" class="assets__error" role="alert" data-testid="assets-error">
       {{ errorMessage }}
     </p>
 
     <div v-else class="assets__stats" data-testid="asset-summary">
+      <StatCard title="可用余额（元）" :value="balance" accent="primary" />
       <StatCard title="持仓总市值（元）" :value="totalMarketValue" accent="primary" />
       <StatCard title="持仓只数" :value="holdingCount" accent="primary" />
       <StatCard title="风险承受等级" :value="riskLevelText" accent="primary" />
     </div>
+
+    <p v-if="balanceError" class="assets__error" role="alert" data-testid="balance-error">
+      {{ balanceError }}
+    </p>
 
     <p v-if="assets?.risk_level_valid_until" class="assets__validity">
       测评有效期至 {{ assets.risk_level_valid_until }}

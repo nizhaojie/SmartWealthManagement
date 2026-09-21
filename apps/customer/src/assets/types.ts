@@ -51,17 +51,25 @@ export type CustomerAssets = {
   holdings: Holding[];
 };
 
+/**
+ * 合并流水里的**一种形状**：申购、赎回与转账共用它（服务端的 `_serialize_flow`）。
+ *
+ * 产品的三项与收款人的两项各自只对一类记录成立，另一类一律为空——转账没有产品，
+ * 申赎没有收款人。写死成非空会让界面把「不存在」读成「有值」。
+ */
 export type TransactionRecord = {
   transaction_no: string;
   transaction_type: string;
-  product_code: string;
-  product_name: string;
+  product_code: string | null;
+  product_name: string | null;
   amount: string;
-  shares: string;
-  nav: string;
-  fee: string;
+  shares: string | null;
+  nav: string | null;
+  fee: string | null;
   status: string;
   traded_at: string;
+  payee_name: string | null;
+  payee_account: string | null;
 };
 
 export type TransactionList = {

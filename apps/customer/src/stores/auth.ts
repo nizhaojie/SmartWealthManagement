@@ -9,6 +9,7 @@ import { defineStore } from "pinia";
 import { login as loginRequest, logout as logoutRequest } from "../auth/api";
 import { clearTokens, setTokens, tokens as storedTokens } from "../auth/tokenStore";
 import { currentUsername, forgetUsername, rememberUsername } from "../auth/username";
+import { useAdviceStore } from "./advice";
 import { useChatStore } from "./chat";
 
 export const useAuthStore = defineStore("auth", () => {
@@ -20,8 +21,9 @@ export const useAuthStore = defineStore("auth", () => {
     setTokens({ accessToken: result.access_token, refreshToken: result.refresh_token });
     // 顶栏「登出」左侧要显示当前用户名（客户登录时填写的账号），而客户侧没有取身份的接口。
     rememberUsername(username);
-    // 会话不跨登录延续：上一次登录留下的消息不带进新会话。
+    // 会话不跨登录延续：上一次登录留下的消息与待决定角标都不带进新会话。
     useChatStore().reset();
+    useAdviceStore().reset();
   }
 
   async function logout(): Promise<void> {
@@ -31,6 +33,7 @@ export const useAuthStore = defineStore("auth", () => {
       clearTokens();
       forgetUsername();
       useChatStore().reset();
+      useAdviceStore().reset();
     }
   }
 

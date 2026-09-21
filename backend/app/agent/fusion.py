@@ -50,10 +50,10 @@ def fuse_and_rank(
     if not graph_passages:
         # 没有图谱段落参与融合（四类降级情形都会落到这里）——原样返回向量结果，
         # 不能连 vector_weight 都乘上去。一旦乘了，退化态就不再是「和纯向量检索
-        # 一样」，而是「打了折的纯向量检索」：默认权重 0.6/0.4 会把恰好卡在
-        # retrieval_score_threshold 之上的向量匹配打到阈值以下，图谱完全没
-        # 参与却让原本能生成回答的问题被兜底话术接管，这就不是「增强不是
-        # 依赖」了，是依赖坏了会拖累主链路。
+        # 一样」，而是「打了折的纯向量检索」：默认权重 0.6/0.4 会把向量相似度打到
+        # 阈值以下，图谱完全没参与却让原本能生成回答的问题被兜底话术接管，这就
+        # 不是「增强不是依赖」了，是依赖坏了会拖累主链路。（兜底判定本身已改用
+        # 融合前的 retrieval_score，这条直通仍是排序与分数展示的正确性所需。）
         return vector_chunks
 
     graph_chunks = [_graph_passage_to_chunk(passage, index) for index, passage in enumerate(graph_passages)]

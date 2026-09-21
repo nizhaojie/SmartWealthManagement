@@ -95,6 +95,10 @@ class AgentState(TypedDict, total=False):
     history: list[dict]
     intent: Intent
     chunks: list[ChunkResult]
+    # 融合前的最强证据分：向量相似度与图谱段落分取大，且不做向量/图谱权重缩放。
+    # 兜底判定用它而不是融合后的综合分——权重的职责是把上下文排出先后，不该让
+    # 「图谱是否参与」改变「有没有依据」的结论（见 route_after_retrieve）。
+    retrieval_score: float
     tool_calls: list[dict]
     answer: str
     citations: list[Citation]
@@ -174,6 +178,14 @@ def _build_graph(db: Session, settings: Settings, driver: Driver, graph_namespac
             vector_weight=settings.graphrag_vector_weight,
             graph_weight=settings.graphrag_graph_weight,
         )
+        # 证据强度在融合前取：向量相似度与图谱段落分取大。融合会把向量分乘上
+        # vector_weight（默认 0.6），拿缩放后的综合分去比阈值，会让一条真实命中
+        # 的向量结果被打成不合格——图谱是增强不是依赖这条约束也要求它不能。
+        retrieval_score = max(
+            [chunk.score for chunk in state["chunks"]]
+            + [passage.score for passage in augmentation.passages],
+            default=0.0,
+        )
         tool_call = {
             "tool": "graphrag_fusion",
             "input": {"question": state["question"]},
@@ -184,7 +196,11 @@ def _build_graph(db: Session, settings: Settings, driver: Driver, graph_namespac
                 "degradation_reason": augmentation.degradation_reason,
             },
         }
-        return {"chunks": fused, "tool_calls": [*state.get("tool_calls", []), tool_call]}
+        return {
+            "chunks": fused,
+            "retrieval_score": retrieval_score,
+            "tool_calls": [*state.get("tool_calls", []), tool_call],
+        }
 
     def generate_node(state: AgentState) -> dict:
         chunks = state["chunks"]
@@ -246,9 +262,17 @@ def _build_graph(db: Session, settings: Settings, driver: Driver, graph_namespac
 
     def route_after_retrieve(state: AgentState) -> str:
         chunks = state["chunks"]
-        # 融合已经把向量结果与图谱结果按综合分排好序（graph_augment_node），
-        # chunks[0] 即最高分，不论它来自哪条路径。
-        if not chunks or chunks[0].score < settings.retrieval_score_threshold:
+        # 比的是融合前的最强证据分（graph_augment_node 算出的 retrieval_score）：
+        # 向量相似度与图谱段落分同一量纲，阈值据此校准。融合后的 chunks[0].score
+        # 是加权综合分——图谱一参与，向量分就被乘上 vector_weight，用它判兜底会
+        # 凭空抬高门槛，让本该生成的回答被兜底话术接管。
+        # 关键词兜底路径打的是「命中字词占比」，与余弦不是一个量纲，用另一条阈值。
+        threshold = (
+            settings.retrieval_keyword_score_threshold
+            if any(chunk.source == "keyword" for chunk in chunks)
+            else settings.retrieval_score_threshold
+        )
+        if not chunks or state["retrieval_score"] < threshold:
             return "fallback"
         return "generate"
 

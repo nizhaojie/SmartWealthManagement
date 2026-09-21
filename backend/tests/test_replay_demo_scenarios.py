@@ -629,9 +629,10 @@ def test_chat_presets_cite_legally() -> None:
         assert max(preset.cited) <= len(preset.chunks)
         inline = {int(number) for number in re.findall(r"\[(\d+)\]", preset.answer)}
         assert inline == set(preset.cited)
-        # 分块分数全部高于检索阈值，且严格递减，融合后顺序确定。
+        # 分块分数全部高于检索阈值（融合前证据分），且严格递减，融合后顺序确定。
+        threshold = get_settings().retrieval_score_threshold
         scores = [chunk.score for chunk in preset.chunks]
-        assert all(score >= 0.35 for score in scores)
+        assert all(score >= threshold for score in scores)
         assert scores == sorted(scores, reverse=True)
 
 

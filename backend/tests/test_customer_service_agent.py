@@ -12,6 +12,7 @@ import app.agent.graph as agent_graph
 from app.agent import memory as agent_memory
 from app.db.models import ConversationArchive
 from app.knowledge.service import ChunkResult
+from app.knowledge_graph.graphrag import GraphAugmentation, GraphPassage
 from app.llm.provider import GroundedAnswer
 from app.main import app
 from app.settings import get_settings
@@ -125,6 +126,88 @@ def test_unrelated_question_returns_fallback_without_llm_call(chat_client, monke
     data = response.json()["data"]
     assert data["citations"] == []
     assert "人工客服" in data["answer"] or "95588" in data["answer"]
+
+
+def test_vector_hit_below_the_calibrated_threshold_falls_back(chat_client, monkeypatch):
+    """阈值按向量相似度量纲校准：0.45 是真实 embedding 对无关文本的常见水平，必须兜底。
+
+    这条用例把「RETRIEVAL_SCORE_THRESHOLD 已从 0.35 上调」钉住——退回旧值就失效。
+    """
+    noisy = ChunkResult(
+        knowledge_id=5555,
+        knowledge_type="FAQ",
+        chunk_index=0,
+        heading_path=[],
+        content="与本问题无关的检索片段。",
+        score=0.45,
+        title="无关文档",
+        source_file="noise.txt",
+    )
+    monkeypatch.setattr(agent_graph, "search_chunks", lambda *a, **k: [noisy])
+
+    def _fail(*args, **kwargs):
+        raise AssertionError("证据分低于阈值不应发起生成")
+
+    monkeypatch.setattr(agent_graph, "generate_grounded_answer", _fail)
+
+    token, _ = _customer_login(chat_client)
+    response = _chat(chat_client, token, "阿尔法半人马座恒星系统的行星编号列表是什么")
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["citations"] == []
+    assert "95588" in data["answer"]
+
+
+def test_graph_fusion_does_not_scale_a_vector_hit_below_the_threshold(
+    chat_client, monkeypatch
+):
+    """图谱参与融合只改变排序：向量命中分不被 vector_weight 打折，仍按原始相似度过阈值。
+
+    融合后 chunks[0].score 是 0.6 * 0.9 = 0.54，低于阈值 0.55；兜底判定用的是融合前的
+    证据分（向量 0.9 与图谱 1.0 取大），因此仍应生成。没有这次解耦，图谱一命中就会把
+    向量命中的回答误判成「检索不到依据」。
+    """
+    hit = ChunkResult(
+        knowledge_id=6666,
+        knowledge_type="FAQ",
+        chunk_index=0,
+        heading_path=[],
+        content="产品风险等级与客户风险承受等级是两套独立的刻度。",
+        score=0.9,
+        title="适当性匹配",
+        source_file="suitability.txt",
+    )
+    monkeypatch.setattr(agent_graph, "search_chunks", lambda *a, **k: [hit])
+    monkeypatch.setattr(
+        agent_graph,
+        "augment_with_graph",
+        lambda *a, **k: GraphAugmentation(
+            passages=[
+                GraphPassage(
+                    content="王守成持有产品「天枢货币基金」（货币基金，风险等级R1）。",
+                    score=1.0,
+                    entity_type="customer",
+                    entity_value="王守成",
+                    tool="customer_holdings",
+                )
+            ],
+        ),
+    )
+    monkeypatch.setattr(
+        agent_graph,
+        "generate_grounded_answer",
+        lambda question, history, chunks, settings: GroundedAnswer(
+            text=f"{chunks[0].content}[1]", cited_chunk_numbers=[1]
+        ),
+    )
+
+    token, _ = _customer_login(chat_client)
+    response = _chat(chat_client, token, "客户能否申购超出自己风险承受等级的产品？")
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["citations"], "向量命中不因图谱参与被权重打折，仍应生成带引用的回答"
 
 
 def test_question_matching_uploaded_document_returns_structured_citations(chat_client):

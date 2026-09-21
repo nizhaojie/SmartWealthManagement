@@ -71,9 +71,10 @@ class ChunkResult:
     score: float
     title: str
     source_file: str
-    # GraphRAG 融合（ticket 03）新增：向量检索产出的结果固定是 "vector"，
-    # 图谱查询产出的段落会用 "graph" 构造同类型对象以便和向量结果一起排序。
-    source: Literal["vector", "graph"] = "vector"
+    # 结果来源：向量检索固定是 "vector"；图谱查询产出的段落用 "graph" 构造同类型
+    # 对象，以便和向量结果一起排序；向量不可用降级为关键词检索时标 "keyword"。
+    # 三种来源的打分不是同一量纲（余弦相似度 / 命中字词占比），兜底判定据此分设阈值。
+    source: Literal["vector", "graph", "keyword"] = "vector"
 
 
 def create_pending_document(
@@ -420,6 +421,7 @@ def keyword_search_chunks(
             score=score,
             title=meta.title,
             source_file=meta.source_file,
+            source="keyword",
         )
         for score, chunk, meta in scored[:top_k]
     ]

@@ -92,10 +92,11 @@ def test_fusion_with_no_graph_passages_returns_vector_chunks_unchanged():
 
 def test_fusion_does_not_deflate_vector_score_when_graph_degrades():
     # 回归用例：图谱降级（四类情形之一）时 graph_passages 恒为 []。融合不能因此
-    # 把 vector_weight（默认 0.6）乘上向量原始分——0.5 * 0.6 = 0.3 会跌破既有
-    # 的 retrieval_score_threshold（0.35），让一个原本能生成回答的问题在图谱
-    # 完全没参与的情况下被兜底话术接管。图谱是增强，不是依赖：没有图谱段落
-    # 参与融合时，向量结果必须和融合之前完全一样，包括分数本身。
+    # 把 vector_weight（默认 0.6）乘上向量原始分——0.5 * 0.6 = 0.3 会把分数打出
+    # 类似「低于阈值」的样子。图谱是增强，不是依赖：没有图谱段落参与融合时，
+    # 向量结果必须和融合之前完全一样，包括分数本身。
+    # （兜底判定另用融合前的 retrieval_score，见 app.agent.graph；这条用例守住的是
+    # 融合本身不得擅自改动向量分这一半。）
     vector_chunks = [_vector_chunk(knowledge_id=1, chunk_index=0, content="向量片段", score=0.5)]
 
     ranked = fuse_and_rank(vector_chunks, [], vector_weight=0.6, graph_weight=0.4)

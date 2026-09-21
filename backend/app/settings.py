@@ -57,7 +57,10 @@ class Settings(BaseSettings):
     minio_bucket: str = "wealth-knowledge"
     minio_secure: bool = False
 
-    jwt_secret: str = "change-me-before-any-real-use"
+    # HS256 的密钥长度直接决定签名强度，PyJWT 对 <32 字节的密钥会发
+    # InsecureKeyLengthWarning。缺省占位符刻意做到 ≥32 字节，生产环境仍须
+    # 在 .env 里换成一份等长（或更长）的随机密钥。
+    jwt_secret: str = "change-me-before-any-real-use-32bytes"
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 15
     refresh_token_expire_days: int = 7
@@ -89,7 +92,14 @@ class Settings(BaseSettings):
 
     demo_replay: bool = False
 
-    retrieval_score_threshold: float = 0.35
+    # 检索兜底阈值：比的是「融合前的最强证据分」（向量相似度与图谱段落分取大、
+    # 不做权重缩放，见 app.agent.graph 的 route_after_retrieve）。真实 embedding
+    # （如 text-embedding-v3）对无关文本的余弦相似度也能到 0.4~0.5，阈值必须校准
+    # 在这条「无关噪声基线」之上，否则无依据的问题会带着一堆低相关分块进入生成。
+    retrieval_score_threshold: float = 0.55
+    # 关键词兜底路径（向量超时/不可用时的降级）单独校准：它打的是「命中字词占比」，
+    # 与余弦相似度不是一个量纲，用上面的 0.55 会把本来命中的降级结果全部打成兜底。
+    retrieval_keyword_score_threshold: float = 0.35
     chat_memory_ttl_minutes: int = 30
     chat_memory_token_budget: int = 2000
     human_service_channel: str = "95588"

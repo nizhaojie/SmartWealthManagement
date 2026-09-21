@@ -136,14 +136,14 @@ def _released_at(db: Session, review: AdvisoryReview) -> datetime:
     return moment
 
 
-def _delivered_reviews(
-    db: Session, *, customer_id: int
-) -> list[tuple[AdvisoryReview, OperationAdviceDraft]]:
+def _delivered_statement(*, customer_id: int):
     """这位客户名下**已放行**的操作建议。
 
-    过滤条写在查询里而不是调用方：未放行的建议在客户侧没有任何出口（护栏 5 的第二个出口）。
+    过滤条只写在这一处：它是护栏 5 的第二个出口（未放行的建议在客户侧没有任何出口），
+    列表读、单条读与决定三处共用同一条语句，谁也不会漏掉其中一条过滤——分开写的话，
+    某一次改动漏掉 `status` 那一条就是一个不会报错的越权读。
     """
-    rows = db.execute(
+    return (
         select(AdvisoryReview, OperationAdviceDraft)
         .join(OperationAdviceDraft, OperationAdviceDraft.id == AdvisoryReview.content_ref)
         .where(
@@ -151,7 +151,13 @@ def _delivered_reviews(
             AdvisoryReview.status == STATUS_RELEASED,
             OperationAdviceDraft.customer_id == customer_id,
         )
-    ).all()
+    )
+
+
+def _delivered_reviews(
+    db: Session, *, customer_id: int
+) -> list[tuple[AdvisoryReview, OperationAdviceDraft]]:
+    rows = db.execute(_delivered_statement(customer_id=customer_id)).all()
     return [(review, draft) for review, draft in rows]
 
 
@@ -159,13 +165,8 @@ def _delivered_advice(
     db: Session, *, advice_id: int, customer_id: int
 ) -> tuple[AdvisoryReview, OperationAdviceDraft]:
     row = db.execute(
-        select(AdvisoryReview, OperationAdviceDraft)
-        .join(OperationAdviceDraft, OperationAdviceDraft.id == AdvisoryReview.content_ref)
-        .where(
-            AdvisoryReview.content_type == CONTENT_TYPE_OPERATION_ADVICE,
-            AdvisoryReview.status == STATUS_RELEASED,
-            OperationAdviceDraft.id == advice_id,
-            OperationAdviceDraft.customer_id == customer_id,
+        _delivered_statement(customer_id=customer_id).where(
+            OperationAdviceDraft.id == advice_id
         )
     ).first()
     if row is None:

@@ -227,6 +227,23 @@ def _code_to_product_id(code: str) -> int:
     return int(product_id)
 
 
+def _holding(customer_id: int, product_code: str) -> dict:
+    """这一笔持仓的份额与状态：部分赎回成交后的对照基准。"""
+    from app.db.models import Holding, Product
+
+    with OrmSession(_engine()) as session:
+        row = session.scalar(
+            select(Holding)
+            .join(Product, Product.id == Holding.product_id)
+            .where(
+                Holding.customer_id == customer_id,
+                Product.product_code == product_code,
+            )
+        )
+    assert row is not None
+    return {"shares": row.shares, "status": row.status}
+
+
 def _engine():
     return create_engine(get_settings().test_database_url)
 
@@ -279,6 +296,13 @@ def _delete_customer(customer_id: int) -> None:
                     "DELETE FROM biz_advisory_review"
                     " WHERE content_type = '操作建议' AND content_ref IN ("
                     "  SELECT id FROM biz_operation_advice_draft WHERE customer_id = :id)"
+                ),
+                {"id": customer_id},
+            )
+            connection.execute(
+                text(
+                    "DELETE FROM biz_operation_advice_decision WHERE advice_id IN ("
+                    " SELECT id FROM biz_operation_advice_draft WHERE customer_id = :id)"
                 ),
                 {"id": customer_id},
             )
@@ -653,6 +677,95 @@ def _walk_full_journey(
         headers=advisor,
         json=advice_body,
     ).status_code == 403
+
+    # ---- 顾问放行 → 客户读到产品与金额 → 客户接受 → 成交（申购） ----
+    # 未放行前客户读不到（护栏 5 的第二个出口）；放行之后才进入客户可见集合。
+    assert client.get(
+        f"/api/customer/operation-advice/{advice['id']}", headers=customer
+    ).status_code == 404
+
+    release_advice = client.post(
+        f"/api/internal/operation-advice/{advice['id']}/release",
+        headers=advisor,
+        json={},
+    )
+    assert release_advice.status_code == 200, release_advice.text
+
+    seen = client.get(
+        f"/api/customer/operation-advice/{advice['id']}", headers=customer
+    )
+    assert seen.status_code == 200, seen.text
+    delivered = seen.json()["data"]
+    # 客户读到的是发起人选定、顾问放行的产品与金额——一个都不改（ADR-0021）。
+    assert delivered["product_code"] == advice["product_code"]
+    assert delivered["amount"] == advice["amount"]
+    assert delivered["direction"] == "申购"
+    assert delivered["status"] == "待客户决定"
+
+    accepted = client.post(
+        f"/api/customer/operation-advice/{advice['id']}/decision",
+        headers=customer,
+        json={"decision": "接受"},
+    )
+    assert accepted.status_code == 200, accepted.text
+    trade = accepted.json()["data"]
+    assert trade["status"] == "已接受"
+    assert trade["transaction"]["transaction_type"] == "申购"
+    assert trade["transaction"]["amount"] == advice["amount"]
+
+    # ---- 部分赎回：经理发起 → 顾问放行 → 客户接受 → 剩余份额与持仓状态正确 ----
+    # 申购成交后客户持有这只产品（份额 = 金额 / 净值）；赎回建议带一个发起人选定的
+    # 份额（ADR-0021），接受时按那个数成交，而不是当下的全部持仓。
+    redemption_options = client.get(
+        f"/api/internal/customers/{customer_id}/operation-advice-options",
+        headers=_employee_headers(client, MANAGER),
+        params={"direction": "赎回"},
+    )
+    assert redemption_options.status_code == 200, redemption_options.text
+    redeemable = {
+        item["product_code"]: item
+        for item in redemption_options.json()["data"]["products"]
+    }
+    # 刚申购的产品出现在赎回方向里，份额上限就是持仓份额（与成交那笔一致）。
+    assert advice["product_code"] in redeemable
+    held_shares = redeemable[advice["product_code"]]["max_shares"]
+    assert held_shares == trade["transaction"]["shares"]
+
+    redemption_body = {
+        "direction": "赎回",
+        "product_code": advice["product_code"],
+        "shares": "400.0000",
+    }
+    redemption_response = client.post(
+        operation_advice_path.format(customer_id=customer_id),
+        headers=_employee_headers(client, MANAGER),
+        json=redemption_body,
+    )
+    assert redemption_response.status_code == 200, redemption_response.text
+    redemption = redemption_response.json()["data"]
+    assert redemption["direction"] == "赎回"
+    assert redemption["product_code"] == advice["product_code"]
+
+    assert client.post(
+        f"/api/internal/operation-advice/{redemption['id']}/release",
+        headers=advisor,
+        json={},
+    ).status_code == 200
+
+    redemption_decided = client.post(
+        f"/api/customer/operation-advice/{redemption['id']}/decision",
+        headers=customer,
+        json={"decision": "接受"},
+    )
+    assert redemption_decided.status_code == 200, redemption_decided.text
+    redeemed = redemption_decided.json()["data"]
+    assert redeemed["status"] == "已接受"
+    assert redeemed["transaction"]["transaction_type"] == "赎回"
+    assert redeemed["transaction"]["shares"] == "400.0000"
+
+    remaining = _holding(customer_id, advice["product_code"])
+    assert remaining["shares"] == Decimal(held_shares) - Decimal("400.0000")
+    assert remaining["status"] == "持有中"
 
     # ---- 交易：真实交易触发风控规则，产生分级预警 ----
     in_level_code = "F000005" if is_private_banking_customer else "F000001"

@@ -54,6 +54,7 @@ from app.db.models import (
     SuitabilityDecision,
 )
 from app.operation_advice import draft as draft_module
+from app.operation_advice import options as options_module
 from app.settings import get_settings
 
 SEEDED_PASSWORD = "Test@1234"
@@ -712,6 +713,47 @@ def test_an_amount_above_the_available_balance_is_rejected(
         },
     )
     assert accepted.status_code == 200, accepted.text
+
+
+def test_the_options_endpoint_and_the_acceptance_read_one_function(
+    auth_client: TestClient, customer_of_manager: dict, monkeypatch: pytest.MonkeyPatch
+):
+    """可选项端点与发起受理对同一组输入给出同一结论（ADR-0021 的主要实现约束）。
+
+    选品规则（申购 = 候选池 − 已持有、赎回 = 持有 ∩ 候选池）只写在 `advice_options`
+    一处：端点渲染它、受理校验读它。受理侧若另写一套，漂移的表现是「下拉里有这只
+    产品，一提交被拒」，不会有断言失败——只有这条把两个入口钉在同一个函数上的断言
+    能提前发现它。这里用 spy 钉住受理这条入口：它必须走 `advice_options` 这一份，
+    而不是自己再判一遍；结论与端点给的那只一字不差。
+    """
+    customer_id = customer_of_manager["id"]
+    directions: list[str] = []
+    original = options_module.advice_options
+
+    def spy(*args, **kwargs):
+        directions.append(kwargs["direction"])
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(options_module, "advice_options", spy)
+
+    # 入口一：可选项端点——它给的那只产品来自同一份计算。
+    option = next(
+        item for item in _options(auth_client, customer_id=customer_id, direction="申购")
+        if item["affordable"]
+    )
+    # 入口二：发起受理——`resolve_advice_choice` 内部读同一份 `advice_options`。
+    response = _start_advice(
+        auth_client,
+        customer_id=customer_id,
+        body={
+            "direction": "申购",
+            "product_code": option["product_code"],
+            "amount": option["min_amount"],
+        },
+    )
+    assert response.status_code == 200, response.text
+    # 受理校验走的就是 `advice_options` 这一份计算，没有第二套选品。
+    assert directions == ["申购"]
 
 
 def test_a_redemption_share_count_must_be_within_the_holding(

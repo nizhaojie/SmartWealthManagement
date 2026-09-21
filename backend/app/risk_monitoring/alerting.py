@@ -20,6 +20,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from decimal import Decimal
@@ -95,6 +96,12 @@ TRANSFER = "转账"
 TRANSACTION_TYPES: tuple[str, ...] = (*OPPOSITE_TRANSACTION_TYPES, TRANSFER)
 
 TRANSACTION_STATUS_CONFIRMED = "已确认"
+
+# 预警来源的两个取值（Q22）：交易的来源**不加字段**，分辨依据是关联交易有没有经办
+# 员工——客户自助发起的没有，内部补录的必带。这两个字面量是预警列表与详情上标注的
+# 全部取值，别处不要再拼一遍。
+SOURCE_CUSTOMER = "客户发起"
+SOURCE_INTERNAL_BACKFILL = "内部补录"
 
 # 预警落库时的初始状态来自 `alert_status`：一个事实陈述（还没有人处置过），不是
 # 工单流程节点。这里只写一次，离开它的两条路径（排除 / 升级）在
@@ -528,6 +535,43 @@ def transaction_response(transaction: Transaction) -> dict:
         "status": transaction.status,
         "occurred_at": transaction.create_time.isoformat(),
     }
+
+
+def alert_sources(db: Session, alerts: Sequence[RiskAlert]) -> dict[int, str]:
+    """这批预警各自的来源：客户发起 / 内部补录。
+
+    依据是**关联交易有没有经办员工**（Q22），不新增字段：
+
+    - 关联交易里有经办员工 → 内部补录；
+    - 关联交易都没有经办员工 → 客户发起；
+    - 关联交易为空 → 客户发起。转账没有 `fin_transaction` 那一行（ADR-0019），
+      而转账只从客户侧的受理进来——内部补录那条路必带产品、必然落在
+      `fin_transaction` 里，所以这个兜底今天是对的。
+
+    一次查完这批交易而不是逐条查：列表页每一行都要标来源，按行查就是 N 次往返。
+    关联的交易已不存在时按客户发起处理：那一行都没了，没有别的依据可读。
+    """
+    transaction_ids = sorted(
+        {transaction_id for alert in alerts for transaction_id in (alert.transaction_ids or [])}
+    )
+    operators: dict[int, int | None] = {}
+    if transaction_ids:
+        operators = {
+            int(row_id): operator_id
+            for row_id, operator_id in db.execute(
+                select(Transaction.id, Transaction.operator_id).where(
+                    Transaction.id.in_(transaction_ids)
+                )
+            ).all()
+        }
+    sources: dict[int, str] = {}
+    for alert in alerts:
+        backfilled = any(
+            operators.get(transaction_id) is not None
+            for transaction_id in (alert.transaction_ids or [])
+        )
+        sources[alert.id] = SOURCE_INTERNAL_BACKFILL if backfilled else SOURCE_CUSTOMER
+    return sources
 
 
 def alert_core(alert: RiskAlert) -> dict:

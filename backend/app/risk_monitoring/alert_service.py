@@ -54,8 +54,14 @@ def _work_orders_by_alert(db: Session, alert_ids: set[int]) -> dict[int, WorkOrd
     return {row.source_alert_id: row for row in rows if row.source_alert_id is not None}
 
 
-def _summary(alert: RiskAlert, *, customer_name: str, work_order: WorkOrder | None) -> dict:
-    """列表行的字段：预警自身的事实，加上「谁的」与「有没有工单」。
+def _summary(
+    alert: RiskAlert,
+    *,
+    customer_name: str,
+    work_order: WorkOrder | None,
+    source: str,
+) -> dict:
+    """列表行的字段：预警自身的事实，加上「谁的」「谁发起的」与「有没有工单」。
 
     足够排序、筛选与决定「接下来看哪一条」，但不含命中依据——那是详情页的事，
     列表上每一行都带一份依据会让这个响应长得没有道理。
@@ -63,6 +69,9 @@ def _summary(alert: RiskAlert, *, customer_name: str, work_order: WorkOrder | No
     return {
         **alerting.alert_core(alert),
         "customer_name": customer_name,
+        # 来源要在一眼扫过时就能看到：风控专员靠它决定这条值不值得信（客户发起 vs
+        # 绕过业务校验的内部补录）。
+        "source": source,
         "rule_count": len(alert.rule_codes or []),
         "work_order_id": work_order.id if work_order is not None else None,
         "work_order_status": work_order.status if work_order is not None else None,
@@ -99,9 +108,16 @@ def list_alerts(
         query = query.where(RiskAlert.create_time <= created_to)
 
     rows = db.execute(query.order_by(RiskAlert.create_time.desc(), RiskAlert.id.desc())).all()
-    orders = _work_orders_by_alert(db, {alert.id for alert, _name in rows})
+    alerts = [alert for alert, _name in rows]
+    orders = _work_orders_by_alert(db, {alert.id for alert in alerts})
+    sources = alerting.alert_sources(db, alerts)
     return [
-        _summary(alert, customer_name=name, work_order=orders.get(alert.id))
+        _summary(
+            alert,
+            customer_name=name,
+            work_order=orders.get(alert.id),
+            source=sources[alert.id],
+        )
         for alert, name in rows
     ]
 
@@ -193,6 +209,8 @@ def detail(db: Session, alert_id: int, *, employee: Employee) -> dict:
     return {
         **alerting.alert_response(alert),
         "customer_name": customer.real_name,
+        # 来源标注：客户发起 / 内部补录，依据是关联交易有没有经办员工（Q22）。
+        "source": alerting.alert_sources(db, [alert])[alert.id],
         # 处置人姓名而不是工号：「这条预警是谁放过的」要能直接读出来。
         "handled_by_name": names.get(alert.handler_id, "") if alert.handler_id else "",
         "customer": _customer_facts(db, customer),

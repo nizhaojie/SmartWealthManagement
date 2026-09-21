@@ -3,7 +3,7 @@ from decimal import Decimal
 from typing import TypedDict
 
 from argon2 import PasswordHasher
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, delete, func, select
 from sqlalchemy.orm import Session
 
 from app.customer_profile.confidence import SOURCE_QUESTIONNAIRE
@@ -17,14 +17,26 @@ from app.db.models import (
     ProductUnderlying,
     ProfileTag,
     RiskAssessment,
+    RiskAlert,
     RiskRule,
     Transaction,
     UnderlyingAsset,
+    WorkOrder,
+    WorkOrderTransition,
 )
+from app.event_bus import NullMirrorPublisher
+from app.risk_monitoring import alerting
 from app.risk_monitoring.rules import RISK_RULE_SEEDS
 from app.settings import get_settings
 
 DEFAULT_PASSWORD = "Test@1234"
+
+# 种子里的历史成交都是申购：它们是客户手里那笔持仓的来处。
+HISTORICAL_TRANSACTION_TYPE = "申购"
+
+# 回放的广播出口：seed 是个脚本，不依赖 Redis（ADR-0008 的回放语义）。
+# 出站镜像就地丢弃，而「落库 → 过规则引擎」这两步照常发生——要修的正是那两步。
+REPLAY_PUBLISHER = NullMirrorPublisher()
 
 
 class EmployeeSeed(TypedDict):
@@ -425,7 +437,10 @@ def seed(database_url: str | None = None) -> None:
             products = _seed_products(session)
             _seed_underlyings(session)
             _seed_customers(session, password_hash, products, employees)
+            # 规则要先进库，再回放历史交易：规则引擎读的是 `fin_risk_rule`，
+            # 顺序反了就会「回放了一场没有规则的交易」。
             _seed_risk_rules(session)
+            _replay_historical_trades(session, employees, products)
             session.commit()
     finally:
         engine.dispose()
@@ -525,7 +540,6 @@ def _seed_customers(
     products: dict[str, Product],
     employees: dict[str, Employee],
 ) -> None:
-    operator_id = employees["advisor1"].id
     for item in _CUSTOMERS:
         customer = session.scalar(select(Customer).where(Customer.username == item["username"]))
         if customer is None:
@@ -623,30 +637,105 @@ def _seed_customers(
                 )
             )
 
-        # 历史成交按流水号对齐而不是只补不改：这几笔是种子自己的数据，重复 seed 等于把
-        # 演示状态恢复成初始状态（资金账户余额已经是这么做的）。只补不改的话，成交口径
-        # 一改，旧库里就留下按老口径躺着的历史流水，而产品详情上写的是新口径——演示时
-        # 一比对就是两个数。
-        transaction = session.scalar(
-            select(Transaction).where(Transaction.transaction_no == item["transaction_no"])
-        )
-        if transaction is None:
-            transaction = Transaction(
-                transaction_no=item["transaction_no"],
-                customer_id=customer.id,
-                product_id=product.id,
-                transaction_type="申购",
-                status="已确认",
+
+def _replay_historical_trades(
+    session: Session,
+    employees: dict[str, Employee],
+    products: dict[str, Product],
+) -> None:
+    """把种子里的历史成交按**时间正序逐笔**走同一个入海口回放一遍。
+
+    这是本 issue 修的那道裂缝：这些交易以前是直接写 ORM 落库的，**绕过了规则引擎**，
+    于是「风控监测」在演示里空转——规则、算子、分级、预警全都齐备，却没有一笔交易
+    经过它们。回放因此不另写批量脚本：每一笔都调用
+    `alerting.submit_transaction_event`，与客户在界面上操作走的是**同一条**路径，
+    落库、广播与规则匹配照常发生，命中就产生预警。
+
+    预警的时间戳取该笔交易自己的时间（`now=trade_at`）。规则求值的基准本来就是交易
+    自身的时间（求值函数内部不读系统时钟），因此窗口与累计类规则会按历史真实的时间线
+    命中，不需要为回放改任何求值逻辑。
+
+    经办员工取**风控专员**：这批历史数据是补录出来的既成事实——它们不经过客户侧的
+    适当性与余额校验，而那是只有风控专员拿得到的口子（ADR-0018）。来源标注因此认得出
+    它们（「内部补录」），与客户当场发起的交易（「客户发起」）形成对照。
+
+    广播走 `NullMirrorPublisher`：seed 是脚本，不连 Redis；广播本来就是 fire-and-forget
+    的增强（ADR-0013），回放要的是「落库 → 过规则引擎」这两步真的发生。
+    """
+    for item in sorted(_CUSTOMERS, key=lambda seed_item: seed_item["trade_at"]):
+        _replay_one_historical_trade(session, item, employees, products)
+
+
+def _replay_one_historical_trade(
+    session: Session,
+    item: CustomerSeed,
+    employees: dict[str, Employee],
+    products: dict[str, Product],
+) -> None:
+    """回放一笔历史成交。"""
+    customer = session.scalar(select(Customer).where(Customer.username == item["username"]))
+    if customer is None:
+        return
+    product = products[item["product_code"]]
+    _discard_previous_replay(session, item["transaction_no"])
+    alerting.submit_transaction_event(
+        session,
+        publisher=REPLAY_PUBLISHER,
+        submission=alerting.TransactionSubmission(
+            customer_id=customer.id,
+            product_id=product.id,
+            transaction_type=HISTORICAL_TRANSACTION_TYPE,
+            amount=item["amount"],
+            occurred_at=item["trade_at"],
+            shares=item["shares"],
+            nav=item["nav"],
+            fee=item["fee"],
+            transaction_no=item["transaction_no"],
+        ),
+        operator_id=employees["risk1"].id,
+        now=item["trade_at"],
+    )
+
+
+def _discard_previous_replay(session: Session, transaction_no: str) -> None:
+    """撤掉上一轮回放写下的这笔交易，以及它产生的预警与预警派生的工单。
+
+    撤掉重放而不是跳过已有行：一是重复 seed 要能把成交口径的变化带进库里（旧库里的
+    历史流水按老口径躺着，而产品详情上写的是新口径，演示时一比对就是两个数）；二是
+    既有的库是在本 issue 之前建的，那五笔交易**从来没有过预警**，跳过就等于让那道裂缝
+    留在演示环境里。
+
+    预警的命中依据是命中那一刻固化的快照，所以不能在原地改金额对齐——金额一改，
+    依据里的实测值就对不上了。删掉重放，结果是确定性的、与第一遍逐字一致。
+
+    工单要一起删：`biz_work_order.source_alert_id` 指着预警，不先删它，重复 seed
+    会撞外键；而且工单本来就是从这条预警派生的，预警没了它也没有来处（重新 seed
+    等于恢复初始演示状态）。
+    """
+    transaction = session.scalar(
+        select(Transaction).where(Transaction.transaction_no == transaction_no)
+    )
+    if transaction is None:
+        return
+    # 先取出标识再删：MySQL 不允许在 DELETE 的子查询里再读同一张表（错误 1093）。
+    alert_ids = list(
+        session.scalars(
+            select(RiskAlert.id).where(
+                RiskAlert.customer_id == transaction.customer_id,
+                func.json_contains(RiskAlert.transaction_ids, str(transaction.id)),
             )
-            session.add(transaction)
-        transaction.customer_id = customer.id
-        transaction.product_id = product.id
-        transaction.amount = item["amount"]
-        transaction.shares = item["shares"]
-        transaction.nav = item["nav"]
-        transaction.fee = item["fee"]
-        transaction.operator_id = operator_id
-        transaction.create_time = item["trade_at"]
+        ).all()
+    )
+    if alert_ids:
+        # 工单先删：`biz_work_order.source_alert_id` 指着预警，反过来删会撞外键。
+        order_ids = select(WorkOrder.id).where(WorkOrder.source_alert_id.in_(alert_ids))
+        session.execute(
+            delete(WorkOrderTransition).where(WorkOrderTransition.work_order_id.in_(order_ids))
+        )
+        session.execute(delete(WorkOrder).where(WorkOrder.source_alert_id.in_(alert_ids)))
+        session.execute(delete(RiskAlert).where(RiskAlert.id.in_(alert_ids)))
+    session.delete(transaction)
+    session.flush()
 
 
 def _seed_risk_rules(session: Session) -> None:

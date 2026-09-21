@@ -1,8 +1,12 @@
-"""交易事件提交：先落库、再广播、后过规则引擎，以及预警分级。
+"""内部补录：先落库、再广播、后过规则引擎，以及预警分级。
+
+补录是修复数据与演示用的窄口，它绕过适当性、起投金额与余额的校验（ADR-0018），
+因此**只对风控专员开放**——这是护栏 7 在接口层的落点。交易的常规入口是客户侧的
+受理（`app.api.customer_transactions`）：那一条路径的断言、「广播不可用仍照常落库」
+与来源标注都在 `tests/test_transactions_as_risk_input.py`。
 
 分级的行为在这里端到端固定下来：同一笔交易命中的规则数与该客户的历史预警记录
-共同决定等级。广播通道被拿掉时，交易与预警都必须照常产生——广播是增强，不是
-核心链路的一部分。
+共同决定等级。
 """
 
 from __future__ import annotations
@@ -30,6 +34,7 @@ from app.settings import get_settings
 SEEDED_PASSWORD = "Test@1234"
 INTERNAL_USERNAME = "risk1"
 ADVISOR_USERNAME = "advisor1"
+MANAGER_USERNAME = "manager1"
 
 SUBMIT_PATH = "/api/internal/transaction-events"
 
@@ -40,7 +45,6 @@ TRADE_AT = datetime(2026, 9, 10, 11, 0, 0)
 CUSTOMER_LIGHT = "wangc1"  # C1，总资产 8 万
 CUSTOMER_MODERATE = "zhangc3"  # C3，总资产 80 万
 CUSTOMER_SEVERE = "lisic2"  # C2，总资产 30 万
-CUSTOMER_BROKEN_BUS = "zhaoc4"  # C4，总资产 300 万
 
 PRODUCT_R1 = "F000001"
 PRODUCT_R4 = "F000004"
@@ -53,13 +57,6 @@ class _RecordingPublisher:
 
     def publish(self, event: Event) -> None:
         self.events.append(event)
-
-
-class _BrokenPublisher:
-    """模拟事件总线不可用：通道掉线时发布就是会抛。"""
-
-    def publish(self, event: Event) -> None:
-        raise ConnectionError("事件总线不可用")
 
 
 class _PersistenceProbe:
@@ -317,36 +314,6 @@ def test_an_alert_recorded_in_the_same_second_still_counts_as_history(
     assert response.json()["data"]["alerts"][0]["alert_level"] == "重度"
 
 
-def test_a_broken_bus_does_not_stop_the_transaction_or_the_alert(auth_client: TestClient):
-    """广播通道不可用时：交易照常落库，预警照常产生。"""
-    engine = _engine()
-    headers = _headers(auth_client)
-    customer_id = _customer_id(engine, CUSTOMER_BROKEN_BUS)
-
-    with _use_publisher(_BrokenPublisher()):
-        response = _submit(
-            auth_client,
-            headers,
-            customer_id=customer_id,
-            product_id=_product_id(engine, PRODUCT_R4),
-            amount="600000.00",
-        )
-
-    assert response.status_code == 200
-    transaction_no = response.json()["data"]["transaction"]["transaction_no"]
-
-    with OrmSession(engine) as session:
-        persisted = session.scalar(
-            select(Transaction).where(Transaction.transaction_no == transaction_no)
-        )
-        alerts = list(session.scalars(select(RiskAlert)).all())
-
-    assert persisted is not None
-    assert len(alerts) == 1
-    assert alerts[0].alert_level == "中度"
-    assert alerts[0].customer_id == customer_id
-
-
 def test_the_transaction_is_committed_before_it_is_broadcast(auth_client: TestClient):
     engine = _engine()
     headers = _headers(auth_client)
@@ -551,18 +518,42 @@ def test_a_duplicate_transaction_no_is_rejected(auth_client: TestClient):
     assert "流水号" in duplicate.json()["message"]
 
 
-def test_an_advisor_can_submit_a_transaction(auth_client: TestClient):
-    """交易事件来自业务侧，不只风控专员能提交。"""
-    engine = _engine()
-    headers = _headers(auth_client, ADVISOR_USERNAME)
+def test_backfilling_a_transaction_is_reserved_for_the_risk_officer(auth_client: TestClient):
+    """内部补录只对风控专员开放（ADR-0018、ADR-0009 的护栏 7）。
 
-    response = _submit(
+    这条口子绕过了适当性、起投金额与余额的校验，能补出一笔越级或超额的交易——
+    修复数据需要它，所以它不能消失，只能收窄到一个角色手里。
+    """
+    engine = _engine()
+    customer_id = _customer_id(engine, CUSTOMER_LIGHT)
+    product_id = _product_id(engine, PRODUCT_R1)
+
+    for username in (ADVISOR_USERNAME, MANAGER_USERNAME):
+        headers = _headers(auth_client, username)
+        assert _submit(
+            auth_client,
+            headers,
+            customer_id=customer_id,
+            product_id=product_id,
+            amount="50000.00",
+        ).status_code == 403
+
+    # 风控专员的补录照常成功——护栏收的是角色，不是这条通道本身。
+    accepted = _submit(
         auth_client,
-        headers,
-        customer_id=_customer_id(engine, CUSTOMER_LIGHT),
-        product_id=_product_id(engine, PRODUCT_R1),
+        _headers(auth_client),
+        customer_id=customer_id,
+        product_id=product_id,
         amount="50000.00",
     )
+    assert accepted.status_code == 200
 
-    assert response.status_code == 200
-    assert response.json()["data"]["alerts"][0]["alert_level"] == "轻度"
+    # 被拒绝的两次在库里没有留下任何痕迹：只有风控专员那一次落成了一笔交易。
+    with OrmSession(engine) as session:
+        stored = list(
+            session.scalars(
+                select(Transaction).where(Transaction.create_time >= TEST_EPOCH)
+            ).all()
+        )
+    assert len(stored) == 1
+    assert stored[0].operator_id is not None

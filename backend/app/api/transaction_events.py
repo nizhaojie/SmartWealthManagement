@@ -1,8 +1,13 @@
-"""交易事件提交：风控监测链路的入口。
+"""内部补录：风控专员替系统补写一笔交易事件的通道。
 
-交易事件由接口提交（实时流式接入不在本 slice 范围内）。接口本身只做参数拼装，
-落库、广播、规则匹配与预警生成都在 `app.risk_monitoring.alerting` 里，顺序由那里
-保证——先落库，再广播，最后过规则引擎。
+这条通道**不是**交易事件的常规入口——常规入口是客户侧的交易受理
+（`app.api.customer_transactions`），客户自己的申购、赎回与转账都从那里进风控。
+这里只用于修复数据与演示：它绕过适当性、起投金额与可用余额的校验（ADR-0018），
+因此只对风控专员开放（ADR-0018、ADR-0009 的护栏 7），且补录必带经办员工——
+客户自助发起的交易没有经办员工，这是分辨两者的唯一依据（`CONTEXT.md` 的「内部补录」）。
+
+接口本身只做参数拼装，落库、广播、规则匹配与预警生成都在
+`app.risk_monitoring.alerting` 里，顺序由那里保证——先落库，再广播，最后过规则引擎。
 """
 
 from datetime import datetime, timezone
@@ -12,7 +17,8 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.auth.dependencies import current_employee
+from app.auth.dependencies import require_employee_role
+from app.auth.roles import RISK_OFFICER
 from app.db.models import Employee
 from app.db.session import get_session
 from app.event_bus import EventPublisher, get_event_publisher
@@ -45,7 +51,7 @@ def submit_transaction_event(
     body: TransactionEventRequest,
     db: Session = Depends(get_session),
     publisher: EventPublisher = Depends(get_event_publisher),
-    employee: Employee = Depends(current_employee),
+    employee: Employee = Depends(require_employee_role(RISK_OFFICER)),
 ):
     now = _now()
     transaction, alerts = alerting.submit_transaction_event(

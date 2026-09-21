@@ -342,7 +342,13 @@ def test_a_transfer_reaches_the_rule_engine(auth_client: TestClient):
 
     assert _transfer(auth_client, amount="500000.00").status_code == 200
 
-    alerts = _stored_alerts(engine, customer_id=customer_id)
+    # 只数本次转账产生的那一条：种子里那笔历史申购现在也会回放出一条预警（issue 04），
+    # 它带着 2020 年的时间戳，不是这里的对象。
+    alerts = [
+        alert
+        for alert in _stored_alerts(engine, customer_id=customer_id)
+        if alert.create_time >= TEST_EPOCH
+    ]
     assert len(alerts) == 1
     alert = alerts[0]
     assert "R001" in alert.rule_codes

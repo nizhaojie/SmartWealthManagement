@@ -896,6 +896,46 @@ class OperationAdviceDraft(Base):
     create_time: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 
+class OperationAdviceDecision(Base):
+    """客户对一条已送达操作建议的决定（CONTEXT「客户决定」）。
+
+    它是建议在客户侧唯一的终态来源：一条建议最多一条决定记录，落下的就是
+    「谁、什么时候、对哪条建议、接受还是拒绝」。拒绝只是这个决定本身；接受还
+    意味着当场成交——那一笔交易在 `fin_transaction` 里，与这条记录由受理侧的同一次
+    提交一起落库，因此不存在「已接受但没有交易」。
+
+    **不是每种终态都在这张表里**：`待客户决定` 是还没有这一行，`已过期` 是送达超过
+    7 个自然日——两者都是时间的函数，现算即可；落一个会自己变化的字段反而要有人去
+    改它，而改它没有任何触发点（见 `app.operation_advice.decision` 的模块说明）。
+
+    客户标识来自凭证推导，不是请求体：决定只能由建议的收件人本人做出。
+    """
+
+    __tablename__ = "biz_operation_advice_decision"
+    __table_args__ = (
+        UniqueConstraint("advice_id", name="uk_operation_advice_decision_advice"),
+        Index("ix_operation_advice_decision_customer_id", "customer_id"),
+        CheckConstraint(
+            "decision IN ('接受','拒绝')",
+            name="ck_operation_advice_decision",
+        ),
+        {"comment": "客户决定"},
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    advice_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("biz_operation_advice_draft.id"),
+        comment="对应的操作建议",
+    )
+    customer_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("sys_customer.id"), comment="做出决定的客户"
+    )
+    decision: Mapped[str] = mapped_column(String(8), comment="接受或拒绝")
+    decided_at: Mapped[datetime] = mapped_column(DateTime, comment="决定时间")
+    create_time: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
 class ConversationArchive(Base):
     __tablename__ = "conversation_archive"
     __table_args__ = (

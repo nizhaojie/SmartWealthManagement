@@ -19,6 +19,7 @@ from app.api.conversations import router as conversations_router
 from app.api.customer_assets import internal_router as customer_assets_internal_router
 from app.api.customer_assets import router as customer_assets_router
 from app.api.customer_conversations import router as customer_conversations_router
+from app.api.customer_operation_advice import router as customer_operation_advice_router
 from app.api.customer_transactions import router as customer_transactions_router
 from app.api.customers import router as customers_router
 from app.api.funding_account import internal_router as funding_account_internal_router
@@ -26,6 +27,7 @@ from app.api.funding_account import router as funding_account_router
 from app.api.graph import router as graph_router
 from app.api.health import router as health_router
 from app.api.knowledge import router as knowledge_router
+from app.api.operation_advice import review_router as operation_advice_review_router
 from app.api.operation_advice import router as operation_advice_router
 from app.api.customer_profile import calibration_router as customer_profile_calibration_router
 from app.api.customer_profile import internal_router as customer_profile_internal_router
@@ -137,6 +139,8 @@ app.include_router(agents_router)
 app.include_router(customers_router)
 app.include_router(knowledge_router)
 app.include_router(operation_advice_router)
+app.include_router(operation_advice_review_router)
+app.include_router(customer_operation_advice_router)
 app.include_router(chat_router)
 app.include_router(conversations_router)
 app.include_router(customer_conversations_router)

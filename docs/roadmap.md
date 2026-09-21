@@ -31,6 +31,8 @@
 - `advisor-review-reminder` —— 顾问的待审核提醒。审核队列只有在顾问主动走进 `/advisory` 时才存在，数字也只活在那页的卡片标题里（`AdvisoryWorkspace.vue:37`）。本 slice 把它钉到「投顾助手」导航项的待办计数上（`CONTEXT.md` 新增词条），复用既有队列接口而**不新增 count 接口**（两个口径迟早漂移，而「角标说 3、点进去是 2」正是提醒失效的形态），只对理财顾问。**无后端改动**，代价明确认下：只在自己刷新时才对，不加轮询、不加 SSE。
 - `operation-advice-product-choice` —— 操作建议的产品与金额由发起人决定，业务操作 Agent 收窄为只写理由（新增 ADR-0021）。它**修改** `operation-advice-and-customer-trading` 的 `#06` 两处已实现决定（「产品/金额/理由由 Agent 给出」与「申购取起投、赎回取全部份额」），**不改**「赎回的产品须在候选池内」这条硬保证，也不动「成交口径只有一处」。赎回因此从「全部」变成携带一个具体份额数（草案加一列），接受时按它执行。
 
+再一条横切 slice（2026-09-21）：`collapsible-sidebars` —— 左右栏折叠/展开。两端左导航可折叠成 64px 图标条（internal 的 `sidebar-footer` 折叠为图标+角标），internal 右检查器可完全隐藏（顶栏开关）；折叠状态全局、按端 localStorage 持久化、默认展开。纯前端、无后端改动、无 ADR、`CONTEXT.md` 零改动。拆三份 issue：shared 壳受控折叠 → customer 接线 → internal 接线（含检查器开关与 footer 折叠态）。
+
 上面两份新 spec 共拆 7 份 ticket（`advisor-review-reminder` 2 份：计数 store → 导航角标；`operation-advice-product-choice` 5 份：可选项端点 → 发起受理接手产品与金额 → 赎回按份额成交 → 发起表单 → 端到端与既有断言收口）。全部 spec 已拆成 ticket，存于 `.scratch/<slug>/issues/`，共 70 个。依赖是一条串行链：每份 spec 的第一个 ticket 被上一份 spec 的最后一个 ticket 阻塞，spec 内部亦为顺序推进。唯一的例外是 `foundation-and-customer-service-slice #07`（共享包边界检查），它只依赖 #01，可提前做。
 
 **当前 frontier**：待重新核对。`.scratch/*/issues/*.md` 里的 `Status:` 标记已经落后于代码——例如 `advisory-plan-visibility` 的三份仍标 `ready-for-agent`，但 `apps/customer/src/advisory/AdvisoryPlanPage.vue` 与 `backend/app/advisory/final.py` 的 `serialize_final_for_customer` 都已经存在；`advisory-agent-and-review-flow` 的 #01–#03 同理。在逐份核对 `Status:` 之前，本行不作断言——写一个过时的答案比留白更容易误导人。

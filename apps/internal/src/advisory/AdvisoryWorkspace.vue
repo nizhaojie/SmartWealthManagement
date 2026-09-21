@@ -8,20 +8,23 @@ import { errorMessage, formatDateTime } from "../format";
 import CustomerInspector from "../inspector/CustomerInspector.vue";
 import { useInspector } from "../shell/pageSlots";
 import { useCurrentCustomerStore } from "../stores/currentCustomer";
-import { generatePlan, getMyHistory, getQueue } from "./api";
+import { generatePlan, getMyHistory } from "./api";
+import { useAdvisoryQueueStore } from "./queueStore";
 import { reviewSummaryLabel, reviewTarget } from "./reviewView";
-import type { AdvisoryHistoryEntry, AdvisoryQueue, ContentType } from "./types";
+import type { AdvisoryHistoryEntry, ContentType } from "./types";
 
 // 生成侧重是顾问对这次生成的口径选择，不是客户属性。
 const TILT_OPTIONS = ["均衡", "收益优先", "流动性优先"] as const;
 
 const router = useRouter();
 const currentCustomer = useCurrentCustomerStore();
+// 队列（含两段列表与计数）来自 store：它与壳的角标是同一次取数，本页不自己拉一份。
+const queue = useAdvisoryQueueStore();
 
-const queue = ref<AdvisoryQueue>({ pending_requests: [], pending_reviews: [] });
 const history = ref<AdvisoryHistoryEntry[]>([]);
 const customers = ref<CustomerListItem[]>([]);
-const loadError = ref("");
+// 本页两段取数（历史、客户名单）的失败；队列那段的失败留在 store 里。
+const pageError = ref("");
 
 const directCustomerId = ref<number | null>(null);
 const tilt = ref<string>(TILT_OPTIONS[0]);
@@ -33,22 +36,29 @@ const dialogOpen = ref(false);
 const dialogRequestId = ref<number | null>(null);
 const dialogCustomerId = ref<number | null>(null);
 
-const pendingRequestCount = computed(() => queue.value.pending_requests.length);
-const pendingReviewCount = computed(() => queue.value.pending_reviews.length);
+const pendingRequestCount = computed(() => queue.pendingRequestCount);
+const pendingReviewCount = computed(() => queue.pendingReviewCount);
+
+/** 顶部横幅：队列那段的失败从 store 来（它没取到，计数也就没有值）。 */
+const loadError = computed(() => pageError.value || queue.error);
+
+/** 计数没取到时标题不带数字：这时写「（0）」是一句没人能担保的断言。 */
+function countTitle(label: string, count: number | undefined): string {
+  return count === undefined ? label : `${label}（${count}）`;
+}
 
 async function loadAll(): Promise<void> {
-  loadError.value = "";
+  pageError.value = "";
   try {
-    const [nextQueue, nextHistory, nextCustomers] = await Promise.all([
-      getQueue(),
+    const [, nextHistory, nextCustomers] = await Promise.all([
+      queue.refresh(),
       getMyHistory(),
       listCustomers(),
     ]);
-    queue.value = nextQueue;
     history.value = nextHistory;
     customers.value = nextCustomers;
   } catch (error) {
-    loadError.value = errorMessage(error, "投顾队列加载失败");
+    pageError.value = errorMessage(error, "投顾工作台加载失败");
   }
 }
 
@@ -161,11 +171,15 @@ onMounted(loadAll);
       </p>
     </PanelCard>
 
-    <PanelCard :title="`待生成的方案请求（${pendingRequestCount}）`">
-      <p v-if="!queue.pending_requests.length" class="advisory__empty">
+    <PanelCard :title="countTitle('待生成的方案请求', pendingRequestCount)">
+      <!-- 没取到数时不写「暂无」：那与「（0）」是同一句没人能担保的断言（见 queueStore）。 -->
+      <p v-if="queue.failed" class="advisory__empty" data-testid="queue-unavailable">
+        队列暂不可用
+      </p>
+      <p v-else-if="!queue.pendingRequests.length" class="advisory__empty">
         暂无待生成的方案请求
       </p>
-      <el-table v-else :data="queue.pending_requests" data-testid="pending-requests-table">
+      <el-table v-else :data="queue.pendingRequests" data-testid="pending-requests-table">
         <el-table-column label="客户" prop="customer_name" sortable />
         <el-table-column label="请求编号" prop="request_no" width="160" />
         <el-table-column label="等待时长" width="160">
@@ -186,9 +200,12 @@ onMounted(loadAll);
       </el-table>
     </PanelCard>
 
-    <PanelCard :title="`待审核（${pendingReviewCount}）`">
-      <p v-if="!queue.pending_reviews.length" class="advisory__empty">暂无待审核内容</p>
-      <el-table v-else :data="queue.pending_reviews" data-testid="pending-reviews-table">
+    <PanelCard :title="countTitle('待审核', pendingReviewCount)">
+      <p v-if="queue.failed" class="advisory__empty" data-testid="queue-unavailable">
+        队列暂不可用
+      </p>
+      <p v-else-if="!queue.pendingReviews.length" class="advisory__empty">暂无待审核内容</p>
+      <el-table v-else :data="queue.pendingReviews" data-testid="pending-reviews-table">
         <el-table-column label="客户" prop="customer_name" />
         <el-table-column label="类型" width="110">
           <template #default="{ row }">

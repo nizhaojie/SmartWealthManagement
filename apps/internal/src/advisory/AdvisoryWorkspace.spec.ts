@@ -6,8 +6,10 @@ import { createPinia, setActivePinia, type Pinia } from "pinia";
 import { flushPromises, mount, type VueWrapper } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createMemoryHistory, createRouter, type Router } from "vue-router";
-import { stubApiFetch } from "../testing";
+import { useAuthStore } from "../stores/auth";
+import { apiError, stubApiFetch } from "../testing";
 import AdvisoryWorkspace from "./AdvisoryWorkspace.vue";
+import { useAdvisoryQueueStore } from "./queueStore";
 import type { AdvisoryHistoryEntry, PendingReview } from "./types";
 
 const PENDING_REVIEWS: PendingReview[] = [
@@ -67,10 +69,12 @@ let wrapper: VueWrapper | null = null;
 async function mountWorkspace(
   history: AdvisoryHistoryEntry[] = HISTORY,
   pendingReviews: PendingReview[] = [],
+  options: { queueFails?: boolean } = {},
 ): Promise<VueWrapper> {
   stubApiFetch((url) => {
     if (url.includes("/api/internal/advisory/history")) return { history };
     if (url.includes("/api/internal/advisory/queue")) {
+      if (options.queueFails) return apiError(500, "投顾队列加载失败");
       return { pending_requests: [], pending_reviews: pendingReviews };
     }
     return undefined;
@@ -194,5 +198,41 @@ describe("待审队列合并两类内容", () => {
 
     expect(router.currentRoute.value.name).toBe("advisory-review");
     expect(router.currentRoute.value.params.draftId).toBe("7");
+  });
+});
+
+// 计数只在一处算：卡片的标题与壳的角标都读同一个 store，页面自己不再现算列表长度。
+describe("待审内容的待办计数", () => {
+  it("取数之后计数等于队列条数，卡片标题读的就是这个数", async () => {
+    const page = await mountWorkspace(HISTORY, PENDING_REVIEWS);
+
+    expect(useAdvisoryQueueStore(pinia).pendingReviewCount).toBe(2);
+    expect(page.text()).toContain("待审核（2）");
+  });
+
+  it("队列接口失败时计数是 undefined 而不是 0，失败在页面上有一条横幅", async () => {
+    const page = await mountWorkspace(HISTORY, [], { queueFails: true });
+    const queue = useAdvisoryQueueStore(pinia);
+
+    expect(queue.failed).toBe(true);
+    expect(queue.pendingReviewCount).toBeUndefined();
+    // 「（0）」与「暂无」是同一句断言（「没有待办」），失败时我们并不知道有几件，两张卡都不该说。
+    expect(page.text()).not.toContain("待审核（0）");
+    expect(page.text()).not.toContain("待生成的方案请求（0）");
+    expect(page.text()).not.toContain("暂无待审核内容");
+    expect(page.text()).not.toContain("暂无待生成的方案请求");
+    expect(page.findAll('[data-testid="queue-unavailable"]')).toHaveLength(2);
+    expect(page.get('[data-testid="queue-error"]').text()).toBe("投顾队列加载失败");
+  });
+
+  it("登出后计数清空，角标不带着上一位员工的数字进入新会话", async () => {
+    await mountWorkspace(HISTORY, PENDING_REVIEWS);
+    const queue = useAdvisoryQueueStore(pinia);
+    expect(queue.pendingReviewCount).toBe(2);
+
+    await useAuthStore(pinia).logout();
+
+    expect(queue.pendingReviewCount).toBeUndefined();
+    expect(queue.pendingReviews).toHaveLength(0);
   });
 });

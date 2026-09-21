@@ -50,3 +50,28 @@ export type AdviceReviewStatus = {
   advice_id: number;
   status: ReviewStatus;
 };
+
+/**
+ * 发起前可选项的一只产品（`GET .../operation-advice-options`）：方向过滤 + 金额/份额
+ * 区间 + 后端算好的 `affordable`。前端只读、只渲染，不按方向过滤、不算买不买得起
+ * （ADR-0021 的主要实现约束）。
+ */
+export type AdviceOption = {
+  product_code: string;
+  product_name: string;
+  product_type: string;
+  risk_level: string;
+  term_days: number;
+  min_amount: string;
+  /** 申购方向：可用余额买得起的最大金额（赎回方向不出现这一项）。 */
+  max_amount?: string;
+  /** 赎回方向：可赎回份额，即当前持仓份额（申购方向不出现这一项）。 */
+  max_shares?: string;
+  /** 后端算好的布尔：买不买得起（赎回恒为真）。 */
+  affordable: boolean;
+};
+
+export type AdviceOptions = {
+  direction: Direction;
+  products: AdviceOption[];
+};

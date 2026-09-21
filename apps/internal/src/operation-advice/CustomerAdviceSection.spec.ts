@@ -1,4 +1,4 @@
-// 客户经理的发起入口与进度表：选客户 → 发起建议（只选方向）→ 看进度。
+// 客户经理的发起入口与进度表：选客户 → 选方向 → 选产品 → 填金额 / 份额 → 发起 → 看进度。
 // 这一侧**没有放行 / 驳回**：发起与放行是两件事（CONTEXT「客户经理」）。
 import ElementPlus, { ElSelect } from "element-plus";
 import { createPinia, setActivePinia, type Pinia } from "pinia";
@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createMemoryHistory, createRouter, type Router } from "vue-router";
 import { apiError, stubApiFetch } from "../testing";
 import CustomerAdviceSection from "./CustomerAdviceSection.vue";
-import type { OperationAdviceProgress } from "./types";
+import type { AdviceOption, OperationAdviceProgress } from "./types";
 
 const CUSTOMERS = [
   {
@@ -57,6 +57,41 @@ const PROGRESS: OperationAdviceProgress[] = [
   },
 ];
 
+// 申购方向的可选项：一只买得起、一只买不起。买不起的那只仍然出现（禁用），不藏掉。
+const PURCHASE_OPTIONS: AdviceOption[] = [
+  {
+    product_code: "F000001",
+    product_name: "稳健增利一号",
+    product_type: "混合型",
+    risk_level: "R3",
+    term_days: 365,
+    min_amount: "1000.00",
+    max_amount: "500000.00",
+    affordable: true,
+  },
+  {
+    product_code: "F000005",
+    product_name: "进取成长五号",
+    product_type: "股票型",
+    risk_level: "R5",
+    term_days: 720,
+    min_amount: "5000.00",
+    max_amount: "0.00",
+    affordable: false,
+  },
+];
+
+const REDEMPTION_OPTION: AdviceOption = {
+  product_code: "F000003",
+  product_name: "稳健增利三号",
+  product_type: "混合型",
+  risk_level: "R3",
+  term_days: 180,
+  min_amount: "1000.00",
+  max_shares: "1200.0000",
+  affordable: true,
+};
+
 let pinia: Pinia;
 let router: Router;
 let wrapper: VueWrapper | null = null;
@@ -64,9 +99,17 @@ let progress: OperationAdviceProgress[] = PROGRESS;
 // 读进度失败时替换成整个响应（非 200 由 http 客户端拆成 ApiError）。
 let progressFailure: unknown = null;
 let startResponse: unknown = { id: 23 };
+// 可选项按方向分开放：切换方向要重取，mock 按 URL 里的 direction 返回对应一份。
+let optionsByDirection: Record<string, { direction: string; products: AdviceOption[] }>;
 
 async function mountSection(): Promise<VueWrapper> {
   stubApiFetch((url, init) => {
+    if (url.includes("/operation-advice-options")) {
+      const direction = url.includes("direction=")
+        ? decodeURIComponent(url.split("direction=")[1])
+        : "申购";
+      return optionsByDirection[direction] ?? { direction, products: [] };
+    }
     if (url.includes("/operation-advice") && init?.method === "POST") return startResponse;
     if (url.includes("/operation-advice")) return progressFailure ?? { advice: progress };
     return undefined;
@@ -102,11 +145,33 @@ async function selectCustomer(page: VueWrapper, customerId: number): Promise<voi
   await flushPromises();
 }
 
+async function selectProduct(page: VueWrapper, productCode: string): Promise<void> {
+  await page.findAllComponents(ElSelect)[2].setValue(productCode);
+  await flushPromises();
+}
+
+async function fillQuantity(page: VueWrapper, value: string): Promise<void> {
+  await page.get('[data-testid="advice-quantity-input"]').setValue(value);
+  await flushPromises();
+}
+
+/** 产品下拉（第三只 ElSelect）后端注册的可选项：label / value / disabled。 */
+function productOptionsOf(page: VueWrapper): Array<{ value: string; label: string; disabled: boolean }> {
+  const vm = page.findAllComponents(ElSelect)[2].vm as unknown as {
+    optionsArray: Array<{ value: string; label: string; disabled: boolean }>;
+  };
+  return vm.optionsArray;
+}
+
 beforeEach(() => {
   localStorage.clear();
   progress = PROGRESS;
   progressFailure = null;
   startResponse = { id: 23 };
+  optionsByDirection = {
+    申购: { direction: "申购", products: PURCHASE_OPTIONS },
+    赎回: { direction: "赎回", products: [] },
+  };
 });
 
 afterEach(() => {
@@ -139,9 +204,89 @@ describe("客户经理的操作建议入口", () => {
     expect(rows[1].text()).toContain("—");
   });
 
-  it("发起建议只发方向，成功后重新拉一次进度", async () => {
+  it("选中客户后加载可选项，每项显示五要素", async () => {
     const page = await mountSection();
     await selectCustomer(page, 9);
+
+    const options = productOptionsOf(page);
+    expect(options).toHaveLength(2);
+
+    const first = options[0];
+    expect(first.value).toBe("F000001");
+    expect(first.label).toContain("稳健增利一号");
+    expect(first.label).toContain("F000001");
+    expect(first.label).toContain("R3");
+    expect(first.label).toContain("365 天");
+    expect(first.label).toContain("1000.00");
+  });
+
+  it("买不起的选项禁用并注明原因", async () => {
+    const page = await mountSection();
+    await selectCustomer(page, 9);
+
+    const options = productOptionsOf(page);
+    const unaffordable = options.find((option) => option.value === "F000005");
+    expect(unaffordable).toBeDefined();
+    expect(unaffordable?.disabled).toBe(true);
+    expect(unaffordable?.label).toContain("可用余额不足");
+  });
+
+  it("候选池为空时渲染「没有合规产品可选」，不留空白", async () => {
+    optionsByDirection["申购"] = { direction: "申购", products: [] };
+    const page = await mountSection();
+    await selectCustomer(page, 9);
+
+    expect(page.get('[data-testid="advice-options-empty"]').text()).toContain(
+      "该客户当前没有合规产品可选",
+    );
+    // 没有可选项，产品与金额两个字段都不渲染（不留空白）。
+    expect(page.findAllComponents(ElSelect)).toHaveLength(2);
+  });
+
+  it("全部买不起时渲染「可用余额不足」文案，不留空白", async () => {
+    optionsByDirection["申购"] = {
+      direction: "申购",
+      products: [
+        {
+          product_code: "F000005",
+          product_name: "进取成长五号",
+          product_type: "股票型",
+          risk_level: "R5",
+          term_days: 720,
+          min_amount: "5000.00",
+          max_amount: "0.00",
+          affordable: false,
+        },
+      ],
+    };
+    const page = await mountSection();
+    await selectCustomer(page, 9);
+
+    expect(page.get('[data-testid="advice-options-empty"]').text()).toContain(
+      "可用余额不足以申购候选池内的任何产品",
+    );
+    expect(page.findAllComponents(ElSelect)).toHaveLength(2);
+  });
+
+  it("切换方向后重新取可选项", async () => {
+    const page = await mountSection();
+    await selectCustomer(page, 9);
+    expect(productOptionsOf(page)).toHaveLength(2);
+
+    optionsByDirection["赎回"] = { direction: "赎回", products: [REDEMPTION_OPTION] };
+    await page.findAllComponents(ElSelect)[1].setValue("赎回");
+    await flushPromises();
+
+    const redemptionOptions = productOptionsOf(page);
+    expect(redemptionOptions).toHaveLength(1);
+    expect(redemptionOptions[0].value).toBe("F000003");
+  });
+
+  it("发起建议带上产品与金额（申购），成功后重新拉一次进度", async () => {
+    const page = await mountSection();
+    await selectCustomer(page, 9);
+    await selectProduct(page, "F000001");
+    await fillQuantity(page, "1000");
     const fetchMock = vi.mocked(globalThis.fetch);
     fetchMock.mockClear();
 
@@ -153,6 +298,8 @@ describe("客户经理的操作建议入口", () => {
     );
     expect(JSON.parse(String((startCall?.[1] as RequestInit).body))).toEqual({
       direction: "申购",
+      product_code: "F000001",
+      amount: "1000",
     });
     // 发起之后以服务端为准重新读一次进度。
     const reloads = fetchMock.mock.calls.filter((call) =>
@@ -161,16 +308,58 @@ describe("客户经理的操作建议入口", () => {
     expect(reloads.length).toBeGreaterThanOrEqual(2);
   });
 
+  it("赎回方向提交带上份额（shares）", async () => {
+    optionsByDirection["赎回"] = { direction: "赎回", products: [REDEMPTION_OPTION] };
+    const page = await mountSection();
+    await selectCustomer(page, 9);
+    await page.findAllComponents(ElSelect)[1].setValue("赎回");
+    await flushPromises();
+    await selectProduct(page, "F000003");
+    await fillQuantity(page, "600");
+    const fetchMock = vi.mocked(globalThis.fetch);
+    fetchMock.mockClear();
+
+    await page.get('[data-testid="start-advice"]').trigger("click");
+    await flushPromises();
+
+    const startCall = fetchMock.mock.calls.find(
+      (call) => (call[1] as RequestInit)?.method === "POST",
+    );
+    expect(JSON.parse(String((startCall?.[1] as RequestInit).body))).toEqual({
+      direction: "赎回",
+      product_code: "F000003",
+      shares: "600",
+    });
+  });
+
   it("未选客户时发起按钮点不动", async () => {
     const page = await mountSection();
 
     expect(page.get('[data-testid="start-advice"]').attributes("disabled")).toBeDefined();
   });
 
+  it("未选产品或未填金额时提交被拦", async () => {
+    const page = await mountSection();
+    await selectCustomer(page, 9);
+
+    // 还没选产品：按钮禁用。
+    expect(page.get('[data-testid="start-advice"]').attributes("disabled")).toBeDefined();
+
+    await selectProduct(page, "F000001");
+    // 选了产品但没填金额：按钮仍禁用。
+    expect(page.get('[data-testid="start-advice"]').attributes("disabled")).toBeDefined();
+
+    await fillQuantity(page, "1000");
+    // 都齐了：按钮可用。
+    expect(page.get('[data-testid="start-advice"]').attributes("disabled")).toBeUndefined();
+  });
+
   it("发起失败时渲染后端给的原因", async () => {
     startResponse = apiError(400, "该客户不在你的名下，无权发起建议");
     const page = await mountSection();
     await selectCustomer(page, 9);
+    await selectProduct(page, "F000001");
+    await fillQuantity(page, "1000");
 
     await page.get('[data-testid="start-advice"]').trigger("click");
     await flushPromises();

@@ -1,6 +1,7 @@
 import { http } from "../api/http";
 import type { AdvisoryComment } from "../advisory/types";
 import type {
+  AdviceOptions,
   AdviceReviewStatus,
   OperationAdvice,
   OperationAdviceProgress,
@@ -21,10 +22,36 @@ export function listCustomerAdvice(customerId: number): Promise<OperationAdviceP
     .then((data) => data.advice);
 }
 
-export function startAdvice(customerId: number, direction: string): Promise<OperationAdvice> {
+/**
+ * 发起前要看得见的东西：这位客户在这个方向下能选哪些产品、每只的区间是多少。
+ * 产品与金额 / 份额由发起人选定（ADR-0021），可选项由后端算好——前端只读只渲染。
+ */
+export function listAdviceOptions(
+  customerId: number,
+  direction: string,
+): Promise<AdviceOptions> {
+  return http.get<AdviceOptions>(
+    `/api/internal/customers/${customerId}/operation-advice-options?direction=${encodeURIComponent(direction)}`,
+  );
+}
+
+/**
+ * 发起建议：产品与金额（申购）/ 份额（赎回）由发起人填，与客户侧自助交易同口径。
+ * `quantity` 按方向落在 `amount` 或 `shares` 上，另一个字段不出现。
+ */
+export function startAdvice(
+  customerId: number,
+  direction: string,
+  productCode: string,
+  quantity: string,
+): Promise<OperationAdvice> {
+  const body =
+    direction === "申购"
+      ? { direction, product_code: productCode, amount: quantity }
+      : { direction, product_code: productCode, shares: quantity };
   return http.post<OperationAdvice>(
     `/api/internal/customers/${customerId}/operation-advice`,
-    { direction },
+    body,
   );
 }
 

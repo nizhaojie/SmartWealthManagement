@@ -18,7 +18,7 @@ import { apiError, stubApiFetch } from "../testing";
 const NAV_ADVISORY = 'button[name="nav-advisory"]';
 const BADGE = `${NAV_ADVISORY} .app-shell__nav-badge`;
 
-function pendingReview(id: number): PendingReview {
+function pendingReview(id: number, overrides: Partial<PendingReview> = {}): PendingReview {
   return {
     content_type: "方案",
     content_ref: id,
@@ -29,6 +29,7 @@ function pendingReview(id: number): PendingReview {
     tilt: "均衡",
     generated_at: "2026-09-18T10:00:00",
     waiting_seconds: 90,
+    ...overrides,
   };
 }
 
@@ -70,6 +71,20 @@ const FINAL = {
   warnings: [],
   released_at: "2026-09-18T11:00:00",
   disclaimer: "本方案为投顾内容，须经审核后送达。",
+};
+
+const ADVICE = {
+  id: 21,
+  customer_id: 9,
+  manager_id: 4,
+  product_code: "F000001",
+  product_name: "稳健增利一号",
+  direction: "申购",
+  amount: "200000.00",
+  reason: "客户现金持仓偏高，且这只产品的期限与他的流动性安排一致。",
+  content_classification: "投顾内容",
+  generated_at: "2026-09-18T09:00:00",
+  disclaimer: "本内容为投顾内容，须经审核后送达。",
 };
 
 // 审核页会把「当前客户」钉给检查器，检查器随后拉画像与资产。这两条不 stub 的话会落到
@@ -220,6 +235,56 @@ describe("投顾助手的待审角标", () => {
     await router.push("/advisory/reviews/7");
     await flushPromises();
     await app.get('[data-testid="reject-reason"]').setValue("标的过于集中");
+    await app.get('[data-testid="reject"]').trigger("click");
+    await flushPromises();
+
+    expect(navBadge(app).text()).toBe("1");
+  });
+
+  // 队列里两类内容共用一个数字（ADR-0020），因此操作建议侧的放行与驳回同样要让角标动。
+  it("操作建议的放行也让角标减一", async () => {
+    let reviews = [pendingReview(21, { content_type: "操作建议" }), pendingReview(22)];
+    const app = await mountApp((url) => {
+      if (url.includes("/api/internal/advisory/queue")) return queueOf(reviews);
+      if (url.includes("/operation-advice/21/release")) {
+        reviews = [pendingReview(22)];
+        return { id: 21, status: "已放行" };
+      }
+      if (url.includes("/operation-advice/21/review")) return { advice_id: 21, status: "待审" };
+      if (url.includes("/operation-advice/21/comments")) return { comments: [] };
+      if (url.includes("/operation-advice/21")) return ADVICE;
+      return undefined;
+    });
+
+    expect(navBadge(app).text()).toBe("2");
+
+    await router.push("/advisory/operation-advice/21");
+    await flushPromises();
+    await app.get('[data-testid="release"]').trigger("click");
+    await flushPromises();
+
+    expect(navBadge(app).text()).toBe("1");
+  });
+
+  it("操作建议的驳回也让角标减一", async () => {
+    let reviews = [pendingReview(21, { content_type: "操作建议" }), pendingReview(22)];
+    const app = await mountApp((url) => {
+      if (url.includes("/api/internal/advisory/queue")) return queueOf(reviews);
+      if (url.includes("/operation-advice/21/reject")) {
+        reviews = [pendingReview(22)];
+        return { id: 21, status: "已驳回", reason: "金额与客户流动性不符" };
+      }
+      if (url.includes("/operation-advice/21/review")) return { advice_id: 21, status: "待审" };
+      if (url.includes("/operation-advice/21/comments")) return { comments: [] };
+      if (url.includes("/operation-advice/21")) return ADVICE;
+      return undefined;
+    });
+
+    expect(navBadge(app).text()).toBe("2");
+
+    await router.push("/advisory/operation-advice/21");
+    await flushPromises();
+    await app.get('[data-testid="reject-reason"]').setValue("金额与客户流动性不符");
     await app.get('[data-testid="reject"]').trigger("click");
     await flushPromises();
 

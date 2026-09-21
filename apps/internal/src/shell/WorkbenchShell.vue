@@ -12,7 +12,7 @@ import RiskAlertSummaryCard from "./RiskAlertSummaryCard.vue";
 const route = useRoute();
 const router = useRouter();
 const auth = useAuthStore();
-// 待审计数的唯一来源，与审核页卡片标题读的是同一份（见 advisory/queueStore）。
+// 待办计数的唯一来源，与审核页卡片标题读的是同一份（见 advisory/queueStore）。
 const queue = useAdvisoryQueueStore();
 
 // 壳把两个注入通道交给页面；没有页面注入检查器时 AppShell 自动塌成两栏。

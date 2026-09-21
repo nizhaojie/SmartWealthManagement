@@ -22,7 +22,7 @@
 **实现落点：** 改 `apps/internal/src/shell/WorkbenchShell.vue`（`navItems` 的 `badge` 只给 `advisory` 一项、`onMounted` 拉一次 store）、
 `apps/internal/src/advisory/AdvisoryReviewPage.vue` 与 `apps/internal/src/operation-advice/AdviceReviewPage.vue`（放行 / 驳回成功后 `await queue.refresh()`，失败路径不刷）、
 `apps/internal/src/advisory/AdvisoryWorkspace.vue`（两个生成入口成功后刷新）；
-新增 `apps/internal/src/shell/advisoryQueueBadge.spec.ts`（7 条）。
+新增 `apps/internal/src/shell/advisoryQueueBadge.spec.ts`（9 条：方案侧与操作建议侧各一对放行 / 驳回的减一断言）。
 
 ### 几处写下来的决定
 

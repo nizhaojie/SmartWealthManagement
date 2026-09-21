@@ -26,7 +26,12 @@
 
 再一条横切 slice（2026-09-19）：`operation-advice-and-customer-trading` —— 客户交易与操作建议。它补的是风控的**输入端**：风控那一侧（规则、算子、分级、预警、工单）本来就是完整的，缺的是「交易从哪来」——交易事件在应用里没有任何真实触发点，唯一入口是需员工身份的内部接口，而种子数据又整批绕过规则引擎，于是「现在的风控监测不起作用」其实是**没有输入**，不是判断不对。本 slice 给客户加上申购、赎回、转账（含资金账户与可用余额），给客户经理加上业务操作 Agent（第五份配置）与操作建议（客户经理发起 → 顾问放行 → 客户可见 → 客户决定），并让这些操作成为交易事件的真实来源。拆为十份 issue，顺序推进；**第四份做完就有可演示的完整状态**（客户发起 50 万转账 → 预警列表出现对应预警）。它**修改**三处已实现的既有决定（`product-screening-and-customer-assets` 的「真实申购赎回支付」排除、`risk-monitoring-agent` 的交易事件来源、`advisory-agent-and-review-flow` 的审核表），清单见该 spec 的头表。
 
-每份 spec 已拆成 ticket，存于 `.scratch/<slug>/issues/`，共 63 个。依赖是一条串行链：每份 spec 的第一个 ticket 被上一份 spec 的最后一个 ticket 阻塞，spec 内部亦为顺序推进。唯一的例外是 `foundation-and-customer-service-slice #07`（共享包边界检查），它只依赖 #01，可提前做。
+再两条横切 slice（2026-09-21，同一次访谈产出，编号共用）：
+
+- `advisor-review-reminder` —— 顾问的待审核提醒。审核队列只有在顾问主动走进 `/advisory` 时才存在，数字也只活在那页的卡片标题里（`AdvisoryWorkspace.vue:37`）。本 slice 把它钉到「投顾助手」导航项的待办计数上（`CONTEXT.md` 新增词条），复用既有队列接口而**不新增 count 接口**（两个口径迟早漂移，而「角标说 3、点进去是 2」正是提醒失效的形态），只对理财顾问。**无后端改动**，代价明确认下：只在自己刷新时才对，不加轮询、不加 SSE。
+- `operation-advice-product-choice` —— 操作建议的产品与金额由发起人决定，业务操作 Agent 收窄为只写理由（新增 ADR-0021）。它**修改** `operation-advice-and-customer-trading` 的 `#06` 两处已实现决定（「产品/金额/理由由 Agent 给出」与「申购取起投、赎回取全部份额」），**不改**「赎回的产品须在候选池内」这条硬保证，也不动「成交口径只有一处」。赎回因此从「全部」变成携带一个具体份额数（草案加一列），接受时按它执行。
+
+上面两份新 spec 共拆 7 份 ticket（`advisor-review-reminder` 2 份：计数 store → 导航角标；`operation-advice-product-choice` 5 份：可选项端点 → 发起受理接手产品与金额 → 赎回按份额成交 → 发起表单 → 端到端与既有断言收口）。全部 spec 已拆成 ticket，存于 `.scratch/<slug>/issues/`，共 70 个。依赖是一条串行链：每份 spec 的第一个 ticket 被上一份 spec 的最后一个 ticket 阻塞，spec 内部亦为顺序推进。唯一的例外是 `foundation-and-customer-service-slice #07`（共享包边界检查），它只依赖 #01，可提前做。
 
 **当前 frontier**：待重新核对。`.scratch/*/issues/*.md` 里的 `Status:` 标记已经落后于代码——例如 `advisory-plan-visibility` 的三份仍标 `ready-for-agent`，但 `apps/customer/src/advisory/AdvisoryPlanPage.vue` 与 `backend/app/advisory/final.py` 的 `serialize_final_for_customer` 都已经存在；`advisory-agent-and-review-flow` 的 #01–#03 同理。在逐份核对 `Status:` 之前，本行不作断言——写一个过时的答案比留白更容易误导人。
 

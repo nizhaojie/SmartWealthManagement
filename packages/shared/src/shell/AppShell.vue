@@ -248,10 +248,15 @@ onUpdated(syncBrandInitial);
 .app-shell__nav {
   display: flex;
   flex-direction: column;
-  gap: var(--wm-space-1);
+  gap: var(--wm-space-3);
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+}
+
+/* 折叠态只留图标条，导航项间距收紧回最小档 */
+.app-shell--sidebar-collapsed .app-shell__nav {
+  gap: var(--wm-space-1);
 }
 
 .app-shell__nav-item {
@@ -262,8 +267,11 @@ onUpdated(syncBrandInitial);
   border: 1px solid transparent;
   border-radius: var(--wm-radius-sm);
   background: transparent;
-  color: var(--wm-text-muted);
-  font-size: 0.85rem;
+  /* 侧边栏文本用主文字色（黑），不用 muted 灰 */
+  color: var(--wm-text-primary);
+  font-size: 0.95rem;
+  /* 侧边栏文本加粗 */
+  font-weight: 700;
   text-align: left;
   cursor: pointer;
 }
@@ -284,7 +292,7 @@ onUpdated(syncBrandInitial);
 .app-shell__nav-item[aria-current="page"] {
   background-color: var(--wm-color-primary-tint);
   color: var(--wm-color-primary-strong);
-  font-weight: 600;
+  font-weight: 700;
 }
 
 .app-shell__nav-icon {
@@ -343,13 +351,13 @@ onUpdated(syncBrandInitial);
   padding: var(--wm-space-2) 0;
   border: none;
   border-top: 1px solid var(--wm-border-hairline);
-  background: transparent;
-  color: var(--wm-text-muted);
+  background-color: var(--wm-bg-page);
+  color: var(--wm-text-primary);
   cursor: pointer;
 }
 
 .app-shell__collapse-toggle:hover {
-  color: var(--wm-text-primary);
+  color: var(--wm-color-primary);
 }
 
 .app-shell__collapse-icon {
@@ -397,17 +405,18 @@ onUpdated(syncBrandInitial);
 
 .app-shell__logout {
   padding: var(--wm-space-1) var(--wm-space-3);
-  border: 1px solid var(--wm-border);
-  border-radius: var(--wm-radius-sm);
-  background-color: var(--wm-bg-card);
-  color: var(--wm-text-muted);
+  border: none;
+  border-radius: var(--wm-radius-lg);
+  background-color: var(--wm-color-primary-soft);
+  color: var(--wm-color-primary);
   font-size: 0.85rem;
+  font-weight: 700;
   cursor: pointer;
 }
 
 .app-shell__logout:hover {
-  color: var(--wm-text-primary);
-  border-color: var(--wm-text-muted);
+  background-color: color-mix(in srgb, var(--wm-color-primary) 10%, white);
+  color: var(--wm-color-primary-strong);
 }
 
 .app-shell__content {

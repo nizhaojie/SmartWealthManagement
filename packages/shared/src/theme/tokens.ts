@@ -10,9 +10,10 @@ export const MIN_TEXT_CONTRAST_RATIO = 4.5;
 
 /** 主题色彩令牌。键名对应 tokens.css 的 --wm-* 变量，改值需两处同步并跑 tokens.test.ts。 */
 export const THEME_COLORS = {
-  primary: "#1570F0",
+  /** 主色取设计稿按钮的紫色；对白底 4.86:1。 */
+  primary: "#6C5CE7",
   /** 主色淡染底；淡染底上的文字用 --wm-color-primary-strong（见 tokens.test.ts）。 */
-  primaryTint: "#E9F1FF",
+  primaryTint: "#EEEBFF",
   up: "#C81E1E",
   down: "#1E7A46",
   success: "#1E7A46",
@@ -26,6 +27,6 @@ export const THEME_COLORS = {
   textPlaceholder: "#A3ACBD",
   pageBackground: "#F4F6FA",
   cardSurface: "#FFFFFF",
-  border: "#E6E9F0",
+  border: "#B8C1CF",
   hairline: "#EEF1F6",
 } as const;

@@ -13,20 +13,22 @@
  */
 
 :root {
-  /* 品牌 */
-  --wm-color-primary: #1570f0;
+  /* 品牌：主色取设计稿按钮的紫色（#6C5CE7，对白底 4.86:1） */
+  --wm-color-primary: #6c5ce7;
   /*
    * 淡染底上的文字（导航激活项、tag、浅底强调块）。02 用 #1677ff on #e8f1ff
-   * 只有 3.61:1，跌破 4.5 门槛，这里按 78% 主色 + 22% 黑现场派生到 5.96:1。
+   * 只有 3.61:1，跌破 4.5 门槛，这里按 78% 主色 + 22% 黑现场派生到 6.07:1。
    */
   --wm-color-primary-strong: color-mix(in srgb, var(--wm-color-primary) 78%, black);
   /* 主色实底上的前景色（按钮文字、::selection） */
   --wm-color-primary-fg: #ffffff;
   /*
    * 主色淡染底：侧边导航激活项、入口卡片图标底座、tag 蓝底等浅色底（02 的 --accent-soft；
-   * 02 的 --tag2-bg 写作 #e8f1ff，与 --accent-soft 是同一个浅蓝，1/255 的差值是 02 自身的不一致）。
+   * 随主色换紫，取同明度档的浅紫）。
    */
-  --wm-color-primary-tint: #e9f1ff;
+  --wm-color-primary-tint: #eeebff;
+  /* 主色更浅的淡底：默认按钮与次级操作的底色（比 tint 更淡，避免大面积实心感） */
+  --wm-color-primary-soft: #f1f0ff;
 
   /* 涨跌：红涨绿跌（中国金融惯例）。与 success/danger 同值但独立命名，保留分叉余地 */
   --wm-color-up: #c81e1e;
@@ -59,7 +61,7 @@
   --wm-bg-card: #ffffff;
   --wm-bg-sidebar: #ffffff;
   --wm-bg-subtle: #fafbfc;
-  --wm-border: #e6e9f0;
+  --wm-border: #b8c1cf;
   --wm-border-hairline: #eef1f6;
   /* 用户气泡底：02 的 --user-bg，配 --wm-text-primary 为 13.9:1 */
   --wm-bg-user-bubble: #e8f1ff;
@@ -117,6 +119,39 @@
   --el-color-primary-light-7: color-mix(in srgb, var(--wm-color-primary) 30%, white);
   --el-color-primary-light-8: color-mix(in srgb, var(--wm-color-primary) 20%, white);
   --el-color-primary-light-9: color-mix(in srgb, var(--wm-color-primary) 10%, white);
+
+  /* 输入框与默认按钮的描边跟随中性边框令牌：EP 默认浅灰在浅色底上几乎看不见 */
+  --el-border-color: var(--wm-border);
+}
+
+/*
+ * Element Plus 按钮统一形态：加粗文字 + 大圆角（设计稿按钮样式）。
+ * 主色按钮即「实底白字」，默认（白底描边）按钮见下方补色。
+ */
+.el-button {
+  font-weight: 700;
+  border-radius: var(--wm-radius-lg);
+}
+
+/*
+ * 默认（白底）按钮参考设计稿：常态即为紫字 + 浅紫描边；hover/active 交回 EP
+ * 自身的主色态（--el-color-primary 已映射到令牌）。排除其它 type 的实底按钮
+ * 与 text/link 按钮——它们不应被染成紫字。
+ */
+.el-button:not(.el-button--primary):not(.el-button--success):not(.el-button--warning):not(
+    .el-button--danger
+  ):not(.el-button--info):not(.is-text):not(.is-link) {
+  color: var(--wm-color-primary);
+  /* 默认按钮：浅紫底、无描边；hover/active 交回 EP 主色态 */
+  background-color: var(--wm-color-primary-soft);
+  border-color: transparent;
+}
+
+/* 默认按钮的 hover 也保持无描边（EP 默认会给 primary 描边） */
+.el-button:not(.el-button--primary):not(.el-button--success):not(.el-button--warning):not(
+    .el-button--danger
+  ):not(.el-button--info):not(.is-text):not(.is-link):hover {
+  border-color: transparent;
 }
 
 /*
@@ -135,9 +170,15 @@
 body {
   margin: 0;
   font-family: var(--wm-font-family);
+  /* 默认 400 在 Windows Segoe UI 下偏细，抬到 500（medium）让正文更清晰 */
+  font-weight: 500;
   background-color: var(--wm-bg-page);
   color: var(--wm-text-primary);
-  -webkit-font-smoothing: antialiased;
+  /*
+   * 不设 -webkit-font-smoothing: antialiased：它在 Windows 上会禁用 ClearType，
+   * 改用灰阶抗锯齿，导致笔画发虚变细——正是「字体偏细」的根因。交给浏览器默认的
+   * 亚像素（ClearType）渲染，字体会更粗更清晰。
+   */
 }
 
 :focus-visible {
@@ -145,6 +186,16 @@ body {
   outline-offset: 2px;
   /* 02 此处硬编码 3px；这里走令牌，取值差异肉眼不可分辨 */
   border-radius: var(--wm-radius-sm);
+}
+
+/*
+ * Element Plus 输入类控件聚焦时自带 box-shadow 焦点环，全局 :focus-visible 会再叠一层
+ * 蓝色描边（filterable 的 el-select 内层 input 尤其明显——蓝色圆角长方形）。剥掉内层重复描边。
+ */
+.el-select__input:focus-visible,
+.el-input__inner:focus-visible,
+.el-textarea__inner:focus-visible {
+  outline: none;
 }
 
 *::-webkit-scrollbar {

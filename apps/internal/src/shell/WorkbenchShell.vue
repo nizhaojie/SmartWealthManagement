@@ -120,7 +120,7 @@ async function onLogout(): Promise<void> {
         :aria-expanded="!layout.inspectorCollapsed"
         @click="layout.toggleInspector()"
       >
-        {{ layout.inspectorCollapsed ? "展开检查器" : "检查器" }}
+        {{ layout.inspectorCollapsed ? "展开检查器" : "收起检查器" }}
       </button>
     </template>
 
@@ -172,19 +172,20 @@ async function onLogout(): Promise<void> {
   white-space: nowrap;
 }
 
-/* 检查器开关：与登出同源的次级按钮观感，aria-expanded 反映检查器展开态 */
+/* 检查器开关：与登出、页面级操作同源的次级按钮观感，aria-expanded 反映检查器展开态 */
 .shell__inspector-toggle {
   padding: var(--wm-space-1) var(--wm-space-3);
-  border: 1px solid var(--wm-border);
-  border-radius: var(--wm-radius-sm);
-  background-color: var(--wm-bg-card);
-  color: var(--wm-text-muted);
+  border: none;
+  border-radius: var(--wm-radius-lg);
+  background-color: var(--wm-color-primary-soft);
+  color: var(--wm-color-primary);
   font-size: 0.85rem;
+  font-weight: 700;
   cursor: pointer;
 }
 
 .shell__inspector-toggle:hover {
-  color: var(--wm-text-primary);
-  border-color: var(--wm-text-muted);
+  background-color: color-mix(in srgb, var(--wm-color-primary) 10%, white);
+  color: var(--wm-color-primary-strong);
 }
 </style>

@@ -5,11 +5,20 @@ import { useRoute, useRouter } from "vue-router";
 import { AppShell, type AppShellNavItem } from "@wealth/shared";
 import { useAdviceStore } from "../stores/advice";
 import { useAuthStore } from "../stores/auth";
+import { useLayoutStore } from "../stores/layout";
 
 const route = useRoute();
 const router = useRouter();
 const auth = useAuthStore();
 const advice = useAdviceStore();
+const layout = useLayoutStore();
+
+// 折叠状态归 layout store 持有：AppShell 是受控组件，触发条点击后 emit update:sidebarCollapsed，
+// 这里用 v-model 把它接回 store 写回 localStorage。customer 无检查器，不传 inspectorCollapsed。
+const sidebarCollapsed = computed({
+  get: () => layout.sidebarCollapsed,
+  set: (next: boolean) => layout.setSidebarCollapsed(next),
+});
 
 // 「交易」是客户主动做的事，「我的建议」是等他做决定的事（收件箱），「我的方案」是资料库
 // （只读回看）。三者在侧栏各占一项：合并任意两项，客户就不会发现还有东西在等他。
@@ -61,6 +70,7 @@ async function onLogout(): Promise<void> {
 
 <template>
   <AppShell
+    v-model:sidebar-collapsed="sidebarCollapsed"
     :nav-items="navItems"
     :active-key="activeKey"
     brand-subtitle="Wealth Copilot"

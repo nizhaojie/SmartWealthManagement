@@ -20,6 +20,18 @@ if (demo) {
   console.log("[dev-backend] DEMO_REPLAY=1 —— 回放模式：预置问答确定性回放，不发起外部调用");
 }
 
+// 依赖预检：pyproject.toml 的 dependencies 是运行期依赖的唯一来源，但解释器是
+// 环境级的（conda 环境 wealth-backend / backend/.venv 都先建好后装依赖）。不预检的话，
+// 新加的依赖要等到 import 那一刻才报 ModuleNotFoundError。缺什么补什么，失败即止。
+const deps = spawnSync(python, ["-m", "scripts.check_deps", "--install"], {
+  stdio: "inherit",
+  cwd: backend,
+  env: process.env,
+});
+if (deps.status !== 0) {
+  process.exit(deps.status ?? 1);
+}
+
 const setup = spawnSync(python, ["-m", "app.db.setup"], {
   stdio: "inherit",
   cwd: backend,

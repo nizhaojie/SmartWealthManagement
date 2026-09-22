@@ -28,6 +28,18 @@ if not exist "%BACKEND_PYTHON%" (
     exit /b 1
 )
 
+echo [1/3] 校验后端依赖（缺失时自动安装，首次需要联网）...
+pushd "%ROOT%backend"
+"%BACKEND_PYTHON%" -m scripts.check_deps --install
+if errorlevel 1 (
+    popd
+    echo [错误] 后端依赖未就绪，请检查网络后重试，或手动执行：
+    echo     "%BACKEND_PYTHON%" -m pip install -e "%ROOT%backend"
+    pause
+    exit /b 1
+)
+popd
+
 docker info >nul 2>&1
 if errorlevel 1 (
     echo [错误] Docker 未运行，请先启动 Docker Desktop。
@@ -35,7 +47,7 @@ if errorlevel 1 (
     exit /b 1
 )
 
-echo [1/2] 启动基础设施容器并等待健康检查通过...
+echo [2/3] 启动基础设施容器并等待健康检查通过...
 pushd "%ROOT%"
 docker compose up -d --wait --wait-timeout 180
 if errorlevel 1 (
@@ -46,7 +58,7 @@ if errorlevel 1 (
 )
 popd
 
-echo [2/2] 拉起后端与两个前端（各自独立窗口）...
+echo [3/3] 拉起后端与两个前端（各自独立窗口）...
 rem BACKEND_PYTHON 设在本窗口，由子进程继承，dev-backend.mjs 据此选 conda 解释器。
 set "BACKEND_PYTHON=%BACKEND_PYTHON%"
 start "backend-8000" cmd /k "cd /d "%ROOT%" && pnpm dev:backend"

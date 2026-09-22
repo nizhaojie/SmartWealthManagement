@@ -96,8 +96,6 @@
   --wm-sidebar-width-collapsed: 64px;
   --wm-topbar-height: 60px;
   --wm-inspector-width: 336px;
-  /* customer 主区限宽居中（02 未给，为本 slice 新增） */
-  --wm-content-max-width: 1080px;
 
   /* 动效曲线：载入浮现与面板发丝线呼吸共用（02 的 cubic-bezier(.22,1,.36,1)） */
   --wm-ease-rise: cubic-bezier(0.22, 1, 0.36, 1);

@@ -103,8 +103,8 @@ onMounted(load);
           <tr>
             <th>流水号</th>
             <th>成交时间</th>
-            <th>产品</th>
-            <th>收款人</th>
+            <th class="cell--wrap">产品</th>
+            <th class="cell--wrap">收款人</th>
             <th>类型</th>
             <th>金额（元）</th>
             <th>份额</th>
@@ -121,8 +121,8 @@ onMounted(load);
           >
             <td>{{ row.transaction_no }}</td>
             <td>{{ row.traded_at }}</td>
-            <td>{{ productLabel(row) }}</td>
-            <td>{{ payeeLabel(row) }}</td>
+            <td class="cell--wrap">{{ productLabel(row) }}</td>
+            <td class="cell--wrap">{{ payeeLabel(row) }}</td>
             <td>{{ row.transaction_type }}</td>
             <td>{{ row.amount }}</td>
             <td>{{ row.shares ?? "—" }}</td>
@@ -178,6 +178,7 @@ onMounted(load);
   font-size: 0.85rem;
 }
 
+/* 兜底：极窄视口下表格仍可横向滚动，但正常情况下表格会收窄到容器内，不出现滚动条。 */
 .table-wrap {
   overflow-x: auto;
 }
@@ -187,14 +188,26 @@ table {
   border-collapse: collapse;
 }
 
+/*
+ * 默认 nowrap：流水号、成交时间、金额这类数据一旦折行就读不出来（「TX2026…」断成两截）。
+ * 全表十列都在一行时约 1270px，所以只让产品名与收款人两列折行（.cell--wrap），
+ * 其余列保持一行，表格最小宽度才落得进主区——横向滚动条因此不出现。
+ * 内边距收到 8px 也是为此：十列各让出 8px，正好把 12px 内边距下差的那几十像素找回来。
+ */
 th,
 td {
-  padding: var(--wm-space-2) var(--wm-space-3);
+  padding: var(--wm-space-2);
   /* 表格行的 1px 分隔细线（令牌纪律声明的极少数例外） */
   border-bottom: 1px solid var(--wm-border-hairline);
   text-align: left;
   font-size: 0.85rem;
   white-space: nowrap;
+}
+
+/* 产品名与收款人（含账号）是整表里唯一两段放得下的长文本：折行 + 长串就地断行。 */
+.cell--wrap {
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 th {

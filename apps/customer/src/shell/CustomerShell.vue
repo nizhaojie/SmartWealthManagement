@@ -42,6 +42,7 @@ const navItems = computed<AppShellNavItem[]>(() => [
 // 导航键与路径首段同名（key 就是 `/${key}`）：详情路由的 name 与导航键不同
 // （advisory-plan vs advisory），按路径取键，进详情时侧栏仍停在「我的方案」。
 const activeKey = computed(() => route.path.split("/").filter(Boolean)[0] ?? "");
+
 // 顶栏左侧的页面标题：壳不认识模块名，key → 标题的映射留在应用里。
 const activeLabel = computed(
   () => navItems.value.find((item) => item.key === activeKey.value)?.label ?? "",
@@ -88,20 +89,16 @@ async function onLogout(): Promise<void> {
       </span>
     </template>
 
-    <div class="shell__content">
-      <router-view />
-    </div>
+    <!--
+      客户侧两栏：不提供 inspector 插槽，壳据此渲染两栏——客户看不到预警等级与处置动作，
+      这是客户可见视图的边界。主区不另设宽度上限（原先的 1080px 居中限宽已取消），
+      与内部工作台一致：宽表（交易流水十列）要把可用宽度全用上。
+    -->
+    <router-view />
   </AppShell>
 </template>
 
 <style scoped>
-/* 客户侧两栏：不提供 inspector 插槽（壳据此渲染两栏），主区限宽居中。
-   客户看不到预警等级与处置动作——客户可见视图的边界。 */
-.shell__content {
-  max-width: var(--wm-content-max-width);
-  margin: 0 auto;
-}
-
 .shell__crumb {
   font-size: 0.85rem;
   font-weight: 600;

@@ -47,6 +47,13 @@ function isNearExpiry(document: KnowledgeDocument): boolean {
   return new Date(document.expire_at).getTime() - Date.now() <= NEAR_EXPIRY_MS;
 }
 
+/** 来源文件列只显示文件名，去掉「金融政策/」这类目录前缀——目录读不出更多东西，
+ *  却占着一列的宽度，是把这张九列表格顶出容器的主要一块。 */
+function fileName(sourceFile: string): string {
+  const segments = sourceFile.split(/[/\\]/);
+  return segments[segments.length - 1] || sourceFile;
+}
+
 function stopPolling(): void {
   if (pollTimer !== null) {
     window.clearInterval(pollTimer);
@@ -219,12 +226,20 @@ const processingCount = computed(
         {{ processingCount }} 份文档处理中，列表会自动刷新。
       </p>
 
+      <!--
+        列宽一律是「最小宽度」而非固定宽度：el-table 只在各列最小宽度之和大于容器时才出横向滚动条。
+        原来的固定值合计 1220px，比侧栏展开（248px）时的主区可用宽度还宽——侧栏折不折都会挂着
+        一条水平滑动条。收窄到合计 836px（来源文件同时只展示文件名）后，连侧栏展开的 1200px
+        窄屏也落在容器内；多余宽度由 el-table 按列分配，宽度真的不够时才退化成横向滚动。
+      -->
       <el-table v-if="documents.length" :data="documents" data-testid="documents-table">
-        <el-table-column label="知识类型" prop="knowledge_type" width="100" />
-        <el-table-column label="标题" prop="title" min-width="180" />
-        <el-table-column label="来源文件" prop="source_file" min-width="160" />
-        <el-table-column label="版本" prop="version" width="90" />
-        <el-table-column label="状态" width="140">
+        <el-table-column label="知识类型" prop="knowledge_type" min-width="80" />
+        <el-table-column label="标题" prop="title" min-width="100" />
+        <el-table-column label="来源文件" min-width="100">
+          <template #default="{ row }">{{ fileName(row.source_file) }}</template>
+        </el-table-column>
+        <el-table-column label="版本" prop="version" min-width="56" />
+        <el-table-column label="状态" min-width="120">
           <template #default="{ row }">
             <el-tag :type="statusTagType(row.status)">
               {{ STATUS_LABELS[row.status as DocumentStatus] }}
@@ -237,11 +252,11 @@ const processingCount = computed(
             </el-tooltip>
           </template>
         </el-table-column>
-        <el-table-column label="入库时间" width="170">
+        <el-table-column label="入库时间" min-width="112">
           <template #default="{ row }">{{ formatDateTime(row.create_time) }}</template>
         </el-table-column>
-        <el-table-column label="分块数" prop="chunk_count" width="90" />
-        <el-table-column label="过期时间" width="200">
+        <el-table-column label="分块数" prop="chunk_count" min-width="68" />
+        <el-table-column label="过期时间" min-width="112">
           <template #default="{ row }">
             <span v-if="row.expire_at">{{ formatDateTime(row.expire_at) }}</span>
             <span v-else>—</span>
@@ -250,7 +265,7 @@ const processingCount = computed(
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="90">
+        <el-table-column label="操作" min-width="88">
           <template #default="{ row }">
             <el-button size="small" name="delete-document" @click="removeDocument(row)">删除</el-button>
           </template>

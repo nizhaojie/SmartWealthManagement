@@ -135,31 +135,37 @@ useTabSummary(
         暂无预警
       </p>
 
+      <!--
+        列宽是「最小宽度」而不是固定宽度：el-table 只有在各列最小宽度之和大于容器时才出横向滚动条。
+        之前的固定值合计 1120px，比收窄侧栏 + 收窄检查器后的主区宽度还多几像素，
+        于是两栏都收起时仍会冒出一条水平滑动条。收窄后合计 980px，落在容器内，
+        多余宽度由 el-table 按列分配；侧栏/检查器展开、宽度不够时仍可横向滚动。
+      -->
       <el-table v-if="alerts.length" :data="visibleAlerts" data-testid="alerts-table">
-        <el-table-column label="产生时间" width="180">
+        <el-table-column label="产生时间" min-width="160">
           <template #default="{ row }">{{ formatDateTime(row.created_at) }}</template>
         </el-table-column>
-        <el-table-column label="客户" prop="customer_name" min-width="110" />
-        <el-table-column label="预警类型" prop="alert_type" min-width="150" />
-        <el-table-column label="等级" width="90">
+        <el-table-column label="客户" prop="customer_name" min-width="90" />
+        <el-table-column label="预警类型" prop="alert_type" min-width="130" />
+        <el-table-column label="等级" min-width="80">
           <template #default="{ row }">
             <el-tag :type="levelTagType(row.alert_level)">{{ row.alert_level }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="置信度" width="90">
+        <el-table-column label="置信度" min-width="80">
           <template #default="{ row }">{{ confidenceText(row.confidence) }}</template>
         </el-table-column>
-        <el-table-column label="命中规则" min-width="200">
+        <el-table-column label="命中规则" min-width="180">
           <template #default="{ row }">
             {{ row.rule_count }} 条 · {{ row.rule_codes.join("、") }}
           </template>
         </el-table-column>
-        <el-table-column label="状态" width="100">
+        <el-table-column label="状态" min-width="90">
           <template #default="{ row }">
             <el-tag :type="statusTagType(row.status)">{{ row.status }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="工单" width="110">
+        <el-table-column label="工单" min-width="90">
           <template #default="{ row }">
             <el-tag v-if="row.work_order_status" :type="workOrderTagType(row.work_order_status)">
               {{ row.work_order_status }}
@@ -167,7 +173,7 @@ useTabSummary(
             <span v-else>—</span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="90">
+        <el-table-column label="操作" min-width="80">
           <template #default="{ row }">
             <el-button size="small" name="open-alert" @click="openAlert(row.id)">查看</el-button>
           </template>

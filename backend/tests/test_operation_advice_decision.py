@@ -138,13 +138,12 @@ def _open_account(client: TestClient, persona: dict) -> dict:
 
 
 def _fund_account(customer_id: int, balance: Decimal = SEEDED_BALANCE) -> None:
-    engine = _engine()
-    try:
-        with OrmSession(engine) as session:
-            session.add(FundingAccount(customer_id=customer_id, available_balance=balance))
-            session.commit()
-    finally:
-        engine.dispose()
+    """开户已经建出资金账户（余额 0），这里只是把余额写成演示起点。
+
+    余额只来自种子（Q20），测试直接写它是为了绕过「没有入金入口」这件事，而不是
+    为了建账户——再 INSERT 一行会撞 `uk_funding_account_customer`。
+    """
+    _set_balance(customer_id, balance)
 
 
 def _set_balance(customer_id: int, balance: Decimal) -> None:

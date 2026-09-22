@@ -9,6 +9,10 @@
 初始画像必须在这里建出来：风险评测的提交、适当性的判定都以画像存在为前提。
 新客户的账户里没有一张画像行，旅程在第一步就走不下去——这个缺口在端到端
 串起来时才暴露（ticket 07），由开户补上。
+
+资金账户（一个客户一个，可用余额为 0）也必须在这里建出来，同样是因为「客户存在」与
+「客户有资金账户」在系统的其它地方被当成同一件事：不在开户时建，客户侧会读到 404，
+受理层会说「资金账户不存在」。入金不在范围内，可用余额从 0 开始是它应有的样子。
 """
 
 from __future__ import annotations
@@ -28,7 +32,8 @@ from app.customer_profile.confidence import (
 )
 from app.customer_profile.judgement import EXPERIENCE_SCORES, INCOME_SCORES
 from app.customer_profile.service import write_tag
-from app.db.models import Customer, CustomerProfile, Employee
+from app.customer_profile.target_allocation import validate_target_allocation
+from app.db.models import Customer, CustomerProfile, Employee, FundingAccount
 from app.exceptions import AppError
 
 USERNAME_TAKEN_MESSAGE = "登录账号已被使用"
@@ -84,6 +89,10 @@ def open_account(
         raise AppError(400, INVALID_ASSETS_MESSAGE) from exc
     if assets < 0:
         raise AppError(400, INVALID_ASSETS_MESSAGE)
+    # 目标配置是比例，不是几个各自独立的数字：合计必须为 100（见
+    # `app.customer_profile.target_allocation`）。这里先拦一道，画像与标签
+    # 就不会先带着一个不成立的值落库。
+    validate_target_allocation(target_allocation)
 
     if db.scalar(select(Customer).where(Customer.username == username)):
         raise AppError(409, USERNAME_TAKEN_MESSAGE)
@@ -119,6 +128,12 @@ def open_account(
         computed_at=now,
     )
     db.add(profile)
+
+    # 资金账户与客户一起落库，可用余额为 0（CONTEXT「资金账户」：一个客户一个）。
+    # 「不做入金」决定的是可用余额只来自种子，不是「新客户没有资金账户」——没有账户的话，
+    # 客户侧读到的 404 会与「读不到可用余额」显示成同一个「—」，而受理层给的拒绝理由会变成
+    # 「资金账户不存在」，说不清到底是没钱还是没有这个账户。
+    db.add(FundingAccount(customer_id=customer.id, available_balance=Decimal("0.00")))
     db.flush()
 
     tags: dict[str, object] = {

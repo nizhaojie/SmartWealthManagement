@@ -17,6 +17,10 @@ from app.customer_profile.confidence import (
 )
 from app.customer_profile.judgement import age_from_id_number, judge_profile
 from app.customer_profile.rerank import MemoryUnit, rerank, weights_for_scenario
+from app.customer_profile.target_allocation import (
+    TAG_TARGET_ALLOCATION,
+    validate_target_allocation,
+)
 from app.db.models import (
     Customer,
     CustomerProfile,
@@ -150,6 +154,9 @@ def write_tag(
         raise AppError(400, UNKNOWN_SOURCE_MESSAGE)
     if source == SOURCE_ADVISOR and not (reason and reason.strip()):
         raise AppError(400, REASON_REQUIRED_MESSAGE)
+    # 目标配置是比例：手工修正这条路径与开户采集用同一份判据，顾问改标签绕不过去。
+    if tag_key == TAG_TARGET_ALLOCATION:
+        validate_target_allocation(value)
 
     _customer, profile = _require_profile(db, customer_id)
     existing = db.scalar(

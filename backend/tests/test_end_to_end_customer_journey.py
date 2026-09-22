@@ -72,8 +72,9 @@ FAQ_QUESTION = "客户办理赎回业务后，赎回资金将在三个工作日�
 
 RISK_INTENT_QUESTION = "我想分几笔转，转账限额是多少？"
 
-# 旅程开的客户在应用里拿不到钱：余额只来自种子（Q20，本 slice 不做入金）。旅程因此
-# 直接给他的资金账户写一个余额——它是演示的起点，不是被测行为。
+# 旅程开的客户在应用里拿不到钱：开户建出来的是余额 0 的资金账户，余额只来自种子
+# （Q20，不做入金）。旅程因此直接把余额写成演示的起点——它绕过的是「没有入金入口」，
+# 不是「没有账户」。
 JOURNEY_BALANCE = Decimal("2000000.00")
 
 INFO_LOG = Path(__file__).resolve().parent.parent / "logs" / "info.log"
@@ -197,14 +198,18 @@ def _open_account(client: TestClient, persona: dict) -> dict:
 
 
 def _fund_customer_account(customer_id: int) -> None:
-    """给旅程客户一笔可动的钱，见 `JOURNEY_BALANCE`。"""
+    """给旅程客户一笔可动的钱，见 `JOURNEY_BALANCE`。
+
+    账户是开户时建出来的（余额 0），这里只写余额——这条语句绕过的是「没有入金入口」，
+    不是「没有账户」。
+    """
     engine = _engine()
     try:
         with engine.begin() as connection:
             connection.execute(
                 text(
-                    "INSERT INTO fin_funding_account (customer_id, available_balance)"
-                    " VALUES (:id, :balance)"
+                    "UPDATE fin_funding_account SET available_balance = :balance"
+                    " WHERE customer_id = :id"
                 ),
                 {"id": customer_id, "balance": JOURNEY_BALANCE},
             )

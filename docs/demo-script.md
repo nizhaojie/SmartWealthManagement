@@ -94,8 +94,8 @@ Agent 会给出该持仓的全部成交金额 `500,000.00` 元——正好是一
    建议方向选「赎回」→ **发起建议** → 提示「已发起，等待理财顾问审核」；下面的进度表出现
    一行：玉衡进取基金 / 赎回 / 500,000.00 / 审核进度「待审」/ 客户决定「—」
    （未放行时客户决定是**空**，因为客户此刻读不到这条建议）。
-   > 台词：「产品、金额与理由不是经理手填的——业务操作 Agent 在**候选池内**算出来的，
-   > 一次只给一个产品一个方向，金额必填。经理只决定方向：要不要动这只票是他的判断。」
+   > 台词：「产品与金额是经理选的，Agent 只写理由（ADR-0021）——选品权在发起人手里，
+   > 而理由要拿去过审核，所以它必须是能审的东西。一次只给一个产品一个方向，金额必填。」
 3. **放行**：内部端 `advisor1` 登录 → **投顾助手 → 待审核**：队列里同时有方案与操作建议，
    每一行带**类型**标注，摘要按类型给。点这条操作建议的「查看」→ **审核操作建议**页：
    内容类型「操作建议」，载荷只有**一个产品、一个方向、一个金额、一条理由**
@@ -139,8 +139,9 @@ Agent 会给出该持仓的全部成交金额 `500,000.00` 元——正好是一
    - 回产品筛选：产品清单出现，交易页可以选品下单。
    > 台词：「受理层的拒绝文案是『请先完成风险测评』，不是『风险等级不足』——开户时写下的
    > C1 是占位而不是结论。客户做完风评，同一笔交易当场就能走通。这一屏演示到『门禁打开』
-   > 为止：新开户客户没有资金账户（本 slice 不做入金），此时下单会回『资金账户不存在』，
-   > 所以别再往下点——最后那一步成交由
+   > 为止：新开户客户的资金账户在开户时就建出来了，可用余额为 0（本 slice 不做入金），此时
+   > 下单回的是『可用余额不足』——没钱与没有资金账户是两件事，后者的话，资产页上的『—』
+   > 说不清是哪一种。最后那一步成交由
    > `test_the_same_customer_can_trade_after_taking_the_assessment` 钉住。」
 
 ## 七、收尾与重置
@@ -168,3 +169,5 @@ Agent 会给出该持仓的全部成交金额 `500,000.00` 元——正好是一
 | 内部补录只对风控专员开放（ADR-0009 护栏 7） | `tests/test_transaction_events_api.py::test_backfilling_a_transaction_is_reserved_for_the_risk_officer` |
 | 广播通道不可用时交易与预警照常落库 | `tests/test_transactions_as_risk_input.py::test_a_broken_bus_does_not_stop_a_customer_trade_or_its_alert` |
 | 五个 Agent 各自被打到真实链路上（含本 slice 的业务操作 Agent） | `tests/test_end_to_end_customer_journey.py::test_full_customer_journey_for_both_personas` |
+| 新开户客户的资金账户在开户时就有了（余额 0），下单回的是余额不足 | `tests/test_customer_onboarding.py::test_a_newly_opened_customer_has_a_funding_account_with_no_money`、`::test_a_freshly_opened_customer_is_short_of_balance_not_missing_an_account` |
+| 目标配置是一组比例：合计不是 100 一律拒绝（开户与手工修正两条路径） | `tests/test_customer_onboarding.py::test_a_target_allocation_that_does_not_total_one_hundred_is_rejected`、`::test_the_target_allocation_cannot_be_smuggled_in_through_the_tag_correction` |

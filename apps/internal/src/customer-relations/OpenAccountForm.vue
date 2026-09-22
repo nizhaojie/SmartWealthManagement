@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { reactive, ref } from "vue";
+import { computed, reactive, ref } from "vue";
 import { PanelCard } from "@wealth/shared";
 import type { FormInstance, FormRules } from "element-plus";
 import { errorMessage } from "../format";
@@ -12,6 +12,9 @@ import {
   MIN_PASSWORD_LENGTH,
   PHONE_PATTERN,
   TARGET_ALLOCATION_CATEGORIES,
+  TARGET_ALLOCATION_TOTAL,
+  targetAllocationError,
+  targetAllocationTotal,
 } from "./onboarding";
 
 const emit = defineEmits<{ created: [] }>();
@@ -35,6 +38,11 @@ const form = reactive({
 const targetAllocation = reactive<Record<string, number>>(
   Object.fromEntries(TARGET_ALLOCATION_CATEGORIES.map((category) => [category, 0])),
 );
+
+// 合计实时显示：五项各自在 0-100 之内不等于它们合起来是一个比例，
+// 用户要能看见自己还差多少，而不是提交之后被后端退回来。
+const allocationTotal = computed(() => targetAllocationTotal(targetAllocation));
+const allocationProblem = computed(() => targetAllocationError(targetAllocation));
 
 const rules: FormRules = {
   username: [{ required: true, message: "请填写登录账号", trigger: "blur" }],
@@ -96,6 +104,11 @@ async function submit(): Promise<void> {
   if (!formRef.value) return;
   const valid = await formRef.value.validate().catch(() => false);
   if (!valid) return;
+
+  // 目标配置是比例：合计不为 100 就不是一个能拿来比较的基线。错误显示在它自己那一块
+  // 下面（`allocationProblem`，随输入实时更新），因此这里只是不放行——两处各写一遍
+  // 同一句话会让人以为是两个问题。
+  if (allocationProblem.value) return;
 
   let productPreference: Record<string, unknown> | null;
   try {
@@ -199,6 +212,19 @@ async function submit(): Promise<void> {
 
       <fieldset class="open-account__optional">
         <legend class="open-account__legend">可选：目标配置（各类资产占比，%）</legend>
+        <p class="open-account__allocation-total">
+          <span>合计</span>
+          <span
+            class="open-account__allocation-sum"
+            :class="{ 'is-invalid': allocationProblem !== null }"
+            data-testid="target-allocation-total"
+          >
+            {{ allocationTotal }}%
+          </span>
+          <span class="open-account__legend">
+            （各项占比合计须为 {{ TARGET_ALLOCATION_TOTAL }}%，全为 0 视为不填）
+          </span>
+        </p>
         <div class="open-account__allocation">
           <label
             v-for="category in TARGET_ALLOCATION_CATEGORIES"
@@ -214,6 +240,15 @@ async function submit(): Promise<void> {
             />
           </label>
         </div>
+
+        <p
+          v-if="allocationProblem"
+          class="open-account__error"
+          role="alert"
+          data-testid="target-allocation-error"
+        >
+          {{ allocationProblem }}
+        </p>
 
         <label class="open-account__preference">
           <span class="open-account__legend">可选：产品偏好（JSON 对象）</span>
@@ -264,6 +299,23 @@ async function submit(): Promise<void> {
 .open-account__legend {
   color: var(--wm-text-muted);
   font-size: 0.8rem;
+}
+
+.open-account__allocation-total {
+  display: flex;
+  align-items: baseline;
+  gap: var(--wm-space-2);
+  margin: var(--wm-space-3) 0 0;
+  font-size: 0.85rem;
+}
+
+.open-account__allocation-sum {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.open-account__allocation-sum.is-invalid {
+  color: var(--wm-color-danger);
 }
 
 .open-account__allocation {

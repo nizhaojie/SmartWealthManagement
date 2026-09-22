@@ -69,8 +69,9 @@ OPTIONS_PATH = "/api/internal/customers/{customer_id}/operation-advice-options"
 CANDIDATE_POOL_PATH = "/api/customer/candidate-pool"
 
 HELD_STATUS = "持有中"
-# 新客户在应用里拿不到钱：余额只来自种子（Q20，本 slice 不做入金）。测试因此直接写
-# 一个资金账户——它是演示起点，不是被测行为。
+# 新客户在应用里拿不到钱：开户建出来的是余额 0 的资金账户，余额只来自种子
+# （Q20，不做入金）。测试因此直接把余额写成演示起点——它绕过的是「没有入金入口」，
+# 不是「没有账户」。
 SEEDED_BALANCE = Decimal("500000.00")
 
 
@@ -134,9 +135,11 @@ def _fund_account(customer_id: int, balance: Decimal = SEEDED_BALANCE) -> None:
     engine = _engine()
     try:
         with OrmSession(engine) as session:
-            session.add(
-                FundingAccount(customer_id=customer_id, available_balance=balance)
+            account = session.scalar(
+                select(FundingAccount).where(FundingAccount.customer_id == customer_id)
             )
+            assert account is not None
+            account.available_balance = balance
             session.commit()
     finally:
         engine.dispose()

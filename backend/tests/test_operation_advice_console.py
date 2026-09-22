@@ -139,9 +139,11 @@ def _fund_account(customer_id: int) -> None:
     engine = _engine()
     try:
         with OrmSession(engine) as session:
-            session.add(
-                FundingAccount(customer_id=customer_id, available_balance=SEEDED_BALANCE)
+            account = session.scalar(
+                select(FundingAccount).where(FundingAccount.customer_id == customer_id)
             )
+            assert account is not None
+            account.available_balance = SEEDED_BALANCE
             session.commit()
     finally:
         engine.dispose()

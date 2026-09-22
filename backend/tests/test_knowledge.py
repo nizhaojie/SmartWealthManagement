@@ -9,6 +9,7 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session as OrmSession
 
 from app.db.models import KnowledgeMeta
+from app.knowledge.parsers import parse_document
 from app.knowledge.seed_faq import FAQ_SOURCE_FILE, seed_faq
 from app.knowledge.service import create_pending_document
 from app.main import app
@@ -459,5 +460,89 @@ def test_corrupt_docx_upload_is_marked_failed_with_parse_stage_and_reason(knowle
         assert listed["status"] == "failed"
         assert listed["stage"] == "parse"
         assert listed["failure_reason"]
+    finally:
+        _delete(knowledge_client, knowledge_id)
+
+
+# --- FAQ 按问答对拆分（`rag-retrieval-upgrade` 01）---
+
+
+QA_PAIRS_TXT = (
+    "公司的客服电话是多少?\t400-XXX-XXXX，服务时间 7:00-22:00。\n"
+    "基金申购后多久确认?\t交易日 15:00 前提交的申请 T+1 日确认份额。\n"
+    "什么是七日年化收益率?\t过去七天每万份基金份额净收益折合成的年收益率。\n"
+)
+
+
+def test_txt_qa_pairs_become_one_section_each():
+    """一组问答是 FAQ 的最小完整语义单元：一行一组，一组一节。"""
+    sections = parse_document("faq.txt", QA_PAIRS_TXT.encode("utf-8"))
+
+    assert [section.heading_path for section in sections] == [
+        ["公司的客服电话是多少?"],
+        ["基金申购后多久确认?"],
+        ["什么是七日年化收益率?"],
+    ]
+    assert [section.text for section in sections] == [
+        "公司的客服电话是多少?\n400-XXX-XXXX，服务时间 7:00-22:00。",
+        "基金申购后多久确认?\n交易日 15:00 前提交的申请 T+1 日确认份额。",
+        "什么是七日年化收益率?\n过去七天每万份基金份额净收益折合成的年收益率。",
+    ]
+
+
+def test_txt_answer_keeps_the_tabs_after_the_first_separator():
+    """只按第一个 tab 切分，答案内部再有 tab 不二次切分。"""
+    content = "问题?\t答案第一段\t答案第二段\n".encode("utf-8")
+
+    sections = parse_document("faq.txt", content)
+
+    assert [(section.heading_path, section.text) for section in sections] == [
+        (["问题?"], "问题?\n答案第一段\t答案第二段")
+    ]
+
+
+def test_txt_plain_lines_and_qa_pairs_keep_the_original_order():
+    """不含 tab 的行按原样成节（`heading_path` 为空），与问答节按出现顺序交错。"""
+    content = "前言第一行。\n问?\t答。\n说明第二行。\n".encode("utf-8")
+
+    sections = parse_document("mixed.txt", content)
+
+    assert [section.heading_path for section in sections] == [[], ["问?"], []]
+    assert [section.text for section in sections] == ["前言第一行。", "问?\n答。", "说明第二行。"]
+
+
+def test_txt_without_tabs_is_one_section_like_before():
+    """没有 tab 的 txt 与改动前同形：整篇一个 Section，正文是去首尾空白的原文。"""
+    content = "第一段没有制表符。\n\n第二段也没有。\n".encode("utf-8")
+
+    sections = parse_document("plain.txt", content)
+
+    assert len(sections) == 1
+    assert sections[0].heading_path == []
+    assert sections[0].text == content.decode("utf-8").strip()
+
+
+def test_qa_pair_txt_is_chunked_one_pair_per_chunk(knowledge_client):
+    upload_response = _upload(
+        knowledge_client,
+        filename="test_qa_pairs.txt",
+        content=QA_PAIRS_TXT.encode("utf-8"),
+        knowledge_type="FAQ",
+    )
+    knowledge_id = upload_response.json()["data"]["knowledge_id"]
+
+    try:
+        listed = _find(_list(knowledge_client).json()["data"], knowledge_id)
+        # 一组问答远短于 512 token，块数因此等于问答对数，不是滑动窗口切出来的块数。
+        assert listed["chunk_count"] == 3
+
+        for line in QA_PAIRS_TXT.strip().split("\n"):
+            question, answer = line.split("\t", 1)
+            hits = _search(
+                knowledge_client, query=f"{question}\n{answer}", knowledge_type="FAQ"
+            ).json()["data"]["hits"]
+            matched = next(hit for hit in hits if hit["knowledge_id"] == knowledge_id)
+            assert matched["content"] == f"{question}\n{answer}"
+            assert matched["heading_path"] == [question]
     finally:
         _delete(knowledge_client, knowledge_id)

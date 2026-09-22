@@ -1,21 +1,23 @@
-"""客户侧的交易受理入口：申购、赎回、转账与充值。
+"""客户侧的交易入口：申购、赎回、转账与充值的受理，以及交易流水的读。
 
-客户标识由凭证推导，请求体里没有这个字段——塞进来的不作数。这里只做参数拼装：
+客户标识由凭证推导，请求体里没有这个字段——塞进来的不作数。写操作这里只做参数拼装：
 校验、成交与持仓、可用余额的更新都在 `app.order_acceptance`，风控的接入在
-`app.risk_monitoring.alerting`。
+`app.risk_monitoring.alerting`。流水的读在 `app.customer_transactions`，与写接口同域
+（spec「交易流水归位」）。
 
 内部补录走的是另一个入口（`app.api.transaction_events`）：那条路子绕过本服务的校验，
 因此只对风控专员开放（ADR-0018）。
 """
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from decimal import Decimal
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.auth.dependencies import AuthContext, require_customer
+from app.customer_transactions.service import list_transactions
 from app.db.session import get_session
 from app.event_bus import EventPublisher, get_event_publisher
 from app.http import ok
@@ -122,5 +124,24 @@ def deposit(
             customer_id=auth.subject_id,
             amount=body.amount,
             now=_now(),
+        )
+    )
+
+
+@router.get("")
+def customer_transactions(
+    auth: AuthContext = Depends(require_customer),
+    db: Session = Depends(get_session),
+    start_date: date | None = Query(default=None),
+    end_date: date | None = Query(default=None),
+    transaction_type: str | None = Query(default=None),
+):
+    return ok(
+        list_transactions(
+            db,
+            customer_id=auth.subject_id,
+            start_date=start_date,
+            end_date=end_date,
+            transaction_type=transaction_type,
         )
     )

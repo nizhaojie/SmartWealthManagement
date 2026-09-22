@@ -203,7 +203,7 @@ def _serialize_option(option: dict, direction: str) -> dict:
     """可选项的呈现形状：金额与其余金额字段同口径，是字符串。
 
     不适用于该方向的那一项**不出现**，而不是给一个空值：赎回写 `max_amount` 是在陈述
-    一个不存在的事实（与 `app.customer_assets.service._format_optional` 同一条口径）。
+    一个不存在的事实（与 `app.customer_transactions.service._format_optional` 同一条口径）。
     """
     if direction == PURCHASE:
         upper = {"max_amount": format(option["max_amount"], "f")}

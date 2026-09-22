@@ -6,19 +6,22 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { h } from "vue";
 import { createMemoryHistory, createRouter, type Router } from "vue-router";
 import { ApiError } from "@wealth/shared";
-import type { Holding, TransactionRecord } from "../assets/types";
+import type { Holding } from "../assets/types";
 import type { Product } from "../products/types";
+import type { TransactionRecord } from "./types";
 
-const { purchase, redeem, transfer } = vi.hoisted(() => ({
+const { purchase, redeem, transfer, deposit, listTransactions } = vi.hoisted(() => ({
   purchase: vi.fn(),
   redeem: vi.fn(),
   transfer: vi.fn(),
+  deposit: vi.fn(),
+  listTransactions: vi.fn(),
 }));
 const { getFundingAccount } = vi.hoisted(() => ({ getFundingAccount: vi.fn() }));
 const { getAssets } = vi.hoisted(() => ({ getAssets: vi.fn() }));
 const { listProducts } = vi.hoisted(() => ({ listProducts: vi.fn() }));
 
-vi.mock("./api", () => ({ purchase, redeem, transfer }));
+vi.mock("./api", () => ({ purchase, redeem, transfer, deposit, listTransactions }));
 vi.mock("../funding/api", () => ({ getFundingAccount }));
 vi.mock("../assets/api", () => ({ getAssets }));
 vi.mock("../products/api", () => ({ listProducts }));
@@ -108,11 +111,14 @@ describe("TradingPage", () => {
     purchase.mockReset();
     redeem.mockReset();
     transfer.mockReset();
+    deposit.mockReset();
+    listTransactions.mockReset();
     getFundingAccount.mockReset();
     getAssets.mockReset();
     listProducts.mockReset();
 
     getFundingAccount.mockResolvedValue({ available_balance: "100000.00" });
+    listTransactions.mockResolvedValue({ transactions: [] });
     getAssets.mockResolvedValue({
       risk_level: "C1",
       risk_level_valid_until: "2027-03-15",
@@ -225,5 +231,17 @@ describe("TradingPage", () => {
     expect(wrapper.get('[data-testid="purchase-done"]').text()).toContain("TR20260921ABCDEF");
     expect(wrapper.get('[data-testid="available-balance"]').text()).toContain("94995.00");
     expect(wrapper.find('[data-testid="purchase-failure"]').exists()).toBe(false);
+  });
+
+  it("renders 交易流水 in a second tab and keeps the order forms intact", async () => {
+    listTransactions.mockResolvedValue({ transactions: [makeTransaction()] });
+    const wrapper = await mountPage();
+
+    expect(wrapper.text()).toContain("下单");
+    expect(wrapper.text()).toContain("交易流水");
+    expect(wrapper.get('[data-testid="transactions-table"]').text()).toContain("TR20260921ABCDEF");
+    // 下单 tab 的表单没有被流水 tab 挤掉。
+    expect(wrapper.find('button[name="submit-purchase"]').exists()).toBe(true);
+    expect(wrapper.find('button[name="submit-redemption"]').exists()).toBe(true);
   });
 });

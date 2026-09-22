@@ -39,7 +39,7 @@ SEEDED_PASSWORD = "Test@1234"
 
 DEPOSIT_PATH = "/api/customer/transactions/deposit"
 FUNDING_ACCOUNT_PATH = "/api/customer/funding-account"
-TRANSACTIONS_PATH = "/api/customer/assets/transactions"
+TRANSACTIONS_PATH = "/api/customer/transactions"
 PURCHASE_PATH = "/api/customer/transactions/purchase"
 REDEMPTION_PATH = "/api/customer/transactions/redemption"
 TRANSFER_PATH = "/api/customer/transactions/transfer"

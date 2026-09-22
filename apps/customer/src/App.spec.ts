@@ -7,8 +7,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createMemoryHistory, createRouter } from "vue-router";
 import { listAdvisoryRequests, listReleasedPlans } from "./advisory/api";
 import App from "./App.vue";
-import { getAssets, listTransactions } from "./assets/api";
+import { getAssets } from "./assets/api";
 import { login as loginRequest, logout as logoutRequest } from "./auth/api";
+import { listTransactions } from "./trading/api";
 import { clearTokens, getAccessToken } from "./auth/tokenStore";
 import { forgetUsername } from "./auth/username";
 import { getFundingAccount } from "./funding/api";
@@ -23,9 +24,9 @@ import { useChatStore } from "./stores/chat";
 vi.mock("./auth/api", () => ({ login: vi.fn(), logout: vi.fn() }));
 vi.mock("./assets/api", () => ({
   getAssets: vi.fn(),
-  listTransactions: vi.fn(),
   getHoldingLookThrough: vi.fn(),
 }));
+vi.mock("./trading/api", () => ({ listTransactions: vi.fn() }));
 vi.mock("./funding/api", () => ({ getFundingAccount: vi.fn() }));
 vi.mock("./operation-advice/api", () => ({ listMyAdvice: vi.fn(), decideAdvice: vi.fn() }));
 vi.mock("./risk-assessment/api", () => ({

@@ -39,7 +39,7 @@ REDEMPTION_PATH = "/api/customer/transactions/redemption"
 TRANSFER_PATH = "/api/customer/transactions/transfer"
 ASSETS_PATH = "/api/customer/assets"
 FUNDING_ACCOUNT_PATH = "/api/customer/funding-account"
-TRANSACTIONS_PATH = "/api/customer/assets/transactions"
+TRANSACTIONS_PATH = "/api/customer/transactions"
 
 # 测试自己造的事实都落在 2026 年之后；种子数据最晚一笔在 2023 年，两者不会混。
 TEST_EPOCH = datetime(2026, 1, 1)

@@ -15,16 +15,21 @@
 import { computed, onMounted, reactive, ref, watch } from "vue";
 import { ApiError, PageHeader, PanelCard, StatCard } from "@wealth/shared";
 import { getAssets } from "../assets/api";
-import type { Holding, TransactionRecord } from "../assets/types";
+import type { Holding } from "../assets/types";
 import { useAvailableBalance } from "../funding/useAvailableBalance";
 import { listProducts } from "../products/api";
 import type { Product } from "../products/types";
 import FailureNotice from "./FailureNotice.vue";
+import TransactionHistory from "./TransactionHistory.vue";
 import { deposit, purchase, redeem, transfer } from "./api";
 import { describeAcceptanceFailure, type AcceptanceFailure } from "./failure";
+import type { TransactionRecord } from "./types";
 
 const BALANCE_HINT =
   "可用余额是你在这里能立即动用的钱，与画像里的总资产不是一回事。申购与转账扣减它，赎回与充值增加它。";
+
+// 下单与流水是交易页的两个切面：默认停在下单，流水在第二个 tab。
+const activeTab = ref("orders");
 
 const { balance, error: balanceError, load: loadBalance } = useAvailableBalance();
 
@@ -174,7 +179,9 @@ onMounted(() => {
   <div class="trading">
     <PageHeader title="交易" :breadcrumb="['客户视图', '交易']" />
 
-    <div class="trading__balance" data-testid="available-balance">
+    <el-tabs v-model="activeTab">
+      <el-tab-pane label="下单" name="orders">
+        <div class="trading__balance" data-testid="available-balance">
       <StatCard title="可用余额（元）" :value="balance" accent="primary" />
     </div>
     <p class="trading__hint">{{ BALANCE_HINT }}</p>
@@ -342,11 +349,23 @@ onMounted(() => {
         <FailureNotice :failure="depositFailure" />
       </div>
     </PanelCard>
+      </el-tab-pane>
+      <el-tab-pane label="交易流水" name="history">
+        <TransactionHistory />
+      </el-tab-pane>
+    </el-tabs>
   </div>
 </template>
 
 <style scoped>
 .trading {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wm-space-4);
+}
+
+/* 下单与流水的内容各自落在 tab-pane 里，卡片间的纵向间距由这里接管（原本在 .trading 上）。 */
+.trading :deep(.el-tab-pane) {
   display: flex;
   flex-direction: column;
   gap: var(--wm-space-4);

@@ -46,9 +46,9 @@ from uuid import uuid4
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.customer_assets.service import (
+from app.customer_assets.service import HELD_STATUS
+from app.customer_transactions.service import (
     DEPOSIT,
-    HELD_STATUS,
     TRANSFER,
     serialize_deposit,
     serialize_transaction,

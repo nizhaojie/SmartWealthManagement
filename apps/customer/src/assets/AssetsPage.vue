@@ -7,7 +7,6 @@ import { RISK_LEVEL_LABELS } from "../risk-assessment/grades";
 import ActualAllocationChart from "./ActualAllocationChart.vue";
 import HoldingLookThrough from "./HoldingLookThrough.vue";
 import RiskLevelDistributionChart from "./RiskLevelDistributionChart.vue";
-import TransactionHistory from "./TransactionHistory.vue";
 import { getAssets, getHoldingLookThrough } from "./api";
 import { profitClass } from "./profit";
 import type { CustomerAssets, LookThrough } from "./types";
@@ -185,8 +184,6 @@ onMounted(() => {
         </table>
       </div>
     </PanelCard>
-
-    <TransactionHistory />
   </div>
 </template>
 

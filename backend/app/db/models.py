@@ -322,6 +322,36 @@ class Transfer(Base):
     create_time: Mapped[datetime] = mapped_column(DateTime, comment="成交时间")
 
 
+class Deposit(Base):
+    """充值：客户把机构之外的钱转入自己的资金账户（CONTEXT「充值」）。
+
+    它没有产品，因此也不进 `fin_transaction`——与转账同一条分表理由（ADR-0019），
+    充值把它延续下来（ADR-0023）：塞进 `fin_transfer` 会让收款人两列在充值行上恒为空。
+    与转账同形：`deposit_no`（前缀 `DP`）、`customer_id`、`amount`、`create_time`，
+    `CHECK amount > 0`，不带 status 列——受理通过即入账（Q5），状态在客户侧合并读里
+    统一给「已确认」。
+
+    方向与转账相反：它**增加**可用余额。它照常是一笔交易事件，照常进风控监测
+    （`app.risk_monitoring.alerting`）：大额入金交给规则引擎申报与预警，而不是在受理侧
+    拒收（ADR-0018 的延续）。金额精度与 `fin_transaction.amount` 对齐（18,2）。
+    """
+
+    __tablename__ = "fin_deposit"
+    __table_args__ = (
+        Index("ix_fin_deposit_customer_id", "customer_id"),
+        CheckConstraint("amount > 0", name="ck_deposit_amount_positive"),
+        {"comment": "充值"},
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    deposit_no: Mapped[str] = mapped_column(String(64), unique=True, comment="充值流水号")
+    customer_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("sys_customer.id"), comment="客户标识"
+    )
+    amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), comment="充值金额")
+    create_time: Mapped[datetime] = mapped_column(DateTime, comment="成交时间")
+
+
 class Holding(Base):
     __tablename__ = "fin_holdings"
     __table_args__ = (

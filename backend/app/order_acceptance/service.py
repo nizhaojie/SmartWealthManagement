@@ -47,12 +47,21 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.customer_assets.service import (
+    DEPOSIT,
     HELD_STATUS,
     TRANSFER,
+    serialize_deposit,
     serialize_transaction,
     serialize_transfer,
 )
-from app.db.models import FundingAccount, Holding, Product, Transaction, Transfer
+from app.db.models import (
+    Deposit,
+    FundingAccount,
+    Holding,
+    Product,
+    Transaction,
+    Transfer,
+)
 from app.event_bus import EventPublisher
 from app.exceptions import AppError
 from app.risk_assessment.service import find_current_result
@@ -83,8 +92,9 @@ NOT_ENOUGH_SHARES_MESSAGE = "赎回份额超过持仓份额"
 MISSING_PAYEE_NAME_MESSAGE = "收款人姓名不能为空"
 MISSING_PAYEE_ACCOUNT_MESSAGE = "收款人账号不能为空"
 
-# 转账流水号与交易流水号同一形状、不同前缀：两类记录会并排出现在客户的同一个列表里。
+# 转账、充值流水号与交易流水号同一形状、不同前缀：多类记录会并排出现在客户的同一个列表里。
 TRANSFER_NO_PREFIX = "TR"
+DEPOSIT_NO_PREFIX = "DP"
 
 
 def _money(value: Decimal) -> Decimal:
@@ -383,6 +393,10 @@ def _transfer_no(occurred_at: datetime) -> str:
     return f"{TRANSFER_NO_PREFIX}{occurred_at:%Y%m%d%H%M%S}{uuid4().hex[:6].upper()}"
 
 
+def _deposit_no(occurred_at: datetime) -> str:
+    return f"{DEPOSIT_NO_PREFIX}{occurred_at:%Y%m%d%H%M%S}{uuid4().hex[:6].upper()}"
+
+
 def transfer(
     db: Session,
     *,
@@ -440,5 +454,61 @@ def transfer(
     )
     return {
         "transaction": serialize_transfer(row),
+        "available_balance": format(account.available_balance, "f"),
+    }
+
+
+def deposit(
+    db: Session,
+    *,
+    publisher: EventPublisher,
+    customer_id: int,
+    amount: Decimal,
+    now: datetime,
+) -> dict:
+    """充值：客户把机构之外的钱转入自己的资金账户，余额只增（Q7）。
+
+    受理校验只有两条：金额为正、资金账户存在。不设限额、不要风评——大额入金交给
+    规则引擎申报与预警，而不是在受理侧拒收（ADR-0018 的延续）；风评门槛只属于申购。
+
+    事实落在 `fin_deposit` 里而不是 `fin_transaction`（ADR-0023），但它与申购赎回、
+    转账走的是**同一个**交易事件入海口——风控不关心事实存在哪张表，它要的是「发生了
+    什么」。余额只增：`available_balance += _money(amount)`，因此
+    `CHECK available_balance >= 0` 恒成立。
+    """
+    if amount <= 0:
+        raise AppError(400, NON_POSITIVE_AMOUNT_MESSAGE)
+    account = _require_account(db, customer_id=customer_id)
+
+    # 校验全部通过：从这里开始写库。客户自助发起，因此 operator_id 为空（Q22）。
+    number = _deposit_no(now)
+    row = Deposit(
+        deposit_no=number,
+        customer_id=customer_id,
+        amount=amount,
+        create_time=now,
+    )
+    db.add(row)
+    account.available_balance = account.available_balance + _money(amount)
+    # 落库由入海口提交（充值行与余额的变动此刻还在同一个会话里），于是「成交」与
+    # 「钱的变动」在同一次提交中发生——与转账完全一样。
+    db.flush()
+    alerting.submit_transaction_event(
+        db,
+        publisher=publisher,
+        submission=alerting.TransactionSubmission(
+            customer_id=customer_id,
+            product_id=None,
+            transaction_type=DEPOSIT,
+            amount=amount,
+            occurred_at=now,
+            transaction_id=row.id,
+            transaction_no=number,
+        ),
+        operator_id=None,
+        now=now,
+    )
+    return {
+        "transaction": serialize_deposit(row),
         "available_balance": format(account.available_balance, "f"),
     }

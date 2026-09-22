@@ -10,11 +10,12 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from sqlalchemy.sql import Select
 
-from app.db.models import Holding, Product, Transaction, Transfer
+from app.db.models import Deposit, Holding, Product, Transaction, Transfer
 from app.risk_assessment.service import find_current_result
 
 HELD_STATUS = "持有中"
 TRANSFER = "转账"
+DEPOSIT = "充值"
 # 转账是既成事实：受理通过的那一刻它就已经完成，没有「待确认」这种中间态。取值与
 # `app.risk_monitoring.alerting.TRANSACTION_STATUS_CONFIRMED` 一致——两张表合进
 # 同一个列表之后，状态列在客户眼里应当是同一个词。
@@ -119,6 +120,24 @@ def serialize_transfer(transfer: Transfer) -> dict:
         status=CONFIRMED_STATUS,
         traded_at=transfer.create_time,
         transfer=transfer,
+    )
+
+
+def serialize_deposit(deposit: Deposit) -> dict:
+    """一笔充值的呈现形状：没有产品，也没有收款人。
+
+    `transaction_no` 用充值自己的流水号——多类记录合进一张列表之后，客户核对账目时
+    每一行都有编号可对。
+    """
+    return _serialize_flow(
+        transaction_no=deposit.deposit_no,
+        transaction_type=DEPOSIT,
+        amount=deposit.amount,
+        shares=None,
+        nav=None,
+        fee=None,
+        status=CONFIRMED_STATUS,
+        traded_at=deposit.create_time,
     )
 
 

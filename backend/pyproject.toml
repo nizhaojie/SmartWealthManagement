@@ -20,6 +20,10 @@ dependencies = [
     "python-docx>=1.1.0",
     "python-multipart>=0.0.12",
     "langgraph>=1.2.0",
+    # 关键词召回臂的本地依赖（ADR-0022）：都不联网、无运行期外部调用，
+    # 回放与测试因此仍是离线确定性运行。pip 安装时需要联网一次。
+    "jieba>=0.42.1",
+    "rank_bm25>=0.2.2",
 ]
 
 [project.optional-dependencies]

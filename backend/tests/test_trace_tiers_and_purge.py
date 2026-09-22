@@ -266,6 +266,7 @@ def test_chat_turn_records_debug_trace_alongside_audit_archive(trace_client, mon
         score=0.99,
         title="产品要素说明",
         source_file="stub-faq.txt",
+        evidence_score=0.99,
     )
     monkeypatch.setattr(agent_graph, "search_chunks", lambda *args, **kwargs: [snippet])
     monkeypatch.setattr(

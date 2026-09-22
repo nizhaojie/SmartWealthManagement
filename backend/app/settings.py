@@ -92,14 +92,25 @@ class Settings(BaseSettings):
 
     demo_replay: bool = False
 
-    # 检索兜底阈值：比的是「融合前的最强证据分」（向量相似度与图谱段落分取大、
-    # 不做权重缩放，见 app.agent.graph 的 route_after_retrieve）。真实 embedding
-    # （如 text-embedding-v3）对无关文本的余弦相似度也能到 0.4~0.5，阈值必须校准
-    # 在这条「无关噪声基线」之上，否则无依据的问题会带着一堆低相关分块进入生成。
+    # 检索兜底阈值改为**分臂判定**（app.agent.graph 的 route_after_retrieve）：
+    # 向量臂最高余弦、关键词臂最高 BM25、图谱段落三者任一达标即认为有依据。
+    # 两个量纲不同，因此各有各的阈值——混用一个数会把一侧的结果整体打成兜底。
+    #
+    # 向量臂阈值：真实 embedding（如 text-embedding-v3）对无关文本的余弦也能到
+    # 0.4~0.5，阈值必须校准在这条「无关噪声基线」之上。
     retrieval_score_threshold: float = 0.55
-    # 关键词兜底路径（向量超时/不可用时的降级）单独校准：它打的是「命中字词占比」，
-    # 与余弦相似度不是一个量纲，用上面的 0.55 会把本来命中的降级结果全部打成兜底。
+    # 关键词臂阈值：量纲是 **BM25 分**（不再是「命中字词占比」），且随语料规模漂移
+    # （df / avgdl 在全语料上统计）。取值由 golden 集校准脚本产出；语料显著变化后
+    # 要重跑校准。当前默认值只是占位，别照它调参。
     retrieval_keyword_score_threshold: float = 0.35
+    # 每个召回臂各自返回的候选数（向量臂与关键词臂各出这么多条，再 RRF 融合）。
+    hybrid_recall_top_k: int = 20
+    # RRF 的平滑常数：rrf_score = Σ 1/(rrf_k + rank_arm)。它只用位次，天然跨量纲，
+    # 免去「余弦与 BM25 怎么归一化」这件事。
+    rrf_k: int = 60
+    # 可选的 jieba 用户词典路径（一行一个词，不存在则跳过）。本 slice 不提供词表，
+    # 这条只是「将来要加金融词表时不必改代码」的接缝。
+    jieba_user_dict_path: str = ""
     chat_memory_ttl_minutes: int = 30
     chat_memory_token_budget: int = 2000
     human_service_channel: str = "95588"

@@ -233,6 +233,8 @@ def _snippet() -> ChunkResult:
         score=0.99,
         title="产品要素说明",
         source_file="stub.txt",
+        # 分臂判定读证据分：这块走的是向量臂，0.99 ≥ RETRIEVAL_SCORE_THRESHOLD。
+        evidence_score=0.99,
     )
 
 
@@ -368,8 +370,10 @@ def test_vector_search_error_falls_back_to_keyword_retrieval(
     )
 
 
-def test_keyword_fallback_ignores_chunks_of_expired_documents(degradation_client):
-    """关键词路径与向量路径的可见性口径一致：过期文档不因降级而复活。"""
+def test_keyword_arm_scores_by_bm25_and_ignores_chunks_of_expired_documents(
+    degradation_client,
+):
+    """关键词臂按 BM25 打分，可见性与向量路径口径一致：过期文档不因降级而复活。"""
     upload = _upload(
         degradation_client,
         filename="test_degradation_expired.txt",
@@ -377,10 +381,19 @@ def test_keyword_fallback_ignores_chunks_of_expired_documents(degradation_client
         knowledge_type="FAQ",
     )
     knowledge_id = upload.json()["data"]["knowledge_id"]
-    _delete_document(degradation_client, knowledge_id)
 
     engine = _engine()
     try:
+        with OrmSession(engine) as session:
+            active_hits = keyword_search_chunks(
+                session, query=FAQ_QUESTION, knowledge_type="FAQ"
+            )
+        assert any(hit.knowledge_id == knowledge_id for hit in active_hits), "BM25 应命中"
+        assert all(hit.evidence_score > 0 for hit in active_hits)
+        assert all(hit.source == "keyword" for hit in active_hits)
+
+        _delete_document(degradation_client, knowledge_id)
+
         with OrmSession(engine) as session:
             leftover = session.scalar(
                 select(KnowledgeChunk.id).where(KnowledgeChunk.knowledge_id == knowledge_id)
@@ -388,11 +401,13 @@ def test_keyword_fallback_ignores_chunks_of_expired_documents(degradation_client
             assert leftover is not None, "镜像行不随删除消失，可见性靠文档状态过滤"
 
         with OrmSession(engine) as session:
-            hits = keyword_search_chunks(session, query=FAQ_QUESTION, knowledge_type="FAQ")
+            expired_hits = keyword_search_chunks(
+                session, query=FAQ_QUESTION, knowledge_type="FAQ"
+            )
     finally:
         engine.dispose()
 
-    assert all(hit.knowledge_id != knowledge_id for hit in hits)
+    assert all(hit.knowledge_id != knowledge_id for hit in expired_hits)
 
 
 # --- 图谱不可用 → 空图而不是 500 ---
@@ -649,11 +664,3 @@ def test_risk_monitoring_agent_type_literal_matches_the_agent_config():
     from app.risk_monitoring.alerting import AGENT_TYPE_RISK_MONITORING
 
     assert AGENT_TYPE_RISK_MONITORING == RISK_MONITORING_CONFIG.name
-
-
-def test_keyword_terms_are_bigrams_so_a_paraphrase_still_matches():
-    from app.knowledge.service import _query_terms
-
-    terms = _query_terms(FAQ_QUESTION)
-    assert "赎回" in terms
-    assert "到账" in terms

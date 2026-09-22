@@ -88,8 +88,8 @@ flowchart TD
 
 要点：
 - 意图分类是**关键词确定性判断**（`agent/intent.py:36-47`），金融关键词优先于闲聊词，避免「你好，请问费率…」被误判。
-- 融合排序：`score = 0.6 × 向量分 + 0.4 × 图谱分`（`settings.py:112-113`，`agent/fusion.py`）。
-- 兜底阈值比的是**融合前的证据分**（`agent/graph.py` 的 `retrieval_score`：向量相似度与图谱段落分取大、不做权重缩放），不是融合后的综合分——权重的职责只是排序，不能让「图谱是否参与」改变「有没有依据」。阈值按来源分别校准：向量/图谱 `RETRIEVAL_SCORE_THRESHOLD`（真实 embedding 对无关文本也能到 0.4~0.5，故取 0.55），关键词降级 `RETRIEVAL_KEYWORD_SCORE_THRESHOLD`（打的是「命中字词占比」，与余弦不同量纲）。
+- 混合召回 → RRF → 融合排序：向量臂（Milvus）与关键词臂（分块镜像上的 BM25，`knowledge/service.py`）各出 `HYBRID_RECALL_TOP_K` 条，先按位次做 RRF（`knowledge/hybrid.py`），候选再与图谱段落做加权和：`score = 0.6 × 相似度分 + 0.4 × 图谱分`（`settings.py`，`agent/fusion.py`）。
+- 兜底是**分臂判定**（`agent/graph.py` 的 `build_retrieval_evidence` / `has_retrieval_evidence`，见 CONTEXT「证据分」）：向量臂最高余弦 ≥ `RETRIEVAL_SCORE_THRESHOLD`、**或** 关键词臂最高 BM25 ≥ `RETRIEVAL_KEYWORD_SCORE_THRESHOLD`、**或** 有图谱段落，即认为有依据。比的是融合前各臂的原始分、不做权重缩放——权重的职责只是排序，不能让「图谱是否参与」改变「有没有依据」。两条阈值量纲不同（余弦 / BM25），由 golden 集校准产出。
 - **强制引用**：检索不到依据时不作答，改出兜底话术并给人工客服热线（`agent/graph.py:48-52`）。
 - 一轮对话的收尾（`agent/graph.py:328-428`）：读短期记忆 → 跑图 → 写回短期记忆 → **审计级留痕**（`ConversationArchive`）→ **调试级留痕**（`AgentDebugTrace`）→ 广播高风险意图事件。
 - **高风险意图识别**（`agent/risk_intent.py`）：关键词确定性匹配（转账限额规避、可疑资金流转、资金出境），识别到不等于定性 —— 只广播一条事件，不产生预警、不改变服务可用性。问题原文不进事件载荷。

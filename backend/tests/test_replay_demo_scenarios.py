@@ -156,6 +156,10 @@ def replay_client(_test_database_ready: None, monkeypatch: pytest.MonkeyPatch) -
             "llm_api_key": "",
             "embedding_api_key": "",
             "neo4j_graph_namespace": get_settings().test_neo4j_graph_namespace,
+            # 预置之外的问题走关键词臂（本地 BM25）。它的阈值量纲已从「命中字词
+            # 占比」变成 BM25 分，默认值要等 golden 集校准（issue 04）写回，
+            # 「明显无关的问题不触发作答」这条断言因此在这里显式注入阈值。
+            "retrieval_keyword_score_threshold": 10.0,
         }
     )
     engine = create_engine(settings.test_database_url)

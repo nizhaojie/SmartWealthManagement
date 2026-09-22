@@ -1,12 +1,13 @@
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeoutError
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Literal, TypeVar
 
-from sqlalchemy import delete, or_, select
+from rank_bm25 import BM25Okapi
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app import degradation
@@ -14,6 +15,7 @@ from app.db.models import KnowledgeChunk, KnowledgeMeta
 from app.exceptions import AppError
 from app.knowledge import object_store, vector_store
 from app.knowledge.embeddings import embed_texts
+from app.knowledge.hybrid import rrf_fuse, tokenize
 from app.knowledge.parsers import Section, is_supported, parse_document
 from app.knowledge.tokenizer import chunk_text
 from app.replay import library as replay_library
@@ -30,10 +32,6 @@ INGESTION_FAILED_CODE = 1008
 # 检索降级原因（进 `biz_degradation_trace` 的 reason 列）。
 DEGRADED_VECTOR_TIMEOUT = degradation.REASON_TIMEOUT
 DEGRADED_VECTOR_UNAVAILABLE = degradation.REASON_UNAVAILABLE
-
-# 关键词兜底最多扫多少行候选：LIKE 命中面可能很宽，先截断再在 Python 里精排，
-# 避免一次抖动把整张分块表拉进内存。
-KEYWORD_SCAN_LIMIT = 500
 
 CHUNK_SIZE = 512
 CHUNK_OVERLAP = 64
@@ -68,13 +66,34 @@ class ChunkResult:
     chunk_index: int
     heading_path: list[str]
     content: str
+    # `score` 是**最终排序分**（由融合/重排写出，0~1），`evidence_score` 是该块在
+    # **其来源臂上的原始分**（余弦 / BM25 / 图谱 1.0）。两者混用是这套设计最容易
+    # 失控的地方：兜底判定只读 `evidence_score` 各自的量纲，排序只读 `score`。
     score: float
     title: str
     source_file: str
-    # 结果来源：向量检索固定是 "vector"；图谱查询产出的段落用 "graph" 构造同类型
-    # 对象，以便和向量结果一起排序；向量不可用降级为关键词检索时标 "keyword"。
-    # 三种来源的打分不是同一量纲（余弦相似度 / 命中字词占比），兜底判定据此分设阈值。
-    source: Literal["vector", "graph", "keyword"] = "vector"
+    evidence_score: float = 0.0
+    # 结果来源：向量臂 "vector"、关键词臂 "keyword"、两路都命中 "hybrid"；
+    # 图谱查询产出的段落用 "graph" 构造同类型对象，以便和相似度结果一起排序。
+    # 注意它不再表示健康度——「出现过关键词路径」不再等于「向量库坏了」，
+    # 判断降级要看 `biz_degradation_trace`（ADR-0022）。
+    source: Literal["vector", "graph", "keyword", "hybrid"] = "vector"
+
+
+class RetrievedChunks(list[ChunkResult]):
+    """检索候选 + 各召回臂的原始最高分（分臂判定的输入）。
+
+    `ChunkResult.evidence_score` 是**单块**在其来源臂上的分；但 hybrid 块两路取大
+    之后，「向量臂最高多少、关键词臂最高多少」已经无法从候选里还原了——拿 BM25 的
+    量纲去冒充余弦，会让向量臂凭空达标。所以臂内最高分在两路还分着的时候
+    （`search_chunks` 内）就算好带出来，而不是事后从融合结果反推。
+    """
+
+    def __init__(
+        self, chunks: Iterable[ChunkResult], evidence: dict[str, float]
+    ) -> None:
+        super().__init__(chunks)
+        self.evidence = evidence
 
 
 def create_pending_document(
@@ -338,42 +357,12 @@ def _build_vector_results(db: Session, hits: list[vector_store.ChunkHit]) -> lis
                 score=hit["score"],
                 title=meta.title,
                 source_file=meta.source_file,
+                # 向量臂的原始分就是余弦相似度，先落进 evidence_score；
+                # 最终排序分由 RRF 融合（或重排）写回 `score`。
+                evidence_score=hit["score"],
             )
         )
     return results
-
-
-def _query_terms(query: str) -> list[str]:
-    """把问题切成关键词检索用的字词。
-
-    中文没有空格分词，按相邻两字切（与画像标签的相似度计算同一套办法）；英文与数字
-    按空白切。这样「管理费率是多少」能命中写着「管理费率为百分之一点二」的片段，
-    而不是要求问题原文作为子串出现。
-    """
-    characters = [char.lower() for char in query if char.isalnum()]
-    bigrams = {
-        f"{characters[index]}{characters[index + 1]}" for index in range(len(characters) - 1)
-    }
-    # 只有真的分过词（问题里带空白）才把整段查询也算一个词；否则中文问题会被
-    # `split()` 原样吐回一整个字符串，混进分母把命中率压到阈值以下。
-    tokens = query.split()
-    words = {token.lower() for token in tokens} if len(tokens) > 1 else set()
-    terms = bigrams | words
-    if not terms and query.strip():
-        terms = {query.strip().lower()}
-    return sorted(terms)
-
-
-def _escape_like(term: str) -> str:
-    return term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-
-
-def _keyword_score(terms: list[str], content: str, title: str) -> float:
-    if not terms:
-        return 0.0
-    haystack = f"{content} {title}".lower()
-    matched = sum(1 for term in terms if term in haystack)
-    return round(matched / len(terms), 4)
 
 
 def keyword_search_chunks(
@@ -382,33 +371,48 @@ def keyword_search_chunks(
     query: str,
     knowledge_type: str | None = None,
     top_k: int = 5,
+    user_dict_path: str = "",
 ) -> list[ChunkResult]:
-    """面向分块镜像的关键词检索：向量检索不可用时的兜底路径。
+    """面向分块镜像（`fin_knowledge_chunk`）的 BM25 召回臂。
 
-    它只按「分块里出现了几个查询字词」打分，语义上远不如向量检索，因此只在降级时
-    使用——正常路径不经过它，它也不参与正常路径的排序。
+    它是一等召回臂：正常路径与向量臂并行发起，两路的位次再交给 RRF 融合；向量臂
+    超时或不可用时，它也是那条唯一路径——降级路径与正常路径共用这一份实现、
+    一套口径（ADR-0022）。
+
+    BM25 的 df / avgdl 在**全语料**（所有 active 分块）上统计，`knowledge_type`
+    只过滤**结果**、不过滤语料：按类型把语料切小会让词频统计在子集上失真。索引
+    每次查询现建——当前语料是百级分块、单次几十毫秒，进程内缓存与失效（多 worker
+    下会漂移）留到真有瓶颈时再说。
     """
-    terms = _query_terms(query)
-    if not terms:
+    query_tokens = tokenize(query, user_dict_path=user_dict_path)
+    if not query_tokens:
         return []
 
-    conditions = [
-        KnowledgeChunk.content.like(f"%{_escape_like(term)}%", escape="\\") for term in terms
-    ]
-    stmt = (
+    corpus = db.execute(
         select(KnowledgeChunk, KnowledgeMeta)
         .join(KnowledgeMeta, KnowledgeMeta.id == KnowledgeChunk.knowledge_id)
         .where(KnowledgeMeta.status == STATUS_ACTIVE)
-        .where(or_(*conditions))
-    )
-    if knowledge_type:
-        stmt = stmt.where(KnowledgeChunk.knowledge_type == knowledge_type)
+    ).all()
+    if not corpus:
+        return []
+
+    tokenized_corpus = [
+        tokenize(chunk.content, user_dict_path=user_dict_path) for chunk, _ in corpus
+    ]
+    if not any(tokenized_corpus):
+        # BM25 的 avgdl 会变成 0（除零）——语料全是标点这种退化情形直接返回空。
+        return []
+
+    scores = BM25Okapi(tokenized_corpus).get_scores(query_tokens)
 
     scored: list[tuple[float, KnowledgeChunk, KnowledgeMeta]] = []
-    for chunk, meta in db.execute(stmt.limit(KEYWORD_SCAN_LIMIT)).all():
-        score = _keyword_score(terms, chunk.content, meta.title)
-        if score > 0:
-            scored.append((score, chunk, meta))
+    for (chunk, meta), raw_score in zip(corpus, scores):
+        if knowledge_type and chunk.knowledge_type != knowledge_type:
+            continue
+        # 与查询没有任何词重叠的块不是命中，不进候选：BM25 对无重叠词给 0 分。
+        if raw_score <= 0:
+            continue
+        scored.append((float(raw_score), chunk, meta))
 
     scored.sort(key=lambda item: (-item[0], item[1].knowledge_id, item[1].chunk_index))
     return [
@@ -421,6 +425,7 @@ def keyword_search_chunks(
             score=score,
             title=meta.title,
             source_file=meta.source_file,
+            evidence_score=score,
             source="keyword",
         )
         for score, chunk, meta in scored[:top_k]
@@ -435,17 +440,23 @@ def search_chunks(
     knowledge_type: str | None = None,
     top_k: int = 5,
     agent_type: str | None = None,
-) -> list[ChunkResult]:
-    """知识检索：优先向量检索，超时或不可用时降级为关键词检索。
+) -> RetrievedChunks:
+    """知识检索：向量臂与关键词臂并行召回，RRF 融合成候选。
 
-    向量检索是外部依赖，不是唯一路径。给它一个墙钟超时（`vector_search_timeout_seconds`），
-    超时或抛错时改用分块镜像上的 MySQL LIKE 关键词检索，并写一条降级留痕。超时用
-    线程池做软超时：Milvus 客户端是阻塞调用，拿不到结果就直接返回降级，不等那个线程
-    收尾（与 GraphRAG 的图谱查询同一取舍）。
+    两臂各出 `hybrid_recall_top_k` 条，融合后的候选按 RRF 位次排序、整体重排由
+    调用方接上（见 `app.agent.graph` 与 `app.knowledge.rerank`）。
+
+    向量臂是外部依赖（Milvus），给它一个墙钟超时（`vector_search_timeout_seconds`）：
+    超时或抛错时**只是少了一路召回**，结果退回「只用关键词臂的排序」，并写一条降级
+    留痕。超时用线程池做软超时：Milvus 客户端是阻塞调用，拿不到结果就直接返回，
+    不等那个线程收尾（与 GraphRAG 的图谱查询同一取舍）。
+
+    关键词臂在主线程跑——SQLAlchemy 的 `Session` 不是线程安全的；它提交给向量臂
+    的线程之后立刻开始，因此两臂是并行而不是「先向量后关键词」。
 
     回放模式（ADR-0008）不触碰 Milvus 与向量化：预置问题返回钉住的分块（内容
     与真实知识一致、分数固定，因此融合排序与引用序号确定性可复现），其余问题
-    直接走 MySQL 关键词路径，连「先试一下向量库」的调用都不发起。
+    直接走本地 BM25 路径，连「先试一下向量库」的调用都不发起。
     """
     if settings.demo_replay:
         preset = replay_library.chat_preset(query)
@@ -459,7 +470,7 @@ def search_chunks(
                 )
             )
         ):
-            return [
+            preset_chunks = [
                 ChunkResult(
                     knowledge_id=chunk.knowledge_id,
                     knowledge_type=chunk.knowledge_type,
@@ -469,65 +480,86 @@ def search_chunks(
                     score=chunk.score,
                     title=chunk.title,
                     source_file=chunk.source_file,
+                    # 预置分同时充当证据分：回放里没有臂内原始分可言，
+                    # 既有回放断言（按 score 比阈值）因此仍然成立。
+                    evidence_score=chunk.score,
                 )
                 # 不按调用方的 top_k 截断：预置回答的引用序号指向这组分块的
                 # 完整位置，截掉靠后的分块会让角标悬空。预置至多三条。
                 for chunk in preset.chunks
             ]
-        return keyword_search_chunks(
-            db, query=query, knowledge_type=knowledge_type, top_k=top_k
+            return RetrievedChunks(preset_chunks, _arm_evidence(preset_chunks, []))
+        keyword_results = keyword_search_chunks(
+            db,
+            query=query,
+            knowledge_type=knowledge_type,
+            top_k=top_k,
+            user_dict_path=settings.jieba_user_dict_path,
         )
+        return RetrievedChunks(keyword_results, _arm_evidence([], keyword_results))
 
     executor = ThreadPoolExecutor(max_workers=1)
     try:
-        future = executor.submit(
+        vector_future = executor.submit(
             _vector_search_hits,
             settings,
             query=query,
             knowledge_type=knowledge_type,
-            top_k=top_k,
+            top_k=settings.hybrid_recall_top_k,
         )
-        hits = future.result(timeout=settings.vector_search_timeout_seconds)
-    except FutureTimeoutError:
-        logger.warning("向量检索降级：检索超时")
-        return _degraded_keyword_results(
+        keyword_results = keyword_search_chunks(
             db,
             query=query,
             knowledge_type=knowledge_type,
-            top_k=top_k,
-            reason=DEGRADED_VECTOR_TIMEOUT,
-            agent_type=agent_type,
+            top_k=settings.hybrid_recall_top_k,
+            user_dict_path=settings.jieba_user_dict_path,
         )
-    except Exception as exc:  # noqa: BLE001 - 向量库边界：任何失败都退到关键词路径
-        logger.warning("向量检索降级：向量库或向量化不可用", exc_info=True)
-        return _degraded_keyword_results(
-            db,
-            query=query,
-            knowledge_type=knowledge_type,
-            top_k=top_k,
-            reason=DEGRADED_VECTOR_UNAVAILABLE,
-            agent_type=agent_type,
-            detail=str(exc),
-        )
+        try:
+            hits = vector_future.result(timeout=settings.vector_search_timeout_seconds)
+        except FutureTimeoutError:
+            logger.warning("向量臂降级：检索超时，只用关键词臂")
+            return _keyword_only_results(
+                db,
+                keyword_results,
+                settings,
+                top_k=top_k,
+                reason=DEGRADED_VECTOR_TIMEOUT,
+                agent_type=agent_type,
+            )
+        except Exception as exc:  # noqa: BLE001 - 向量库边界：任何失败都退到单臂
+            logger.warning("向量臂降级：向量库或向量化不可用，只用关键词臂", exc_info=True)
+            return _keyword_only_results(
+                db,
+                keyword_results,
+                settings,
+                top_k=top_k,
+                reason=DEGRADED_VECTOR_UNAVAILABLE,
+                agent_type=agent_type,
+                detail=str(exc),
+            )
+        vector_results = _build_vector_results(db, hits)
     finally:
         executor.shutdown(wait=False)
 
-    return _build_vector_results(db, hits)
+    fused = rrf_fuse([vector_results, keyword_results], rrf_k=settings.rrf_k, top_k=top_k)
+    return RetrievedChunks(fused, _arm_evidence(vector_results, keyword_results))
 
 
-def _degraded_keyword_results(
+def _keyword_only_results(
     db: Session,
+    keyword_results: list[ChunkResult],
+    settings: Settings,
     *,
-    query: str,
-    knowledge_type: str | None,
     top_k: int,
     reason: str,
     agent_type: str | None,
     detail: str | None = None,
-) -> list[ChunkResult]:
-    results = keyword_search_chunks(
-        db, query=query, knowledge_type=knowledge_type, top_k=top_k
-    )
+) -> RetrievedChunks:
+    """向量臂不可用时的返回：只用已经拿到的关键词臂排一遍，并留一条降级痕迹。
+
+    不另起一次关键词检索——关键词臂本来就在正常路径上跑，向量臂的缺席只是少了
+    一路召回。留痕的写入点与原因码都不变，降级统计口径因此不受影响。
+    """
     degradation.record(
         db,
         dependency=degradation.DEPENDENCY_VECTOR,
@@ -536,7 +568,23 @@ def _degraded_keyword_results(
         trace_id=get_trace_id(),
         detail=detail,
     )
-    return results
+    fused = rrf_fuse([keyword_results], rrf_k=settings.rrf_k, top_k=top_k)
+    return RetrievedChunks(fused, _arm_evidence([], keyword_results))
+
+
+def _arm_evidence(
+    vector_results: list[ChunkResult], keyword_results: list[ChunkResult]
+) -> dict[str, float]:
+    """在两路还分着的时候取各臂的最高原始分（分臂判定的输入）。
+
+    这就是 `RetrievedChunks` 存在的理由：一旦 RRF 把 hybrid 块合成一条，臂与臂的
+    分就再也分不开了，而 BM25 的量纲冒充余弦会让向量臂凭空达标。
+    """
+    return {
+        "vector": max((chunk.evidence_score for chunk in vector_results), default=0.0),
+        "keyword": max((chunk.evidence_score for chunk in keyword_results), default=0.0),
+        "graph": 0.0,
+    }
 
 
 def _chunk_sections(sections: list[Section]) -> list[ChunkPiece]:

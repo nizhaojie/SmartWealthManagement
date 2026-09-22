@@ -39,6 +39,12 @@ def chat_client(auth_client: TestClient) -> Iterator[TestClient]:
             # 稳定走「实体未命中」静默降级，不会因为别的测试模块重建过
             # test_neo4j_graph_namespace 而产生跨文件的结果耦合。
             "neo4j_graph_namespace": "wealth_test_customer_service_agent_unused",
+            # 关键词臂阈值在这里显式注入：它的量纲已从「命中字词占比」变成 BM25 分，
+            # 默认值要等 golden 集校准（issue 04）写回，断言不能依赖默认值。
+            # 取值只要求「分得开」：无关问题共享「系统」这类高频词时 BM25 约 4 分，
+            # 而逐字命中一块约 40 分（见 test_unrelated_question... 与
+            # test_question_matching_uploaded_document...）。
+            "retrieval_keyword_score_threshold": 10.0,
         }
     )
     app.dependency_overrides[get_settings] = lambda: test_settings
@@ -129,9 +135,11 @@ def test_unrelated_question_returns_fallback_without_llm_call(chat_client, monke
 
 
 def test_vector_hit_below_the_calibrated_threshold_falls_back(chat_client, monkeypatch):
-    """阈值按向量相似度量纲校准：0.45 是真实 embedding 对无关文本的常见水平，必须兜底。
+    """阈值按向量臂的量纲校准：0.45 是真实 embedding 对无关文本的常见水平，必须兜底。
 
     这条用例把「RETRIEVAL_SCORE_THRESHOLD 已从 0.35 上调」钉住——退回旧值就失效。
+    兜底判定读的是分臂证据（`evidence_score`），不是融合后的 `score`；这里两路都
+    没有达标，因此即便这块排在候选第一位也不作答。
     """
     noisy = ChunkResult(
         knowledge_id=5555,
@@ -142,6 +150,7 @@ def test_vector_hit_below_the_calibrated_threshold_falls_back(chat_client, monke
         score=0.45,
         title="无关文档",
         source_file="noise.txt",
+        evidence_score=0.45,
     )
     monkeypatch.setattr(agent_graph, "search_chunks", lambda *a, **k: [noisy])
 
@@ -177,6 +186,7 @@ def test_graph_fusion_does_not_scale_a_vector_hit_below_the_threshold(
         score=0.9,
         title="适当性匹配",
         source_file="suitability.txt",
+        evidence_score=0.9,
     )
     monkeypatch.setattr(agent_graph, "search_chunks", lambda *a, **k: [hit])
     monkeypatch.setattr(
@@ -244,6 +254,7 @@ def test_citation_referencing_nonexistent_chunk_is_dropped(chat_client, monkeypa
         score=0.99,
         title="客户经理更换须知",
         source_file="test_stub.txt",
+        evidence_score=0.99,
     )
     monkeypatch.setattr(agent_graph, "search_chunks", lambda *args, **kwargs: [only_chunk])
     monkeypatch.setattr(

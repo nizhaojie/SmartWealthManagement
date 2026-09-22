@@ -95,10 +95,11 @@ class AgentState(TypedDict, total=False):
     history: list[dict]
     intent: Intent
     chunks: list[ChunkResult]
-    # 融合前的最强证据分：向量相似度与图谱段落分取大，且不做向量/图谱权重缩放。
+    # 融合前的分臂证据集：{"vector": 最高余弦, "keyword": 最高 BM25, "graph": 有段落则 1.0}。
     # 兜底判定用它而不是融合后的综合分——权重的职责是把上下文排出先后，不该让
     # 「图谱是否参与」改变「有没有依据」的结论（见 route_after_retrieve）。
-    retrieval_score: float
+    # 三条量纲不能混用，因此是集合而不是一个数：CONTEXT「证据分」。
+    retrieval_evidence: dict[str, float]
     tool_calls: list[dict]
     answer: str
     citations: list[Citation]
@@ -119,6 +120,52 @@ class ChatTurnResult:
     degraded: bool = False
 
 
+def build_retrieval_evidence(
+    chunks: list[ChunkResult], passage_scores: list[float]
+) -> dict[str, float]:
+    """把「有没有依据」拆成按臂计的证据集（CONTEXT「证据分」，ADR-0022 决定 4）。
+
+    各臂的原始最高分由 `search_chunks` 在**两路还分着**的时候算好带出来
+    （`RetrievedChunks.evidence`）：RRF 把 hybrid 块合成一条之后，「向量臂最高
+    多少、关键词臂最高多少」就再也分不开了，而 BM25 的量纲冒充余弦会让向量臂
+    凭空达标。测试替身给的是普通 list，这时按来源从候选里反推（hybrid 块两路
+    都算），对单臂构造的用例够用。图谱段落是查出来的确定事实，有就算达标。
+    """
+    carried = getattr(chunks, "evidence", None)
+    evidence = dict(carried) if carried is not None else _evidence_from_chunk_sources(chunks)
+    if passage_scores:
+        evidence["graph"] = max(passage_scores)
+    return evidence
+
+
+def _evidence_from_chunk_sources(chunks: list[ChunkResult]) -> dict[str, float]:
+    evidence = {"vector": 0.0, "keyword": 0.0, "graph": 0.0}
+    for chunk in chunks:
+        if chunk.source in ("vector", "hybrid"):
+            evidence["vector"] = max(evidence["vector"], chunk.evidence_score)
+        if chunk.source in ("keyword", "hybrid"):
+            evidence["keyword"] = max(evidence["keyword"], chunk.evidence_score)
+    return evidence
+
+
+def has_retrieval_evidence(
+    evidence: dict[str, float],
+    *,
+    vector_threshold: float,
+    keyword_threshold: float,
+) -> bool:
+    """分臂判定：任一臂达标即认为有依据（Q9）。RRF 与重排不参与这里。
+
+    「该不该作答」是合规结论，不能被一次增强环节（RRF 只排序、重排只排序）的
+    抖动改写；因此这里读的是各臂的原始分与各自的阈值。
+    """
+    return (
+        evidence.get("vector", 0.0) >= vector_threshold
+        or evidence.get("keyword", 0.0) >= keyword_threshold
+        or evidence.get("graph", 0.0) > 0
+    )
+
+
 def _build_graph(db: Session, settings: Settings, driver: Driver, graph_namespace: str):
     graph = StateGraph(AgentState)
 
@@ -126,6 +173,8 @@ def _build_graph(db: Session, settings: Settings, driver: Driver, graph_namespac
         return {"intent": classify_intent(state["question"])}
 
     def retrieve_node(state: AgentState) -> dict:
+        # `top_k` 是**本节点要几条**：两臂各自召回 hybrid_recall_top_k 条、RRF 融合
+        # 之后再截到这里。重排（issue 03）接上后由它决定最终取几条上下文。
         chunks = search_chunks(
             db,
             settings,
@@ -135,10 +184,16 @@ def _build_graph(db: Session, settings: Settings, driver: Driver, graph_namespac
         )
         tool_call = {
             "tool": "knowledge_search",
-            "input": {"query": state["question"], "top_k": CUSTOMER_SERVICE_CONFIG.retrieval_top_k},
+            "input": {
+                "query": state["question"],
+                "top_k": CUSTOMER_SERVICE_CONFIG.retrieval_top_k,
+            },
             "output": {
                 "hit_count": len(chunks),
                 "top_score": chunks[0].score if chunks else None,
+                # 原始臂分要能看到：排查与校准读的是 evidence_score 那套量纲，
+                # 不是融合后的 score。
+                "retrieval_evidence": build_retrieval_evidence(chunks, []),
             },
         }
         return {"chunks": chunks, "tool_calls": [*state.get("tool_calls", []), tool_call]}
@@ -178,13 +233,11 @@ def _build_graph(db: Session, settings: Settings, driver: Driver, graph_namespac
             vector_weight=settings.graphrag_vector_weight,
             graph_weight=settings.graphrag_graph_weight,
         )
-        # 证据强度在融合前取：向量相似度与图谱段落分取大。融合会把向量分乘上
-        # vector_weight（默认 0.6），拿缩放后的综合分去比阈值，会让一条真实命中
-        # 的向量结果被打成不合格——图谱是增强不是依赖这条约束也要求它不能。
-        retrieval_score = max(
-            [chunk.score for chunk in state["chunks"]]
-            + [passage.score for passage in augmentation.passages],
-            default=0.0,
+        # 证据集在融合前取：融合会把相似度分乘上 vector_weight（默认 0.6），拿缩放
+        # 后的综合分去比阈值，会让一条真实命中的结果被打成不合格——「图谱是增强不是
+        # 依赖」这条约束也要求它不能。分臂判定见 route_after_retrieve。
+        evidence = build_retrieval_evidence(
+            state["chunks"], [passage.score for passage in augmentation.passages]
         )
         tool_call = {
             "tool": "graphrag_fusion",
@@ -194,11 +247,12 @@ def _build_graph(db: Session, settings: Settings, driver: Driver, graph_namespac
                 "graph_hit_count": len(augmentation.passages),
                 "degraded": augmentation.degraded,
                 "degradation_reason": augmentation.degradation_reason,
+                "retrieval_evidence": evidence,
             },
         }
         return {
             "chunks": fused,
-            "retrieval_score": retrieval_score,
+            "retrieval_evidence": evidence,
             "tool_calls": [*state.get("tool_calls", []), tool_call],
         }
 
@@ -261,18 +315,15 @@ def _build_graph(db: Session, settings: Settings, driver: Driver, graph_namespac
     graph.add_edge("retrieve", "graph_augment")
 
     def route_after_retrieve(state: AgentState) -> str:
-        chunks = state["chunks"]
-        # 比的是融合前的最强证据分（graph_augment_node 算出的 retrieval_score）：
-        # 向量相似度与图谱段落分同一量纲，阈值据此校准。融合后的 chunks[0].score
-        # 是加权综合分——图谱一参与，向量分就被乘上 vector_weight，用它判兜底会
-        # 凭空抬高门槛，让本该生成的回答被兜底话术接管。
-        # 关键词兜底路径打的是「命中字词占比」，与余弦不是一个量纲，用另一条阈值。
-        threshold = (
-            settings.retrieval_keyword_score_threshold
-            if any(chunk.source == "keyword" for chunk in chunks)
-            else settings.retrieval_score_threshold
-        )
-        if not chunks or state["retrieval_score"] < threshold:
+        # 分臂判定（Q9）：向量臂最高余弦、关键词臂最高 BM25、图谱段落三者任一达标
+        # 即认为有依据。比的是融合前的臂内原始分（graph_augment_node 写进
+        # retrieval_evidence），不是 chunks[0].score——后者是加权综合分，图谱一参与
+        # 相似度分就被乘上 vector_weight，拿它判兜底会凭空抬高门槛。
+        if not state["chunks"] or not has_retrieval_evidence(
+            state.get("retrieval_evidence", {}),
+            vector_threshold=settings.retrieval_score_threshold,
+            keyword_threshold=settings.retrieval_keyword_score_threshold,
+        ):
             return "fallback"
         return "generate"
 

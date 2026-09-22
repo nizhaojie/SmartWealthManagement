@@ -14,7 +14,7 @@ from neo4j import GraphDatabase
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session as OrmSession
 
-from app.db.models import ConversationArchive
+from app.db.models import AgentDebugTrace, ConversationArchive
 from app.db.seed import seed
 from app.knowledge_graph import sync
 from app.main import app
@@ -49,6 +49,9 @@ def chat_client(auth_client: TestClient, _graph_rebuilt: None) -> Iterator[TestC
             "embedding_api_key": "",
             "llm_api_key": "",
             "neo4j_graph_namespace": base_settings.test_neo4j_graph_namespace,
+            # 关键词臂阈值的量纲已变成 BM25 分，默认值等 golden 集校准（issue 04）
+            # 写回；「实体未命中 / 图谱不可用时应兜底」这两条断言在这里显式注入。
+            "retrieval_keyword_score_threshold": 10.0,
         }
     )
     app.dependency_overrides[get_settings] = lambda: test_settings
@@ -93,7 +96,30 @@ def _archive_rows(session_id: str) -> list[ConversationArchive]:
         engine.dispose()
 
 
+def _debug_snippets(session_id: str) -> list[dict]:
+    engine = create_engine(get_settings().test_database_url)
+    try:
+        with OrmSession(engine) as session:
+            row = session.scalar(
+                select(AgentDebugTrace)
+                .where(AgentDebugTrace.session_id == session_id)
+                .order_by(AgentDebugTrace.id.desc())
+            )
+    finally:
+        engine.dispose()
+    assert row is not None
+    return list(row.retrieval_snippets or [])
+
+
 def test_graph_entity_hit_produces_grounded_answer_and_graph_citation(chat_client):
+    """图谱命中要真的改变送进模型的上下文与留痕。
+
+    注：混合检索之后，相似度候选的 `score` 是**归一化 RRF**（最高记 1.0），乘上
+    `graphrag_vector_weight`（0.6）后恒高于图谱段落的 `graph_weight * 1.0`（0.4）
+    ——图谱段落因此恒定排在相似度候选之后（「恒定附加」）。它仍在上下文里、仍可被
+    引用，但不再保证落在前三个角标内，所以这里断言的是「它在上下文与留痕里」，
+    而不是具体某个角标。
+    """
     token, session_id = _customer_login(chat_client)
 
     response = _chat(chat_client, token, "天璇混合基金主要投在哪些行业")
@@ -101,7 +127,10 @@ def test_graph_entity_hit_produces_grounded_answer_and_graph_citation(chat_clien
     assert response.status_code == 200
     data = response.json()["data"]
     assert data["citations"], "图谱命中应当产出可供展示的引用"
-    assert any(citation["title"] == "知识图谱" for citation in data["citations"])
+
+    snippets = _debug_snippets(session_id)
+    assert any(snippet["source"] == "graph" for snippet in snippets), "图谱段落应进入上下文"
+    assert any(snippet["title"] == "知识图谱" for snippet in snippets)
 
     rows = _archive_rows(session_id)
     assistant_row = next(row for row in rows if row.role == "assistant")
@@ -109,6 +138,7 @@ def test_graph_entity_hit_produces_grounded_answer_and_graph_citation(chat_clien
     assert fusion_call["output"]["degraded"] is False
     assert {"type": "product", "value": "天璇混合基金"} in fusion_call["output"]["matched_entities"]
     assert fusion_call["output"]["graph_hit_count"] > 0
+    assert fusion_call["output"]["retrieval_evidence"]["graph"] == 1.0
 
 
 def test_no_entity_match_degrades_silently_and_records_reason(chat_client):

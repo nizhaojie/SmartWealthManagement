@@ -1,5 +1,7 @@
 """向量与图谱结果的融合排序（ticket 03「融合排序」），纯函数，不需要真实基础设施。"""
 
+from dataclasses import replace
+
 from app.agent.fusion import fuse_and_rank
 from app.knowledge.service import ChunkResult
 from app.knowledge_graph.graphrag import GraphPassage
@@ -65,7 +67,9 @@ def test_fusion_dedupes_identical_graph_passages_from_different_queries():
     assert {chunk.content for chunk in ranked} == {"重复的图谱事实", "独有的图谱事实"}
 
 
-def test_fusion_keeps_vector_only_dedupe_key_by_knowledge_id_and_chunk_index():
+def test_fusion_keeps_similarity_chunk_dedupe_key_by_knowledge_id_and_chunk_index():
+    # 去重身份是「哪个分块」而不是「哪条路径」（ADR-0022）：向量 / 关键词 / hybrid
+    # 都按 (knowledge_id, chunk_index) 认同一块，融合不会把同块拆成两条。
     vector_chunks = [
         _vector_chunk(knowledge_id=1, chunk_index=0, content="片段A", score=0.9),
         _vector_chunk(knowledge_id=1, chunk_index=1, content="片段B", score=0.8),
@@ -74,6 +78,25 @@ def test_fusion_keeps_vector_only_dedupe_key_by_knowledge_id_and_chunk_index():
     ranked = fuse_and_rank(vector_chunks, [], vector_weight=0.6, graph_weight=0.4)
 
     assert [chunk.content for chunk in ranked] == ["片段A", "片段B"]
+
+
+def test_fusion_preserves_evidence_score_and_source_of_each_chunk():
+    # 融合只重写 `score`（加权和），证据分与来源必须原样带过去——兜底判定与
+    # 调试留痕读的是它们，融合把它们洗掉就等于把分臂判定弄瞎。
+    hybrid = replace(
+        _vector_chunk(knowledge_id=1, chunk_index=0, content="两路都命中的片段", score=0.9),
+        source="hybrid",
+        evidence_score=8.0,
+    )
+
+    ranked = fuse_and_rank(
+        [hybrid], [_graph_passage(content="图谱事实", score=1.0)],
+        vector_weight=0.6, graph_weight=0.4,
+    )
+
+    chunk = next(item for item in ranked if item.content == "两路都命中的片段")
+    assert chunk.source == "hybrid"
+    assert chunk.evidence_score == 8.0
 
 
 def test_fusion_with_no_graph_passages_returns_vector_chunks_unchanged():

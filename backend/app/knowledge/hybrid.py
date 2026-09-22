@@ -1,0 +1,94 @@
+"""关键词召回臂的分词与两路召回的 RRF 融合（ADR-0022）。
+
+这里的两个函数都是纯函数：只依赖 `ChunkResult` 的形状，不碰数据库、不碰模型，
+因此可以被单测直接钉住。检索编排（哪几路并行、超时怎么降级）留在
+`app.knowledge.service`，本模块只管「怎么分词」与「怎么把位次合成一个顺序」。
+"""
+
+from __future__ import annotations
+
+import logging
+from collections.abc import Sequence
+from dataclasses import replace
+from functools import lru_cache
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+import jieba
+
+if TYPE_CHECKING:  # 只为类型标注：运行期只用到 ChunkResult 的 dataclass 行为，
+    # 真去 import 它会形成 service ↔ hybrid 的模块加载环。
+    from app.knowledge.service import ChunkResult
+
+logger = logging.getLogger("app.knowledge.hybrid")
+
+# jieba 首次分词会构建前缀词典并往 stderr 打一行进度；它对服务日志没有价值，
+# 这里抬到 WARNING，避免每次冷启动都刷一段看似异常的构建信息。
+jieba.setLogLevel(logging.WARNING)
+
+
+@lru_cache(maxsize=None)
+def _load_user_dict(path: str) -> None:
+    """可选的用户词典（Q16 只预留路径，本 slice 不提供词表）：文件不存在就跳过。
+
+    用 `lru_cache` 保证同一个词表只加载一次——`jieba.load_userdict` 每次调用都会
+    往全局词典里追加，重复加载会不断放大同一个词条的分词权重。
+    """
+    if path and Path(path).is_file():
+        jieba.load_userdict(path)
+
+
+def tokenize(text: str, *, user_dict_path: str = "") -> list[str]:
+    """查询侧与文档侧共用的分词：`jieba.lcut` 精确模式，丢掉纯空白与纯标点 token。
+
+    两侧必须是同一个分词器、同一种模式，否则 BM25 的词表对不上。纯空白与纯标点
+    只贡献噪声 df，直接丢弃；「七日 / 年化」这类切分由 jieba 的词典决定，不在这里
+    人为干预（Q16：不建自定义金融词典，只预留上面那条用户词典路径）。
+    """
+    if user_dict_path:
+        _load_user_dict(user_dict_path)
+    return [token for token in jieba.lcut(text) if any(char.isalnum() for char in token)]
+
+
+def rrf_fuse(
+    arms: Sequence[Sequence[ChunkResult]],
+    *,
+    rrf_k: int,
+    top_k: int,
+) -> list[ChunkResult]:
+    """按位次融合各路召回（Reciprocal Rank Fusion），返回重排后的候选。
+
+    - 融合分 = `Σ 1/(rrf_k + rank_arm)`，`rank_arm` 从 1 起。RRF 只用位次，
+      因此天然跨量纲，免去「余弦与 BM25 怎么归一化」这个无底洞。
+    - 去重身份是 `(knowledge_id, chunk_index)`：两路都命中的块只出现一次，
+      `source` 标 `"hybrid"`、`evidence_score` 取两路里的较大值（分臂判定用）。
+    - `score` 写**归一化 RRF**（本次候选的最高分记 1.0，其余按比例）：它仍与图谱
+      分（1.0）同一量纲、单调不增，下游的加权融合因此继续成立。它跨查询不可比，
+      要展示「这条有多相关」应当读 `evidence_score`。
+    """
+    scores: dict[tuple[int, int], float] = {}
+    groups: dict[tuple[int, int], list[ChunkResult]] = {}
+    for arm in arms:
+        for rank, chunk in enumerate(arm, start=1):
+            key = (chunk.knowledge_id, chunk.chunk_index)
+            scores[key] = scores.get(key, 0.0) + 1.0 / (rrf_k + rank)
+            groups.setdefault(key, []).append(chunk)
+
+    if not scores:
+        return []
+
+    best = max(scores.values())
+    ranked_keys = sorted(scores, key=lambda key: (-scores[key], key[0], key[1]))
+    return [
+        _merge(groups[key], score=scores[key] / best) for key in ranked_keys[:top_k]
+    ]
+
+
+def _merge(group: list[ChunkResult], *, score: float) -> ChunkResult:
+    representative = group[0]
+    return replace(
+        representative,
+        score=score,
+        source="hybrid" if len(group) > 1 else representative.source,
+        evidence_score=max(chunk.evidence_score for chunk in group),
+    )

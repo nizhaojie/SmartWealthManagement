@@ -28,16 +28,19 @@ def _graph_passage_to_chunk(passage: GraphPassage, index: int) -> ChunkResult:
         score=passage.score,
         title="知识图谱",
         source_file=f"graph:{passage.tool}",
+        # 图谱段落是查出来的确定事实，证据分固定为它的分（1.0）。
+        evidence_score=passage.score,
         source="graph",
     )
 
 
 def _dedupe_key(chunk: ChunkResult) -> tuple:
     # 图谱段落按文本内容去重（不同实体查询可能产出同一条事实）；
-    # 向量片段沿用既有的 (knowledge_id, chunk_index) 身份。
+    # 相似度片段（向量 / 关键词 / hybrid）的去重身份是「哪个分块」，不是「哪条路径」——
+    # 同一个块被两路命中时它是一条候选，融合不该按来源拆成两条。
     if chunk.source == "graph":
         return ("graph", chunk.content)
-    return ("vector", chunk.knowledge_id, chunk.chunk_index)
+    return ("chunk", chunk.knowledge_id, chunk.chunk_index)
 
 
 def fuse_and_rank(

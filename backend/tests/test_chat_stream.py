@@ -23,6 +23,9 @@ def chat_client(auth_client: TestClient) -> Iterator[TestClient]:
             # 见 test_customer_service_agent.py 的 chat_client：保证 GraphRAG
             # 融合在这些流式测试里稳定走空图谱降级，不与图谱测试的命名空间耦合。
             "neo4j_graph_namespace": "wealth_test_customer_service_agent_unused",
+            # 关键词臂阈值的量纲已变成 BM25 分，默认值等 golden 集校准（issue 04）
+            # 写回；「无关问题应兜底」这条断言在这里显式注入阈值，不依赖默认值。
+            "retrieval_keyword_score_threshold": 10.0,
         }
     )
     app.dependency_overrides[get_settings] = lambda: test_settings

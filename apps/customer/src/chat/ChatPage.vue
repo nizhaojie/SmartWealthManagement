@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, nextTick, ref } from "vue";
+import { computed, nextTick, onMounted, ref } from "vue";
+import { EditPen } from "@element-plus/icons-vue";
 import { useChatStore, type ChatMessage } from "../stores/chat";
 import CitationPanel from "./CitationPanel.vue";
 import CiteChip from "./CiteChip.vue";
@@ -21,6 +22,12 @@ const openCitationKey = ref<string | null>(null);
 const listEl = ref<HTMLElement | null>(null);
 
 const hasMessages = computed(() => chat.messages.length > 0);
+
+// 消息存在 store 里，切换模块再切回时组件重新挂载，DOM 从顶部重新渲染。
+// 进来就滚到底部，让客户直接看到最新一条，而不是停在最旧的历史上。
+onMounted(() => {
+  void scrollToBottom();
+});
 
 function citationKey(messageId: number, citationIndex: number): string {
   return `${messageId}:${citationIndex}`;
@@ -94,58 +101,62 @@ async function send(): Promise<void> {
       <el-button data-testid="history-toggle" @click="historyOpen = true">历史记录</el-button>
     </header>
 
-    <div ref="listEl" class="chat__list" data-testid="chat-list">
-      <p v-if="!hasMessages" class="chat__empty" data-testid="chat-empty">
-        可以问我产品要素、政策条款或常见问题，例如「这支产品的最短持有期是多久」。
-      </p>
+    <div class="chat__panel">
+      <div ref="listEl" class="chat__list" data-testid="chat-list">
+        <p v-if="!hasMessages" class="chat__empty" data-testid="chat-empty">
+          可以问我产品要素、政策条款或常见问题，例如「这支产品的最短持有期是多久」。
+        </p>
 
-      <article
-        v-for="message in chat.messages"
-        :key="message.id"
-        class="msg"
-        :class="`msg--${message.role}`"
-        :data-role="message.role"
-      >
-        <div class="msg__avatar" aria-hidden="true">{{ message.role === "user" ? "我" : "AI" }}</div>
-        <div class="msg__bubble">
-          <p v-if="message.role === 'assistant' && message.done" class="msg__text">
-            <template v-for="(segment, index) in segmentsOf(message)" :key="index">
-              <span v-if="segment.type === 'text'">{{ segment.value }}</span>
-              <CiteChip
-                v-else
-                :marker="segment.marker"
-                :open="isCitationOpen(message.id, segment.citationIndex)"
-                :panel-id="citationPanelId(message.id, segment.citationIndex)"
-                @toggle="toggleCitation(message.id, segment.citationIndex)"
-              />
-            </template>
-          </p>
-          <p v-else class="msg__text">{{ message.text }}</p>
+        <article
+          v-for="message in chat.messages"
+          :key="message.id"
+          class="msg"
+          :class="`msg--${message.role}`"
+          :data-role="message.role"
+        >
+          <div class="msg__avatar" aria-hidden="true">{{ message.role === "user" ? "我" : "AI" }}</div>
+          <div class="msg__bubble">
+            <p v-if="message.role === 'assistant' && message.done" class="msg__text">
+              <template v-for="(segment, index) in segmentsOf(message)" :key="index">
+                <span v-if="segment.type === 'text'">{{ segment.value }}</span>
+                <CiteChip
+                  v-else
+                  :marker="segment.marker"
+                  :open="isCitationOpen(message.id, segment.citationIndex)"
+                  :panel-id="citationPanelId(message.id, segment.citationIndex)"
+                  @toggle="toggleCitation(message.id, segment.citationIndex)"
+                />
+              </template>
+            </p>
+            <p v-else class="msg__text">{{ message.text }}</p>
 
-          <template v-if="message.role === 'assistant' && message.done">
-            <template v-for="(citation, index) in message.citations" :key="`panel-${index}`">
-              <CitationPanel
-                v-if="isCitationOpen(message.id, index)"
-                :citation="citation"
-                :panel-id="citationPanelId(message.id, index)"
-              />
+            <template v-if="message.role === 'assistant' && message.done">
+              <template v-for="(citation, index) in message.citations" :key="`panel-${index}`">
+                <CitationPanel
+                  v-if="isCitationOpen(message.id, index)"
+                  :citation="citation"
+                  :panel-id="citationPanelId(message.id, index)"
+                />
+              </template>
             </template>
-          </template>
-        </div>
-      </article>
+          </div>
+        </article>
+      </div>
+
+      <form class="composer" @submit.prevent="send">
+        <span class="composer__icon" aria-hidden="true">
+          <el-icon><EditPen /></el-icon>
+        </span>
+        <el-input
+          v-model="draft"
+          name="chat-message"
+          class="composer__input"
+          placeholder="继续追问，例如「最短持有期是多久」"
+          :disabled="sending"
+        />
+        <el-button type="primary" native-type="submit" :loading="sending">发送</el-button>
+      </form>
     </div>
-
-    <form class="composer" @submit.prevent="send">
-      <span class="composer__icon" aria-hidden="true">＋</span>
-      <el-input
-        v-model="draft"
-        name="chat-message"
-        class="composer__input"
-        placeholder="继续追问，例如「最短持有期是多久」"
-        :disabled="sending"
-      />
-      <el-button type="primary" native-type="submit" :loading="sending">发送</el-button>
-    </form>
 
     <ChatHistoryDrawer :open="historyOpen" @close="historyOpen = false" />
   </div>
@@ -156,6 +167,8 @@ async function send(): Promise<void> {
   display: flex;
   flex-direction: column;
   gap: var(--wm-space-4);
+  /* 对话页是内容区的全部：占满可用高度，滚动交给面板内的消息区 */
+  height: 100%;
 }
 
 .chat__head {
@@ -184,19 +197,29 @@ async function send(): Promise<void> {
   color: var(--wm-text-muted);
 }
 
-/* 消息区自己滚：客户侧的对话是这一页的全部内容，composer 对齐 02 贴在下方 */
-.chat__list {
+/* 对话面板：消息区 + 输入框同处一个对话框内，铺满剩余高度。面板的 1px 描边
+   是令牌纪律声明的极少数例外，由面板统一持有，消息区与输入框不再各自成卡。 */
+.chat__panel {
+  flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: var(--wm-space-4);
-  max-height: 58vh;
-  overflow-y: auto;
-  padding: var(--wm-space-4);
-  /* 消息区的 1px 描边（令牌纪律声明的极少数例外） */
   border: 1px solid var(--wm-border);
   border-radius: var(--wm-radius-lg);
   background-color: var(--wm-bg-card);
   box-shadow: var(--wm-shadow-card);
+  overflow: hidden;
+}
+
+/* 消息区自己滚：对话多了只在这里出滚动条，composer 始终贴在面板底部 */
+.chat__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wm-space-4);
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--wm-space-4);
 }
 
 .chat__empty {
@@ -260,11 +283,10 @@ async function send(): Promise<void> {
   align-items: center;
   gap: var(--wm-space-3);
   padding: var(--wm-space-3) var(--wm-space-4);
-  /* composer 的 1px 描边（令牌纪律声明的极少数例外） */
-  border: 1px solid var(--wm-border);
-  border-radius: var(--wm-radius-lg);
-  background-color: var(--wm-bg-card);
-  box-shadow: var(--wm-shadow-card);
+  /* 输入带用淡灰底 + 实线顶部分隔，和上方白色消息区拉开区分度 */
+  border-top: 1px solid var(--wm-border);
+  background-color: var(--wm-bg-page);
+  flex-shrink: 0;
 }
 
 .composer__icon {
@@ -274,9 +296,11 @@ async function send(): Promise<void> {
   width: var(--wm-space-5);
   height: var(--wm-space-5);
   border-radius: var(--wm-radius-sm);
-  background-color: var(--wm-bg-subtle);
+  /* 白底底座在灰底输入带上凸起，图标不被灰底吃掉 */
+  background-color: var(--wm-bg-card);
   color: var(--wm-text-muted);
-  font-size: 0.9rem;
+  /* el-icon 的 svg 以 1em 计，font-size 即图标尺寸 */
+  font-size: var(--wm-space-4);
 }
 
 .composer__input {

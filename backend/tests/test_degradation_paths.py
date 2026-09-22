@@ -15,6 +15,7 @@ Seam：后端 HTTP 层。这一份用例固定的是同一件事的五个侧面�
 
 from __future__ import annotations
 
+import threading
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -109,6 +110,11 @@ def _test_settings(**overrides):
             "embedding_api_key": "",
             "llm_api_key": "",
             "neo4j_graph_namespace": UNUSED_GRAPH_NAMESPACE,
+            # 关键词臂阈值显式注入：本文件验证的是「降级路径仍给出可用结果」，分界因此
+            # 由用例自己掌握，不跟着校准值走。校准后的默认值（13.0，见 issue 04）量的是
+            # 另一份语料上的分布：这里的目标分块在测试库的 FAQ 语料里只拿到约 11.5 分
+            # （同主题的 faq_seed 分块稀释了 df），用默认值会把「降级成功」判成兜底。
+            "retrieval_keyword_score_threshold": 10.0,
             # 退避等待置 0：这里验证的是「重试与切换发生了」，不是真的等 1s / 2s。
             "llm_retry_backoff_seconds": 0.0,
             **overrides,
@@ -304,13 +310,18 @@ def test_vector_search_timeout_falls_back_to_keyword_retrieval(
     )
     knowledge_id = upload.json()["data"]["knowledge_id"]
 
-    def _slow(*_args, **_kwargs):
-        # 比阈值慢即可；线程池的软超时不等它收尾。
-        time.sleep(0.4)
+    # 向量臂的替身一直阻塞到用例放行：软超时不看它收尾，所以只要它在预算用光时
+    # 还没返回，超时就一定发生。**不能用固定 sleep**——超时预算从提交那一刻起算，
+    # 关键词臂在主线程里花掉的时间要从预算里扣，而 jieba 冷启动一次接近 1s（隔离
+    # 运行本文件时就是这种情形），比 0.4s 的 sleep 还长，future 会先跑完、超时不再发生。
+    release_vector_arm = threading.Event()
+
+    def _blocked(*_args, **_kwargs):
+        release_vector_arm.wait(timeout=30)
         return []
 
-    monkeypatch.setattr("app.knowledge.service._vector_search_hits", _slow)
-    # 超时阈值可配置：这里把它调到 0.1s，让上面的 0.4s 真的超时。
+    monkeypatch.setattr("app.knowledge.service._vector_search_hits", _blocked)
+    # 超时阈值可配置：这里把它调到 0.1s，让上面那个不会返回的调用真的超时。
     app.dependency_overrides[get_settings] = lambda: _test_settings(
         vector_search_timeout_seconds=0.1
     )
@@ -325,6 +336,7 @@ def test_vector_search_timeout_falls_back_to_keyword_retrieval(
         assert data["citations"][0]["knowledge_id"] == knowledge_id
         assert data["degraded"] is True
     finally:
+        release_vector_arm.set()
         _delete_document(degradation_client, knowledge_id)
 
     rows = _degradation_rows()

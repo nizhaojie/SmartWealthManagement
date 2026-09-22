@@ -39,8 +39,8 @@ def chat_client(auth_client: TestClient) -> Iterator[TestClient]:
             # 稳定走「实体未命中」静默降级，不会因为别的测试模块重建过
             # test_neo4j_graph_namespace 而产生跨文件的结果耦合。
             "neo4j_graph_namespace": "wealth_test_customer_service_agent_unused",
-            # 关键词臂阈值在这里显式注入：它的量纲已从「命中字词占比」变成 BM25 分，
-            # 默认值要等 golden 集校准（issue 04）写回，断言不能依赖默认值。
+            # 关键词臂阈值在这里显式注入：断言要的是用例自己掌握的分界，不依赖校准值
+            # （issue 04 已把默认值校准为 13.0，但那个值量的是另一份语料上的分布）。
             # 取值只要求「分得开」：无关问题共享「系统」这类高频词时 BM25 约 4 分，
             # 而逐字命中一块约 40 分（见 test_unrelated_question... 与
             # test_question_matching_uploaded_document...）。

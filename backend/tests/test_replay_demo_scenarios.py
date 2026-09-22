@@ -156,9 +156,9 @@ def replay_client(_test_database_ready: None, monkeypatch: pytest.MonkeyPatch) -
             "llm_api_key": "",
             "embedding_api_key": "",
             "neo4j_graph_namespace": get_settings().test_neo4j_graph_namespace,
-            # 预置之外的问题走关键词臂（本地 BM25）。它的阈值量纲已从「命中字词
-            # 占比」变成 BM25 分，默认值要等 golden 集校准（issue 04）写回，
-            # 「明显无关的问题不触发作答」这条断言因此在这里显式注入阈值。
+            # 预置之外的问题走关键词臂（本地 BM25）。阈值在这里显式注入：「明显无关的
+            # 问题不触发作答」这条断言要的是用例自己掌握的分界，不依赖 issue 04 校准出
+            # 的默认值（它随语料漂移）。
             "retrieval_keyword_score_threshold": 10.0,
         }
     )

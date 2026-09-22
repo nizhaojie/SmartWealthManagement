@@ -6,8 +6,8 @@
 - **后端 HTTP 层**：重排把达标块排到最后时它仍在送进模型的上下文里、重排超时退回
   RRF 序且回答照常产出、`fake` provider 下恒等保序且不发起任何 HTTP 请求。
 
-`retrieval_keyword_score_threshold` 的量纲在 02 里变成了 BM25 分，默认值要等 issue 04
-的校准脚本写回，因此这里的用例**一律注入**该阈值，不依赖默认值。
+`retrieval_keyword_score_threshold` 的量纲在 02 里变成了 BM25 分（默认值已由 issue 04
+校准为 13.0），但「哪块达标」必须由用例自己掌握，因此这里**一律注入**该阈值。
 """
 
 from __future__ import annotations
@@ -41,7 +41,7 @@ EMPLOYEE_USERNAME = "advisor1"
 SEEDED_PASSWORD = "Test@1234"
 UNUSED_GRAPH_NAMESPACE = "wealth_test_rerank_unused"
 
-# 注入的两条阈值：用例自己掌握「哪块达标」，不等 issue 04 的校准结果。
+# 注入的两条阈值：用例自己掌握「哪块达标」，不依赖 issue 04 校准出的默认值。
 VECTOR_THRESHOLD = 0.55
 KEYWORD_THRESHOLD = 10.0
 

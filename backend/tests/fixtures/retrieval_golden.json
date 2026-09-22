@@ -1,0 +1,109 @@
+{
+  "description": "检索兜底阈值的 golden 问答集（ADR-0022 决定 6）。正例声明『问法与期望命中的语料』，负例声明『库里没有任何依据』。校准脚本（backend/scripts/calibrate_retrieval.py）在真实 embedding 下跑它产出两条阈值的建议值；回归测试（backend/tests/test_retrieval_calibration.py）用 fake embedding 只钉相对关系。语料（rag_db/ 及库内 active 分块）显著变化后必须重跑校准。",
+  "corpus": "rag_db",
+  "positives": [
+    {
+      "id": "literal-t1-confirmation",
+      "kind": "literal",
+      "question": "T+1 日确认是什么意思",
+      "source_file": "公司信息/高频问答对.txt",
+      "snippet": "T+1"
+    },
+    {
+      "id": "literal-seven-day-annualized",
+      "kind": "literal",
+      "question": "七日年化收益率怎么理解",
+      "source_file": "公司信息/高频问答对.txt",
+      "snippet": "七日年化收益率"
+    },
+    {
+      "id": "literal-hotline-digits",
+      "kind": "literal",
+      "question": "客服热线 400-XXX-XXXX 是什么",
+      "source_file": "公司信息/高频问答对.txt",
+      "snippet": "400-XXX-XXXX"
+    },
+    {
+      "id": "literal-risk-scale",
+      "kind": "literal",
+      "question": "R1 到 R5 分别代表什么",
+      "source_file": "公司信息/高频问答对.txt",
+      "snippet": "R1（低风险）"
+    },
+    {
+      "id": "faq-fund-vs-wealth-product",
+      "kind": "faq",
+      "question": "基金和理财产品有什么区别",
+      "source_file": "公司信息/高频问答对.txt",
+      "snippet": "基金是由基金公司发行和管理的投资产品"
+    },
+    {
+      "id": "faq-open-account-materials",
+      "kind": "faq",
+      "question": "开户需要哪些材料",
+      "source_file": "公司信息/高频问答对.txt",
+      "snippet": "本人有效身份证"
+    },
+    {
+      "id": "faq-how-to-open-account",
+      "kind": "faq",
+      "question": "如何在XX科技开户",
+      "source_file": "公司信息/高频问答对.txt",
+      "snippet": "线上开户"
+    },
+    {
+      "id": "semantic-redemption-settlement",
+      "kind": "semantic",
+      "question": "我把钱投进去以后多久才能取出来",
+      "source_file": "公司信息/高频问答对.txt",
+      "snippet": "赎回到账"
+    },
+    {
+      "id": "semantic-complaint-channel",
+      "kind": "semantic",
+      "question": "对服务不满意应该找谁反映",
+      "source_file": "公司信息/高频问答对.txt",
+      "snippet": "投诉渠道"
+    },
+    {
+      "id": "semantic-dual-recording",
+      "kind": "semantic",
+      "question": "买产品前是不是必须全程录音录像",
+      "source_file": "金融政策/理财产品销售管理办法.md",
+      "snippet": "双录"
+    },
+    {
+      "id": "semantic-company-regulators",
+      "kind": "semantic",
+      "question": "公司是受哪些监管机构管理的",
+      "source_file": "公司信息/企业信息.md",
+      "snippet": "中国证监会"
+    }
+  ],
+  "negatives": [
+    {
+      "id": "unrelated-astronomy",
+      "question": "阿尔法半人马座恒星系统的行星编号列表是什么"
+    },
+    {
+      "id": "unrelated-machine-learning",
+      "question": "如何用 Python 训练一个图像分类模型"
+    },
+    {
+      "id": "unrelated-poetry",
+      "question": "请写一首关于春天的七言绝句"
+    },
+    {
+      "id": "unrelated-mountain",
+      "question": "珠穆朗玛峰的海拔高度是多少米"
+    },
+    {
+      "id": "unrelated-world-cup",
+      "question": "下一届世界杯足球赛在哪个国家举办"
+    },
+    {
+      "id": "unrelated-houseplant",
+      "question": "怎么给家里的绿萝施肥和浇水"
+    }
+  ]
+}

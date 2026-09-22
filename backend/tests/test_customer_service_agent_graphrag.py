@@ -49,8 +49,8 @@ def chat_client(auth_client: TestClient, _graph_rebuilt: None) -> Iterator[TestC
             "embedding_api_key": "",
             "llm_api_key": "",
             "neo4j_graph_namespace": base_settings.test_neo4j_graph_namespace,
-            # 关键词臂阈值的量纲已变成 BM25 分，默认值等 golden 集校准（issue 04）
-            # 写回；「实体未命中 / 图谱不可用时应兜底」这两条断言在这里显式注入。
+            # 关键词臂阈值在这里显式注入：「实体未命中 / 图谱不可用时应兜底」这两条
+            # 断言要的是用例自己掌握的分界，不依赖 issue 04 校准出的默认值（它随语料漂移）。
             "retrieval_keyword_score_threshold": 10.0,
         }
     )

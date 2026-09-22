@@ -96,13 +96,17 @@ class Settings(BaseSettings):
     # 向量臂最高余弦、关键词臂最高 BM25、图谱段落三者任一达标即认为有依据。
     # 两个量纲不同，因此各有各的阈值——混用一个数会把一侧的结果整体打成兜底。
     #
-    # 向量臂阈值：真实 embedding（如 text-embedding-v3）对无关文本的余弦也能到
-    # 0.4~0.5，阈值必须校准在这条「无关噪声基线」之上。
-    retrieval_score_threshold: float = 0.55
-    # 关键词臂阈值：量纲是 **BM25 分**（不再是「命中字词占比」），且随语料规模漂移
-    # （df / avgdl 在全语料上统计）。取值由 golden 集校准脚本产出；语料显著变化后
-    # 要重跑校准。当前默认值只是占位，别照它调参。
-    retrieval_keyword_score_threshold: float = 0.35
+    # 两条阈值都由 `scripts/calibrate_retrieval.py` 在 golden 集
+    # （tests/fixtures/retrieval_golden.json）上量出来（ADR-0022 决定 6），不是手写的
+    # 经验值。注释里记着产出它们的那次校准：语料或 embedding 模型一变，两条分布都会
+    # 移（BM25 的 df / avgdl 在全语料上统计），必须按同一脚本重跑、人工复核后改这里。
+    #
+    # 向量臂阈值：2026-09 校准（语料 = 10 文档 / 348 分块，text-embedding-v3）——
+    # 无关负例最高余弦 0.46，语义正例最低 0.68。
+    retrieval_score_threshold: float = 0.57
+    # 关键词臂阈值：量纲是 **BM25 分**（不再是「命中字词占比」），且随语料规模漂移。
+    # 同一次校准：无关负例最高 10.63，字面 / FAQ 正例最低 15.52。
+    retrieval_keyword_score_threshold: float = 13.0
     # 每个召回臂各自返回的候选数（向量臂与关键词臂各出这么多条，再 RRF 融合）。
     hybrid_recall_top_k: int = 20
     # RRF 的平滑常数：rrf_score = Σ 1/(rrf_k + rank_arm)。它只用位次，天然跨量纲，

@@ -32,6 +32,7 @@
 ## 落地要点
 
 - **校准结果（2026-09，语料 = 10 文档 / 348 分块，`text-embedding-v3`）**：向量臂负例最高 0.4626、语义正例最低 0.6791 → `RETRIEVAL_SCORE_THRESHOLD=0.57`；关键词臂负例最高 10.6322、字面 / FAQ 正例最低 15.5196 → `RETRIEVAL_KEYWORD_SCORE_THRESHOLD=13`。11 条正例全部进了候选池，建议值都取「最差负例与最低正例的中点」。
+- **向量臂本次降级时，脚本拒绝给向量建议。** `RetrievedChunks.evidence` 分不清「向量臂没块达标」与「向量臂整个降级」——降级时 `evidence["vector"]` 恒为 0，算出来的建议值是「向量库坏了」而不是「余弦分布如何」。脚本因此跑之前记下 `biz_degradation_trace` 的最大 id，跑完查这一段里有没有 `vector_store` 依赖的记录，有就在报告里标 `[WARN]` 并说明不可写回（fake embedding 同理）。「向量臂没命中」与「向量臂没跑起来」混在一起是这套分臂设计最容易出错的地方，工具层先把它分开。
 - **golden 的 `kind` 决定它服务哪条臂**：`literal` / `faq` 归关键词臂（逐字命中），`semantic` 归向量臂。脚本按这个映射分别提两条臂的建议值——把语义型正例混进关键词臂的正例集会让「最低正例」掉到 0。
 - **`.env` 也要一起改。** `Settings` 的 `env_file` 指着 `backend/.env`，只改 `.env.example` 与 `settings.py` 的话，本机跑起来的仍是旧阈值（`retrieval_keyword_score_threshold` 停在 0.35，无关问题照答）。`.env` 不进版本库，但它才是运行时真读的那份。
 - **回归测试不读 `backend/.env`**（`Settings(_env_file=None)`）：它钉的是 `settings.py` 里的代码默认值。读 `.env` 会让这条回归时而检查代码、时而检查某个人机器上的历史遗留值。

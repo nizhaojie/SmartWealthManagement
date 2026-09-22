@@ -1,7 +1,9 @@
 // 把回答里的 `[n]` 切成文本段与引用段。
 //
-// 匹配按 marker 的值精确进行，不按角标在文本里出现的顺序——后端 build_citations
-// 保留的序号与 citations 数组顺序并不保证一致，按位置猜会把引用挂错论断。
+// 匹配按 marker 的值精确进行，不按角标在文本里出现的顺序——编号是后端
+// （`app/agent/citations.reconcile_answer`）按本条回答重排过的位次，前端按值
+// 匹配即可对上；将来后端换了编号口径也不会把引用挂错论断，对不上时宁可露出
+// 一个 `[3]` 文本，也不凭空造一条来源。
 import type { Citation } from "./api";
 
 export type TextSegment = { type: "text"; value: string };

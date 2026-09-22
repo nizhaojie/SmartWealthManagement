@@ -23,7 +23,8 @@ from app.event_bus import (
     publish_safely,
 )
 from app.exceptions import AppError
-from app.knowledge.hybrid import arm_evidence
+from app.knowledge.hybrid import carried_evidence
+from app.knowledge.rerank import rerank_chunks
 from app.knowledge.service import ChunkResult, search_chunks
 from app.knowledge_graph.graphrag import (
     DEGRADED_NO_ENTITY,
@@ -132,8 +133,7 @@ def build_retrieval_evidence(
     凭空达标。调用方给的是普通 list（测试替身）时退到 `arm_evidence` 反推，那条路
     只对单臂构造的候选成立。图谱段落是查出来的确定事实，有就算 1.0。
     """
-    carried = getattr(chunks, "evidence", None)
-    evidence = dict(carried) if carried is not None else arm_evidence(chunks)
+    evidence = carried_evidence(chunks)
     evidence["graph"] = 1.0 if has_graph_passages else 0.0
     return evidence
 
@@ -166,11 +166,22 @@ def _build_graph(db: Session, settings: Settings, driver: Driver, graph_namespac
         # 要的是**召回候选**（两臂各 hybrid_recall_top_k 条、RRF 融合后的那一批），
         # 不是最终送进模型的条数：重排与保底在后面决定取几条上下文。少要一批等于
         # 让重排没得选。
-        chunks = search_chunks(
+        candidates = search_chunks(
             db,
             settings,
             query=state["question"],
             top_k=settings.hybrid_recall_top_k,
+            agent_type=CUSTOMER_SERVICE_CONFIG.name,
+        )
+        # 重排是增强，由调用方显式串起来而不是塞进 `search_chunks`——后者会形成
+        # service → rerank → provider → service 的模块加载环。关闭 / fake / 回放时它
+        # 恒等保序、超时失败时退回 RRF 序，都不改变「有没有依据」（那是分臂证据的职责）。
+        chunks = rerank_chunks(
+            state["question"],
+            candidates,
+            settings,
+            db=db,
+            top_k=CUSTOMER_SERVICE_CONFIG.retrieval_top_k,
             agent_type=CUSTOMER_SERVICE_CONFIG.name,
         )
         tool_call = {
@@ -180,6 +191,7 @@ def _build_graph(db: Session, settings: Settings, driver: Driver, graph_namespac
                 "top_k": settings.hybrid_recall_top_k,
             },
             "output": {
+                "candidate_count": len(candidates),
                 "hit_count": len(chunks),
                 "top_score": chunks[0].score if chunks else None,
                 # 原始臂分要能看到：排查与校准读的是 evidence_score 那套量纲，

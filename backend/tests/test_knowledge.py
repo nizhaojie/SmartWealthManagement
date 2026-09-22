@@ -27,6 +27,9 @@ def knowledge_client(auth_client: TestClient) -> Iterator[TestClient]:
         update={
             "milvus_collection": base_settings.test_milvus_collection,
             "embedding_api_key": "",
+            # 内部检索接口在召回之后串一次重排（模型调用）。测试不该外呼，
+            # 置空 key 即 fake provider：重排恒等保序、不发请求，顺序仍是 RRF 序。
+            "llm_api_key": "",
         }
     )
     app.dependency_overrides[get_settings] = lambda: test_settings

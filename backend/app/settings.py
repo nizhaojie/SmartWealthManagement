@@ -111,6 +111,14 @@ class Settings(BaseSettings):
     # 可选的 jieba 用户词典路径（一行一个词，不存在则跳过）。本 slice 不提供词表，
     # 这条只是「将来要加金融词表时不必改代码」的接缝。
     jieba_user_dict_path: str = ""
+    # 重排（把 RRF 候选交给一次模型调用重排序）的开关。关掉、provider 为 fake、或
+    # 处于回放模式下都恒等保序、不发调用——跳过是「保持召回那一步的顺序」，不是降级，
+    # 因此不记 `biz_degradation_trace`。
+    rerank_enabled: bool = True
+    # 重排单次调用的墙钟超时（秒）。它独立于 llm_timeout_seconds：重排单次调用、不
+    # 重试、不切备用配置（备用配置的语义是「主模型不可用时给兜底回答」，不是「重排要
+    # 更稳」）。把它套成主链路那套会把 2s 的检索变成 30s+。
+    rerank_timeout_seconds: float = 5.0
     chat_memory_ttl_minutes: int = 30
     chat_memory_token_budget: int = 2000
     human_service_channel: str = "95588"

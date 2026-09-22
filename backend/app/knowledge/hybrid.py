@@ -68,6 +68,18 @@ def arm_evidence(chunks: Iterable[ChunkResult]) -> dict[str, float]:
     return evidence
 
 
+def carried_evidence(chunks: Iterable[ChunkResult]) -> dict[str, float]:
+    """取分臂判定的输入：优先用 `RetrievedChunks.evidence`，普通 list 才退到反推。
+
+    检索那一步（两路还分着的时候）算好的臂内最高分是权威值；重排与融合之后按
+    `source` 反推只对单臂构造的候选成立（hybrid 块的 `evidence_score` 是两路取大，
+    反推会把 BM25 的量纲记进向量臂）。这里收拢成一个函数，避免「往回退」和「带出来」
+    两条路各写一遍——`rerank` 与 `agent.graph` 的分臂证据都用它。
+    """
+    carried = getattr(chunks, "evidence", None)
+    return dict(carried) if carried is not None else arm_evidence(chunks)
+
+
 def rrf_fuse(
     arms: Sequence[Sequence[ChunkResult]],
     *,

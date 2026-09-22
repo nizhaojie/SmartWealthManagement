@@ -9,6 +9,7 @@ from app.db.models import KnowledgeMeta
 from app.db.session import get_session
 from app.exceptions import AppError
 from app.http import ok
+from app.knowledge.rerank import rerank_chunks
 from app.knowledge.schemas import (
     ChunkHitResponse,
     DocumentResponse,
@@ -113,11 +114,20 @@ def search_knowledge(
     settings: Settings = Depends(get_settings),
     _auth: AuthContext = Depends(require_internal),
 ):
-    results = search_chunks(
+    # 候选池按召回臂的宽度取，重排再决定最终返回几条——与聊天检索是同一条流水线、
+    # 同一个排名（重排由调用方显式串，见 app/knowledge/rerank.py 的模块说明）。
+    candidates = search_chunks(
         db,
         settings,
         query=body.query,
         knowledge_type=body.knowledge_type,
+        top_k=settings.hybrid_recall_top_k,
+    )
+    results = rerank_chunks(
+        body.query,
+        candidates,
+        settings,
+        db=db,
         top_k=body.top_k,
     )
     response = SearchResponse(

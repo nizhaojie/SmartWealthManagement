@@ -129,12 +129,14 @@ def model_failure_answer(settings: Settings) -> str:
     return MODEL_FAILURE_TEMPLATE.format(channel=settings.human_service_channel)
 
 
-def _endpoints(settings: Settings) -> list[LlmEndpoint]:
+def _endpoints(settings: Settings, *, allow_backup: bool = True) -> list[LlmEndpoint]:
     """按顺序尝试的模型配置：主配置在前，备用配置在后。
 
     备用配置未填 ``llm_backup_api_key`` 时整条跳过——否则会拿着空 key 去请求一次，
     白白多等一个超时。主配置的可用性由 ``resolved_llm_provider`` 在外面保证：
     fake provider 根本不会走到这里。
+
+    ``allow_backup=False`` 时只剩主配置：检索链上的重排用它（见 ``chat_completion``）。
     """
     endpoints = [
         LlmEndpoint(
@@ -150,7 +152,7 @@ def _endpoints(settings: Settings) -> list[LlmEndpoint]:
         api_key=settings.llm_backup_api_key,
         model_name=settings.llm_backup_model_name,
     )
-    if backup.usable:
+    if allow_backup and backup.usable:
         endpoints.append(backup)
     return [endpoint for endpoint in endpoints if endpoint.usable]
 
@@ -181,23 +183,36 @@ def _request_chat(endpoint: LlmEndpoint, messages: list[dict], *, timeout: float
     return payload["choices"][0]["message"]["content"]
 
 
-def chat_completion(messages: list[dict], settings: Settings) -> str:
+def chat_completion(
+    messages: list[dict],
+    settings: Settings,
+    *,
+    timeout: float | None = None,
+    max_retries: int | None = None,
+    allow_backup: bool = True,
+) -> str:
     """调用 OpenAI 兼容的 chat 接口，带退避重试与备用配置。
 
     失败链路（需求文档 F5.3）：同一配置内按指数退避重试 ``llm_max_retries`` 次
     （间隔 1s / 2s / 4s …，可配），仍失败则换备用配置再走一遍同样的重试，全部失败
     才折算成业务错误码。退避等待可配，测试里置 0 即可不必真的等待。
+
+    三个可选参数是给**检索链上的重排**（`app.knowledge.rerank`）用的，默认值保持主
+    链路的既有行为不变：重排走单次调用、`rerank_timeout_seconds` 超时、不用备用配置。
+    主链路那套「30s × (1+3 次重试) 再切备用」是为「回答必须尽量产出」设计的，搬到
+    检索链上会把 2s 的检索变成 30s+。
     """
-    endpoints = _endpoints(settings)
-    retries = max(settings.llm_max_retries, 0)
+    endpoints = _endpoints(settings, allow_backup=allow_backup)
+    retries = max(
+        settings.llm_max_retries if max_retries is None else max_retries, 0
+    )
+    request_timeout = settings.llm_timeout_seconds if timeout is None else timeout
     last_error: Exception | None = None
 
     for endpoint in endpoints:
         for attempt in range(retries + 1):
             try:
-                return _request_chat(
-                    endpoint, messages, timeout=settings.llm_timeout_seconds
-                )
+                return _request_chat(endpoint, messages, timeout=request_timeout)
             except Exception as exc:  # noqa: BLE001 - 换配置/退避前的统一收口
                 last_error = exc
                 logger.warning(

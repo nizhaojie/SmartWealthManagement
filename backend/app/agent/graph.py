@@ -23,6 +23,7 @@ from app.event_bus import (
     publish_safely,
 )
 from app.exceptions import AppError
+from app.knowledge.hybrid import arm_evidence
 from app.knowledge.service import ChunkResult, search_chunks
 from app.knowledge_graph.graphrag import (
     DEGRADED_NO_ENTITY,
@@ -121,30 +122,19 @@ class ChatTurnResult:
 
 
 def build_retrieval_evidence(
-    chunks: list[ChunkResult], passage_scores: list[float]
+    chunks: list[ChunkResult], *, has_graph_passages: bool = False
 ) -> dict[str, float]:
     """把「有没有依据」拆成按臂计的证据集（CONTEXT「证据分」，ADR-0022 决定 4）。
 
     各臂的原始最高分由 `search_chunks` 在**两路还分着**的时候算好带出来
     （`RetrievedChunks.evidence`）：RRF 把 hybrid 块合成一条之后，「向量臂最高
     多少、关键词臂最高多少」就再也分不开了，而 BM25 的量纲冒充余弦会让向量臂
-    凭空达标。测试替身给的是普通 list，这时按来源从候选里反推（hybrid 块两路
-    都算），对单臂构造的用例够用。图谱段落是查出来的确定事实，有就算达标。
+    凭空达标。调用方给的是普通 list（测试替身）时退到 `arm_evidence` 反推，那条路
+    只对单臂构造的候选成立。图谱段落是查出来的确定事实，有就算 1.0。
     """
     carried = getattr(chunks, "evidence", None)
-    evidence = dict(carried) if carried is not None else _evidence_from_chunk_sources(chunks)
-    if passage_scores:
-        evidence["graph"] = max(passage_scores)
-    return evidence
-
-
-def _evidence_from_chunk_sources(chunks: list[ChunkResult]) -> dict[str, float]:
-    evidence = {"vector": 0.0, "keyword": 0.0, "graph": 0.0}
-    for chunk in chunks:
-        if chunk.source in ("vector", "hybrid"):
-            evidence["vector"] = max(evidence["vector"], chunk.evidence_score)
-        if chunk.source in ("keyword", "hybrid"):
-            evidence["keyword"] = max(evidence["keyword"], chunk.evidence_score)
+    evidence = dict(carried) if carried is not None else arm_evidence(chunks)
+    evidence["graph"] = 1.0 if has_graph_passages else 0.0
     return evidence
 
 
@@ -173,27 +163,28 @@ def _build_graph(db: Session, settings: Settings, driver: Driver, graph_namespac
         return {"intent": classify_intent(state["question"])}
 
     def retrieve_node(state: AgentState) -> dict:
-        # `top_k` 是**本节点要几条**：两臂各自召回 hybrid_recall_top_k 条、RRF 融合
-        # 之后再截到这里。重排（issue 03）接上后由它决定最终取几条上下文。
+        # 要的是**召回候选**（两臂各 hybrid_recall_top_k 条、RRF 融合后的那一批），
+        # 不是最终送进模型的条数：重排与保底在后面决定取几条上下文。少要一批等于
+        # 让重排没得选。
         chunks = search_chunks(
             db,
             settings,
             query=state["question"],
-            top_k=CUSTOMER_SERVICE_CONFIG.retrieval_top_k,
+            top_k=settings.hybrid_recall_top_k,
             agent_type=CUSTOMER_SERVICE_CONFIG.name,
         )
         tool_call = {
             "tool": "knowledge_search",
             "input": {
                 "query": state["question"],
-                "top_k": CUSTOMER_SERVICE_CONFIG.retrieval_top_k,
+                "top_k": settings.hybrid_recall_top_k,
             },
             "output": {
                 "hit_count": len(chunks),
                 "top_score": chunks[0].score if chunks else None,
                 # 原始臂分要能看到：排查与校准读的是 evidence_score 那套量纲，
                 # 不是融合后的 score。
-                "retrieval_evidence": build_retrieval_evidence(chunks, []),
+                "retrieval_evidence": build_retrieval_evidence(chunks),
             },
         }
         return {"chunks": chunks, "tool_calls": [*state.get("tool_calls", []), tool_call]}
@@ -237,7 +228,7 @@ def _build_graph(db: Session, settings: Settings, driver: Driver, graph_namespac
         # 后的综合分去比阈值，会让一条真实命中的结果被打成不合格——「图谱是增强不是
         # 依赖」这条约束也要求它不能。分臂判定见 route_after_retrieve。
         evidence = build_retrieval_evidence(
-            state["chunks"], [passage.score for passage in augmentation.passages]
+            state["chunks"], has_graph_passages=bool(augmentation.passages)
         )
         tool_call = {
             "tool": "graphrag_fusion",

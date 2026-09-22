@@ -24,7 +24,6 @@ from sqlalchemy import create_engine, delete, select
 from sqlalchemy.orm import Session as OrmSession
 
 import app.agent.graph as agent_graph
-from app.agent.config import CUSTOMER_SERVICE_CONFIG
 from app.agent.graph import build_retrieval_evidence, has_retrieval_evidence
 from app.db.models import AgentDebugTrace, DegradationTrace
 from app.knowledge.hybrid import rrf_fuse, tokenize
@@ -260,7 +259,7 @@ def test_build_retrieval_evidence_keeps_each_arms_own_scale():
         _chunk(2, source="keyword", evidence_score=8.0),
     ]
 
-    assert build_retrieval_evidence(chunks, []) == {
+    assert build_retrieval_evidence(chunks) == {
         "vector": 0.42,
         "keyword": 8.0,
         "graph": 0.0,
@@ -444,9 +443,9 @@ def test_internal_search_returns_the_same_order_as_the_chat_pipeline(hybrid_clie
         token, session_id = _customer_login(hybrid_client)
         assert _chat(hybrid_client, token, query).status_code == 200
 
-        # 聊天检索要的条数与内部检索接口一致（同一个 retrieval_top_k），两边才能比序。
+        # 聊天检索要的条数与内部检索接口一致（都是召回候选池大小），两边才能比序。
         internal_hits = _search(
-            hybrid_client, query=query, top_k=CUSTOMER_SERVICE_CONFIG.retrieval_top_k
+            hybrid_client, query=query, top_k=get_settings().hybrid_recall_top_k
         ).json()["data"]["hits"]
         snippets = _debug_snippets(session_id)
 

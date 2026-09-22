@@ -1,4 +1,5 @@
 import logging
+import time
 from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeoutError
@@ -15,7 +16,7 @@ from app.db.models import KnowledgeChunk, KnowledgeMeta
 from app.exceptions import AppError
 from app.knowledge import object_store, vector_store
 from app.knowledge.embeddings import embed_texts
-from app.knowledge.hybrid import rrf_fuse, tokenize
+from app.knowledge.hybrid import arm_evidence, rrf_fuse, tokenize
 from app.knowledge.parsers import Section, is_supported, parse_document
 from app.knowledge.tokenizer import chunk_text
 from app.replay import library as replay_library
@@ -443,13 +444,14 @@ def search_chunks(
 ) -> RetrievedChunks:
     """知识检索：向量臂与关键词臂并行召回，RRF 融合成候选。
 
-    两臂各出 `hybrid_recall_top_k` 条，融合后的候选按 RRF 位次排序、整体重排由
-    调用方接上（见 `app.agent.graph` 与 `app.knowledge.rerank`）。
+    两臂各出 `hybrid_recall_top_k` 条，融合后的候选按 RRF 位次排序。要几条由调用方
+    的 `top_k` 决定；整条候选池上的重排由调用方接（见 `app.agent.graph`）。
 
-    向量臂是外部依赖（Milvus），给它一个墙钟超时（`vector_search_timeout_seconds`）：
-    超时或抛错时**只是少了一路召回**，结果退回「只用关键词臂的排序」，并写一条降级
-    留痕。超时用线程池做软超时：Milvus 客户端是阻塞调用，拿不到结果就直接返回，
-    不等那个线程收尾（与 GraphRAG 的图谱查询同一取舍）。
+    向量臂是外部依赖（Milvus），给它一个墙钟超时（`vector_search_timeout_seconds`，
+    从**提交那一刻**起算，不是从等它那一刻起算）：超时或抛错时**只是少了一路召回**，
+    结果退回「只用关键词臂的排序」，并写一条降级留痕。超时用线程池做软超时：Milvus
+    客户端是阻塞调用，拿不到结果就直接返回，不等那个线程收尾（与 GraphRAG 的图谱
+    查询同一取舍）。
 
     关键词臂在主线程跑——SQLAlchemy 的 `Session` 不是线程安全的；它提交给向量臂
     的线程之后立刻开始，因此两臂是并行而不是「先向量后关键词」。
@@ -488,7 +490,7 @@ def search_chunks(
                 # 完整位置，截掉靠后的分块会让角标悬空。预置至多三条。
                 for chunk in preset.chunks
             ]
-            return RetrievedChunks(preset_chunks, _arm_evidence(preset_chunks, []))
+            return RetrievedChunks(preset_chunks, arm_evidence(preset_chunks))
         keyword_results = keyword_search_chunks(
             db,
             query=query,
@@ -496,10 +498,11 @@ def search_chunks(
             top_k=top_k,
             user_dict_path=settings.jieba_user_dict_path,
         )
-        return RetrievedChunks(keyword_results, _arm_evidence([], keyword_results))
+        return RetrievedChunks(keyword_results, arm_evidence(keyword_results))
 
     executor = ThreadPoolExecutor(max_workers=1)
     try:
+        started = time.monotonic()
         vector_future = executor.submit(
             _vector_search_hits,
             settings,
@@ -514,8 +517,13 @@ def search_chunks(
             top_k=settings.hybrid_recall_top_k,
             user_dict_path=settings.jieba_user_dict_path,
         )
+        # 超时是向量臂自己的墙钟预算，从提交那一刻起算：关键词臂在主线程里花掉的
+        # 时间要从预算里扣掉，否则「关键词臂慢一点」会顺带把向量臂的容忍度拉长。
+        # 预算已经用光时 `remaining` 取 0——`result(0)` 对已完成的 future 仍然直接
+        # 返回，只有真的没跑完才判超时。
+        remaining = settings.vector_search_timeout_seconds - (time.monotonic() - started)
         try:
-            hits = vector_future.result(timeout=settings.vector_search_timeout_seconds)
+            hits = vector_future.result(timeout=max(remaining, 0.0))
         except FutureTimeoutError:
             logger.warning("向量臂降级：检索超时，只用关键词臂")
             return _keyword_only_results(
@@ -542,7 +550,8 @@ def search_chunks(
         executor.shutdown(wait=False)
 
     fused = rrf_fuse([vector_results, keyword_results], rrf_k=settings.rrf_k, top_k=top_k)
-    return RetrievedChunks(fused, _arm_evidence(vector_results, keyword_results))
+    # 两路此刻还分着：每个块的 evidence_score 就是它那条臂的分。
+    return RetrievedChunks(fused, arm_evidence([*vector_results, *keyword_results]))
 
 
 def _keyword_only_results(
@@ -569,22 +578,7 @@ def _keyword_only_results(
         detail=detail,
     )
     fused = rrf_fuse([keyword_results], rrf_k=settings.rrf_k, top_k=top_k)
-    return RetrievedChunks(fused, _arm_evidence([], keyword_results))
-
-
-def _arm_evidence(
-    vector_results: list[ChunkResult], keyword_results: list[ChunkResult]
-) -> dict[str, float]:
-    """在两路还分着的时候取各臂的最高原始分（分臂判定的输入）。
-
-    这就是 `RetrievedChunks` 存在的理由：一旦 RRF 把 hybrid 块合成一条，臂与臂的
-    分就再也分不开了，而 BM25 的量纲冒充余弦会让向量臂凭空达标。
-    """
-    return {
-        "vector": max((chunk.evidence_score for chunk in vector_results), default=0.0),
-        "keyword": max((chunk.evidence_score for chunk in keyword_results), default=0.0),
-        "graph": 0.0,
-    }
+    return RetrievedChunks(fused, arm_evidence(keyword_results))
 
 
 def _chunk_sections(sections: list[Section]) -> list[ChunkPiece]:

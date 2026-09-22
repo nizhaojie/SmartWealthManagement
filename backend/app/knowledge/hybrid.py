@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import replace
 from functools import lru_cache
 from pathlib import Path
@@ -48,6 +48,24 @@ def tokenize(text: str, *, user_dict_path: str = "") -> list[str]:
     if user_dict_path:
         _load_user_dict(user_dict_path)
     return [token for token in jieba.lcut(text) if any(char.isalnum() for char in token)]
+
+
+def arm_evidence(chunks: Iterable[ChunkResult]) -> dict[str, float]:
+    """从带来源标记的候选里取各召回臂的最高原始分（分臂判定的输入）。
+
+    **在两路还分着的时候**（`search_chunks` 内、RRF 之前）调用才是准确的：那时每个
+    块的 `evidence_score` 恰好就是它那条臂的分，`source` 也只有 vector / keyword
+    两个取值。RRF 把 hybrid 块两路取大之后再用它反推，会把 BM25 的量纲记进向量臂
+    （无关问题的 BM25 也能到个位数，而余弦阈值是 0.55），所以在线上路径上优先用
+    `RetrievedChunks.evidence`；这个函数是「调用方给的是普通 list」时的退路。
+    """
+    evidence = {"vector": 0.0, "keyword": 0.0, "graph": 0.0}
+    for chunk in chunks:
+        if chunk.source in ("vector", "hybrid"):
+            evidence["vector"] = max(evidence["vector"], chunk.evidence_score)
+        if chunk.source in ("keyword", "hybrid"):
+            evidence["keyword"] = max(evidence["keyword"], chunk.evidence_score)
+    return evidence
 
 
 def rrf_fuse(

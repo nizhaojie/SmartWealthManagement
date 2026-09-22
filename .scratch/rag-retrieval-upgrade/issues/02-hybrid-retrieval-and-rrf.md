@@ -45,8 +45,10 @@
 ## 落地要点
 
 - **RRF 纯函数与分词放在新模块 `backend/app/knowledge/hybrid.py`**（`tokenize` + `rrf_fuse`）。它用 `TYPE_CHECKING` 才 import `ChunkResult`：真 import 会形成 `service ↔ hybrid` 的模块加载环。`jieba.setLogLevel(WARNING)` 在模块导入时执行一次，免得冷启动刷构建词典的进度行。
-- **`RetrievedChunks`（`list[ChunkResult]` 的子类）承载各臂的最高原始分。** `rrf_fuse` 把 hybrid 块合成一条、`evidence_score` 取两路较大值之后，「向量臂最高多少、关键词臂最高多少」就还原不出来了——从候选里按 `source` 反推，会让 BM25 的量纲冒充余弦（实测：无关问题「阿尔法半人马座…」的关键词臂最高约 3.97，被当成余弦后 ≥ 0.55，系统凭空作答）。因此臂内最高分在**两路还分着**的 `search_chunks` 内算好带出（`_arm_evidence`），`build_retrieval_evidence` 优先读它；测试替身返回普通 `list` 时退化为按来源反推（单臂构造的用例够用）。
-- **`retrieve_node` 的 `top_k` 仍是 `retrieval_top_k`（5）。** 两臂各召回 `hybrid_recall_top_k`（20）条、RRF 在 20 条候选上排序与归一化，但本节点只要 5 条——「重排取几条」是 issue 03 的事，把候选池一次性喂到上下文里会顺手改掉图谱融合的相对排序（见下一条）。issue 03 接上重排时再把这一步的 `top_k` 提到候选池大小。
+- **`RetrievedChunks`（`list[ChunkResult]` 的子类）承载各臂的最高原始分。** `rrf_fuse` 把 hybrid 块合成一条、`evidence_score` 取两路较大值之后，「向量臂最高多少、关键词臂最高多少」就还原不出来了——从候选里按 `source` 反推，会让 BM25 的量纲冒充余弦（实测：无关问题「阿尔法半人马座…」的关键词臂最高约 3.97，被当成余弦后 ≥ 0.55，系统凭空作答）。因此臂内最高分在**两路还分着**的 `search_chunks` 内算好带出，`build_retrieval_evidence` 优先读它；取最高分这件事本身抽成纯函数 `hybrid.arm_evidence`，service（RRF 之前）与 graph（测试替身给普通 `list` 时的退路）共用同一份实现。
+- **`retrieve_node` 按 `hybrid_recall_top_k` 取货。** RRF 去重后的整批候选（≤20）就是交给重排的那一批，最终取几条由 issue 03 的重排 + 保底决定；在本份单独合入时，送进模型的相似度片段会暂时是 20 条。内部检索接口的 `top_k` 仍是它自己的请求参数，不跟着变（所以「接口与聊天同序」那条断言要比前 20 条）。
+- **向量臂的超时从提交那一刻起算。** 关键词臂在主线程跑，它的耗时会从向量臂的墙钟预算里扣掉（`remaining = timeout - elapsed`，用光时取 0）——否则「关键词臂慢一点」会顺带把向量臂的容忍度拉长，墙钟超时就不再是墙钟超时。
+- **图谱证据分恒为 1.0**（`has_graph_passages` 为真即 1.0），不是「段落分里的最大值」：图谱段落的分本来就恒为 1.0，写成取最大值会让「段落分 ≤ 0」这种不该出现的情况悄悄翻转兜底结论。
 - **归一化 RRF 让图谱段落恒定排在相似度候选之后。** RRF 归一化是「最高记 1.0、其余按比例」，而 `1/(rrf_k + rank)` 随位次变化很慢，全部候选都落在 0.94~1.0 附近；乘上 `graphrag_vector_weight`（0.6）后恒高于图谱段落的 `graph_weight × 1.0`（0.4）。图谱段落因此恒定是「附加」而不是「优先」——它仍在上下文里、仍可被引用，但不再保证进前三个角标。`test_customer_service_agent_graphrag.py` 里那条断言相应改成「图谱段落进入上下文与留痕」（`retrieval_snippets` 里有 `source == "graph"`、`retrieval_evidence["graph"] == 1.0`），不再是「引用里出现《知识图谱》」。
 - **默认关键词阈值仍是占位的 0.35**（量纲已换成 BM25 分），必须由 04 的校准脚本写回。在它写回之前，BM25 一侧几乎必然达标，系统会「答不该答的」；这是 issue 明确认下的代价（02 与 04 同批合入）。
 - **既有用例里需要显式注入 `retrieval_keyword_score_threshold`**：`test_customer_service_agent.py`、`test_chat_stream.py`、`test_replay_demo_scenarios.py`、`test_customer_service_agent_graphrag.py` 的夹具都注入 `10.0`（实测：无关问题共享「系统」这类高频词时 BM25 ≈ 4，逐字命中一块 ≈ 40，10 分得开）。注入的位置都写了「默认值等 04 校准」的注释，04 落地后可以评估是否撤掉。

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // 方案请求的进度列表，是「我的方案」页的下半区。客户在这里能看到「请求走到哪一步了」，
 // 但看不到顾问定稿本身——定稿在上半区的「已放行方案」里，两者是两份不同的东西。
-import { PanelCard } from "@wealth/shared";
+import { formatDateTime, PanelCard } from "@wealth/shared";
 import type { AdvisoryRequest } from "./types";
 
 defineProps<{
@@ -48,7 +48,7 @@ function statusHint(status: string): string {
           <span class="request__hint">{{ statusHint(request.status) }}</span>
         </p>
         <p class="request__meta">请求编号：{{ request.request_no }}</p>
-        <p class="request__meta">提交时间：{{ request.submitted_at }}</p>
+        <p class="request__meta">提交时间：{{ formatDateTime(request.submitted_at) }}</p>
         <p v-if="conditionText(request)" class="request__meta">
           触发条件：{{ conditionText(request) }}
         </p>

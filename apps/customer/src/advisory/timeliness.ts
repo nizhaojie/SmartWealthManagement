@@ -1,10 +1,11 @@
+import { formatDateTime } from "@wealth/shared";
+
 // 时效提示：方案不设硬过期（Q7），放行后一直可读；能表达「有多新」的只有
 // 出具时间本身，所以页面把日期与距今天数一起写出来。
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-export function formatDateTime(value: string): string {
-  return new Date(value).toLocaleString();
-}
+// 时间形态由 shared 统一：`YYYY-MM-DD HH:mm:ss`。
+export { formatDateTime };
 
 /** 距今天数。不足一天算今天（0），不写「0 天前」；时间戳不可解析时也不编造天数。 */
 export function elapsedDays(releasedAt: string, now: Date = new Date()): number {

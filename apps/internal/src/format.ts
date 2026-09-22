@@ -1,5 +1,8 @@
 import { ApiError } from "@wealth/shared";
 
+// 时间形态由 shared 统一：`YYYY-MM-DD HH:mm:ss`。
+export { formatDateTime } from "@wealth/shared";
+
 /** 风险承受等级的呈现文案：`C1`–`C5` 是规范写法，中文只是它在界面上的说法。 */
 export const GRADE_LABELS: Record<string, string> = {
   C1: "保守型",
@@ -38,10 +41,6 @@ export function formatConfidence(confidence: number): string {
 /** 0–100 的百分比：调用方给小数（0.86 → 86）。 */
 export function toPercent(value: number): number {
   return Math.round(value * 100);
-}
-
-export function formatDateTime(value: string): string {
-  return new Date(value).toLocaleString();
 }
 
 /** 金额：原型给的是字符串小数，界面上保留两位并挂千分位。 */

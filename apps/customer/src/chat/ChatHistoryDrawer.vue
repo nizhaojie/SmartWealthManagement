@@ -5,6 +5,7 @@
 // 抽屉自己取数：打开时拉列表，点条目拉详情。只读回看，不把历史加载回当前对话
 // （「会话不跨登录延续」，历史不进入上下文）。
 import { ref, watch } from "vue";
+import { formatDateTime } from "@wealth/shared";
 import CitationPanel from "./CitationPanel.vue";
 import CiteChip from "./CiteChip.vue";
 import { splitCitations } from "./citations";
@@ -27,10 +28,6 @@ const detail = ref<CustomerSessionDetail | null>(null);
 const detailLoading = ref(false);
 const detailFailed = ref(false);
 const openCitationKey = ref<string | null>(null);
-
-function formatDateTime(value: string): string {
-  return new Date(value).toLocaleString();
-}
 
 async function load(): Promise<void> {
   loading.value = true;

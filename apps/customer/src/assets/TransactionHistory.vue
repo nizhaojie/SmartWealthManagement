@@ -2,7 +2,7 @@
 // 交易流水：按时间与类型筛选自己的每一笔资金操作（申购、赎回、转账），用来核对账目。
 // 三类记录合并在一张表里读，形状由服务端统一（转账行没有产品名而有收款人）。
 import { onMounted, reactive, ref } from "vue";
-import { ApiError, PanelCard } from "@wealth/shared";
+import { ApiError, formatDateTime, PanelCard } from "@wealth/shared";
 import { listTransactions } from "./api";
 import type { TransactionFilters, TransactionRecord } from "./types";
 
@@ -120,7 +120,7 @@ onMounted(load);
             :data-transaction-type="row.transaction_type"
           >
             <td>{{ row.transaction_no }}</td>
-            <td>{{ row.traded_at }}</td>
+            <td>{{ formatDateTime(row.traded_at) }}</td>
             <td class="cell--wrap">{{ productLabel(row) }}</td>
             <td class="cell--wrap">{{ payeeLabel(row) }}</td>
             <td>{{ row.transaction_type }}</td>

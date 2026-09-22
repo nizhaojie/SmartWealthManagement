@@ -9,6 +9,7 @@ export { ACCENTS } from "./components/accent";
 export type { Accent } from "./components/accent";
 export type { StatCardTrend } from "./components/statCard";
 export { MIN_TEXT_CONTRAST_RATIO, THEME_COLORS } from "./theme";
+export { formatDateTime } from "./datetime";
 export { ApiError, createHttpClient, unwrap } from "./http";
 export type { Envelope, HttpClient, HttpClientOptions } from "./http";
 export { createTokenStore } from "./tokenStore";

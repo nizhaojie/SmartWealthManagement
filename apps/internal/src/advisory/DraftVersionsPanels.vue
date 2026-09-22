@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { PanelCard } from "@wealth/shared";
+import { formatDateTime, PanelCard } from "@wealth/shared";
 import type { AdvisoryDraft, AdvisoryFinal, EditableCandidate } from "./types";
 
 /**
@@ -50,7 +50,7 @@ const removedCount = computed(() => props.candidates.filter((item) => !item.incl
 
     <PanelCard v-if="final" title="顾问定稿" data-testid="final-panel">
       <p class="versions__release">
-        放行人：{{ final.advisor_name ?? "—" }} · {{ final.released_at }}
+        放行人：{{ final.advisor_name ?? "—" }} · {{ formatDateTime(final.released_at) }}
       </p>
       <el-table :data="final.candidates" row-key="product_code">
         <el-table-column label="产品" prop="product_name" min-width="160" />

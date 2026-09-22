@@ -41,6 +41,7 @@
 ## 落地要点
 
 - 只换骨架与视觉，**不改产品筛选页的字段与流程**。模块名维持「产品筛选」——「产品筛选」是 `CONTEXT.md` 的规范用词（陈述「符合条件的产品有哪些」，不评价适配性），改名会漂移语义。
+- **主区限宽已取消（commit `a3c4467`）**：清单第 4 条的「主区挂 `--wm-content-max-width` 居中」在后续「宽表去掉水平滑动条」一轮被推翻。三张宽表（文档列表 / 预警列表 / 交易流水）的固有最小宽度都超过 1080px 主区实际能给出的宽度，限宽等于把水平滑动条钉在页面上——侧栏收起、展开都一样。现在 customer 主区宽度直接由网格列给出、不设上限，与 internal 主区一致；`--wm-content-max-width` 已从 `packages/shared/src/theme/tokens.css` 删除。`spec.md` 的「布局常量」与「骨架」两节、`collapsible-sidebars/issues/02-customer-app.md` 落地要点里「限宽居中、折叠只让主区可用宽度变大」的说法随之失效，以本节为准。
 - 删掉旧的 `health/HealthPage.vue` 与 `api/health.ts`（上一轮的孤立页面，未挂路由）。`/api/health` 不在本 slice 的页面范围内。
 - 登录页别再重复上一轮的坑（`el-form-item` 套在没有 `el-form` 的外层）。
 - 聊天页的气泡与引用角标是客服链路的合规呈现面，改动时对照测试，不许为了风格牺牲可点性。

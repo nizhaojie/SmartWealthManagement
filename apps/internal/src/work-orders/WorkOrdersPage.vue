@@ -171,25 +171,32 @@ useInspector(() => ({
         暂无工单
       </p>
 
+      <!--
+        列宽一律是「最小宽度」：el-table 只在各列最小宽度之和大于容器时才出横向滚动条，
+        固定 width 还会让列在宽屏上一动不动。原先的固定值合计 1030px，比「1200px 视口 +
+        侧栏展开 + 检查器收起」的可用宽度（873px）宽出 157px，于是那几种状态下总挂着水平滑动条。
+        收到合计 862px，创建时间列给足 172px 让 `YYYY-MM-DD HH:mm:ss` 单行显示；
+        宽度有余时由 el-table 按列分配，工单编号这类长串也能摊开成一行。
+      -->
       <el-table v-if="workOrders.length" :data="workOrders" data-testid="work-orders-table">
-        <el-table-column label="工单编号" prop="work_order_no" width="170" />
-        <el-table-column label="来源" prop="order_type" width="110" />
-        <el-table-column label="优先级" prop="priority" width="90" />
-        <el-table-column label="状态" width="100">
+        <el-table-column label="工单编号" prop="work_order_no" min-width="168" />
+        <el-table-column label="来源" prop="order_type" min-width="80" />
+        <el-table-column label="优先级" prop="priority" min-width="70" />
+        <el-table-column label="状态" min-width="80">
           <template #default="{ row }">
             <el-tag :type="workOrderTagType(row.status)">{{ row.status }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="受理人" width="110">
+        <el-table-column label="受理人" min-width="72">
           <template #default="{ row }">{{ row.handler_name || "—" }}</template>
         </el-table-column>
-        <el-table-column label="最近理由" min-width="180">
+        <el-table-column label="最近理由" min-width="134">
           <template #default="{ row }">{{ row.handle_reason ?? "—" }}</template>
         </el-table-column>
-        <el-table-column label="创建时间" width="180">
+        <el-table-column label="创建时间" min-width="172">
           <template #default="{ row }">{{ formatDateTime(row.created_at) }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="90">
+        <el-table-column label="操作" min-width="86">
           <template #default="{ row }">
             <el-button size="small" name="open-work-order" @click="openDetail(row.id)">处置</el-button>
           </template>

@@ -32,7 +32,7 @@ ADVISOR = "advisor1"  # 不绑定客户归属，可用余额可见范围不受�
 CUSTOMER_PATH = "/api/customer/funding-account"
 INTERNAL_PATH = "/api/internal/customers/{customer_id}/funding-account"
 
-# 与 app.db.seed 的配置值一一对应：种子是可用余额的唯一来源（不做入金）。
+# 与 app.db.seed 的配置值一一对应：种子是可用余额的初始值（充值入口见 ADR-0023）。
 SEEDED_AVAILABLE_BALANCES = {
     "wangc1": "2000.00",
     "lisic2": "120000.00",

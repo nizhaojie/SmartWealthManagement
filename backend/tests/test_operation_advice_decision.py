@@ -76,8 +76,8 @@ MY_ADVICE_PATH = "/api/customer/operation-advice"
 HELD_STATUS = "持有中"
 # 份额归零的持仓不再是「持有中」（受理侧 `order_acceptance.CLEARED_STATUS`）。
 CLEARED_STATUS = "已清仓"
-# 新客户在应用里拿不到钱：余额只来自种子（Q20，本 slice 不做入金）。测试因此直接写
-# 一个资金账户——它是演示起点，不是被测行为。
+# 新客户在应用里拿不到钱：余额的初始值来自种子。测试因此直接写一个资金账户——它是
+# 演示起点，不是被测行为（应用里有充值入口，见 ADR-0023）。
 SEEDED_BALANCE = Decimal("500000.00")
 
 
@@ -140,8 +140,8 @@ def _open_account(client: TestClient, persona: dict) -> dict:
 def _fund_account(customer_id: int, balance: Decimal = SEEDED_BALANCE) -> None:
     """开户已经建出资金账户（余额 0），这里只是把余额写成演示起点。
 
-    余额只来自种子（Q20），测试直接写它是为了绕过「没有入金入口」这件事，而不是
-    为了建账户——再 INSERT 一行会撞 `uk_funding_account_customer`。
+    测试直接写它是为了绕过「装库时没有入金」这件事，而不是为了建账户——再 INSERT 一行
+    会撞 `uk_funding_account_customer`（应用里的充值入口见 ADR-0023）。
     """
     _set_balance(customer_id, balance)
 

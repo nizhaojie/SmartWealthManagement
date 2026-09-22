@@ -69,9 +69,9 @@ OPTIONS_PATH = "/api/internal/customers/{customer_id}/operation-advice-options"
 CANDIDATE_POOL_PATH = "/api/customer/candidate-pool"
 
 HELD_STATUS = "持有中"
-# 新客户在应用里拿不到钱：开户建出来的是余额 0 的资金账户，余额只来自种子
-# （Q20，不做入金）。测试因此直接把余额写成演示起点——它绕过的是「没有入金入口」，
-# 不是「没有账户」。
+# 新客户在应用里拿不到钱：开户建出来的是余额 0 的资金账户，余额的初始值来自种子。
+# 测试因此直接把余额写成演示起点——它绕过的是「装库时没有入金」，不是「没有账户」，
+# 更不是「应用里没有充值入口」（ADR-0023）。
 SEEDED_BALANCE = Decimal("500000.00")
 
 

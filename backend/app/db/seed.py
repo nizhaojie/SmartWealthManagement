@@ -561,8 +561,8 @@ def _seed_customers(
             customer.manager_id = manager.id
             session.flush()
 
-        # 资金账户：余额只来自种子，应用里没有入金（spec Q20），因此重复 seed 时把
-        # 余额对齐回配置值——重新 seed 等于把演示状态恢复成初始状态。
+        # 资金账户：余额的初始值来自种子，重复 seed 时把余额对齐回配置值——重新 seed
+        # 等于把演示状态恢复成初始状态（应用里的充值也会一起复位）。
         account = session.scalar(
             select(FundingAccount).where(FundingAccount.customer_id == customer.id)
         )

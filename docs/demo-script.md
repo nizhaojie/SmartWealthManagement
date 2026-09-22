@@ -40,8 +40,8 @@ pnpm install && pnpm dev               # 后端 8000、客户端 5173、内部�
    会回「风险评测已过期，画像权限已冻结，请重新评估」；而交易受理只看「有没有做过风评」
    （Q18），不看有效期。所以凡是要用到候选池的演示（产品筛选、发起建议），先让那位客户
    **重做一次风评**——这也是演示的第一步。
-2. **余额只来自种子，没有入金（Q20）。** 不要试图「给客户打一笔钱」：那不在这个 slice 里。
-   余额不够就是换一位余额充足的客户重来（第四幕）。
+2. **余额的初始值来自种子，应用里有充值入口。** 余额不足不用换客户重来：充值即可当场
+   自救（第四幕）。
 3. **种子里那五笔历史成交在 `seed` 时被逐笔回放过**，产生的历史预警标注「内部补录」、
    按时间倒序自然沉底；演示中当场发起的交易标注「客户发起」，永远排在最上面。列表里同时
    有「监测一直在跑」和「现在是活的」两种证据。
@@ -118,11 +118,13 @@ Agent 会给出该持仓的全部成交金额 `500,000.00` 元——正好是一
 
 ## 六、第四幕：三道拒绝，各归各位
 
-1. **余额不足**：客户端 `wangc1` 登录 → 交易：可用余额 `2,000.00` → 转账 `5000.00`
-   → 「可用余额不足，还差 3000.00 元」。看「我的资产」的流水：**没有**任何新记录，
-   校验全部在写库之前。
-   > 台词：「入金不在这个 slice 里——余额只来自种子。所以这里不试图给客户打钱，换一位
-   > 余额充足的客户重来。」
+1. **余额不足被拒 → 充值 → 同一笔转账成功**：客户端 `wangc1` 登录 → 交易：可用余额
+   `2,000.00` → 转账 `5000.00` → 「可用余额不足，还差 3000.00 元」。看「我的资产」的流水：
+   **没有**任何新记录，校验全部在写库之前。
+   → 回交易页**充值** `5000.00`：余额变成 `7,000.00`，流水里多出一条「充值」。
+   → 再发同一笔转账 `5000.00` → 「转账成功」，余额变成 `2,000.00`。
+   > 台词：「余额不足在这里不是死路——种子给的是初始值，应用里有充值入口。当场充一笔，
+   > 同一笔转账就走通了：这一屏讲的是『拒绝 → 自救 → 成功』，不是换一位客户重来。」
    - 申购那条路径的余额不足（C1 买天枢货币基金 5000，还差 `3012.50` 元手续费也一起算）
      在同一位客户身上要先把风评补上才点得到——交易页的在售产品同样受候选池的过期熔断
      影响（见第一幕第 1 条）；这条路径的断言是
@@ -139,8 +141,9 @@ Agent 会给出该持仓的全部成交金额 `500,000.00` 元——正好是一
    - 回产品筛选：产品清单出现，交易页可以选品下单。
    > 台词：「受理层的拒绝文案是『请先完成风险测评』，不是『风险等级不足』——开户时写下的
    > C1 是占位而不是结论。客户做完风评，同一笔交易当场就能走通。这一屏演示到『门禁打开』
-   > 为止：新开户客户的资金账户在开户时就建出来了，可用余额为 0（本 slice 不做入金），此时
-   > 下单回的是『可用余额不足』——没钱与没有资金账户是两件事，后者的话，资产页上的『—』
+   > 为止：新开户客户的资金账户在开户时就建出来了，可用余额为 0（余额 0 是开户的起点，充值
+   > 入口见第 1 条），此时下单回的是『可用余额不足』——没钱与没有资金账户是两件事，后者的话，
+   > 资产页上的『—』
    > 说不清是哪一种。最后那一步成交由
    > `test_the_same_customer_can_trade_after_taking_the_assessment` 钉住。」
 
@@ -163,6 +166,7 @@ Agent 会给出该持仓的全部成交金额 `500,000.00` 元——正好是一
 | 未放行的建议客户侧读不到；客户经理放不了行 | `tests/test_operation_advice_decision.py::test_an_unreleased_advice_is_invisible_to_the_customer`、`::test_only_the_advisor_can_release_an_advice` |
 | 接受即成交、走同一个入海口并过规则引擎 | `tests/test_operation_advice_decision.py::test_accepting_an_advice_strikes_a_trade_through_the_rule_engine` |
 | 余额不足被拒绝 | `tests/test_customer_purchase_and_redemption.py::test_a_purchase_beyond_the_available_balance_is_rejected`、`tests/test_customer_transfer_and_merged_history.py::test_a_transfer_beyond_the_available_balance_is_rejected` |
+| 充值让余额有了入口；大额入金进风控 | `tests/test_customer_deposit.py::test_a_deposit_adds_to_the_available_balance`、`::test_a_deposit_reaches_the_rule_engine` |
 | 越级被拒绝 | `tests/test_customer_purchase_and_redemption.py::test_an_overgrade_purchase_is_rejected` |
 | 未测评被引导；做完风评同一笔交易能走通 | `tests/test_customer_purchase_and_redemption.py::test_a_customer_who_never_took_the_assessment_is_asked_to_take_one`、`::test_the_same_customer_can_trade_after_taking_the_assessment` |
 | 客户自助发起的交易没有经办员工（来源不加字段） | `tests/test_customer_purchase_and_redemption.py::test_a_customer_initiated_trade_has_no_operator`、`tests/test_transactions_as_risk_input.py::test_a_customer_trade_is_marked_as_customer_initiated` |

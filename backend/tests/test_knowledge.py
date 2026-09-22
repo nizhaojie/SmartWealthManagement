@@ -11,7 +11,8 @@ from sqlalchemy.orm import Session as OrmSession
 from app.db.models import KnowledgeMeta
 from app.knowledge.parsers import parse_document
 from app.knowledge.seed_faq import FAQ_SOURCE_FILE, seed_faq
-from app.knowledge.service import create_pending_document
+from app.knowledge.service import CHUNK_OVERLAP, CHUNK_SIZE, create_pending_document
+from app.knowledge.tokenizer import chunk_text
 from app.main import app
 from app.settings import get_settings
 
@@ -520,6 +521,23 @@ def test_txt_without_tabs_is_one_section_like_before():
     assert len(sections) == 1
     assert sections[0].heading_path == []
     assert sections[0].text == content.decode("utf-8").strip()
+
+
+def test_plain_txt_still_chunks_on_the_sliding_window(knowledge_client):
+    """没有 tab 的 txt 走原路：块数仍是 512/64 滑动窗口切出来的那个数。"""
+    text = "随存随取型现金管理产品的赎回到账时间为下一个交易日。" * 40
+    upload_response = _upload(
+        knowledge_client, filename="test_plain_window.txt", content=text.encode("utf-8")
+    )
+    knowledge_id = upload_response.json()["data"]["knowledge_id"]
+
+    try:
+        listed = _find(_list(knowledge_client).json()["data"], knowledge_id)
+        expected = chunk_text(text, chunk_size=CHUNK_SIZE, overlap=CHUNK_OVERLAP)
+        assert len(expected) > 1
+        assert listed["chunk_count"] == len(expected)
+    finally:
+        _delete(knowledge_client, knowledge_id)
 
 
 def test_qa_pair_txt_is_chunked_one_pair_per_chunk(knowledge_client):

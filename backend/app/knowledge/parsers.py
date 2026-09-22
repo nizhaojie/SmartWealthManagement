@@ -56,6 +56,8 @@ def _parse_txt(content: bytes) -> list[Section]:
 
     for line in content.decode("utf-8").split("\n"):
         question, separator, answer = line.partition("\t")
+        # 问题与答案两侧的空白不是语义的一部分（也顺带吃掉 CRLF 里的 \r，仓库在
+        # Windows 上检出时它就是行长的一部分）：切出来先 strip 再落库。
         if separator and question.strip():
             flush_paragraph()
             question = question.strip()

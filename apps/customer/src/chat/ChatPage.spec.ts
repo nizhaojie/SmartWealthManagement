@@ -46,16 +46,24 @@ describe("ChatPage", () => {
   });
 
   it("streams deltas into the assistant bubble before the final answer arrives", async () => {
-    mockStreamOnce((handlers) => {
-      handlers.onDelta("你");
-      handlers.onDelta("好");
-    });
+    // 只 fake 打字机的 setInterval：setTimeout 保持真实，ask() 里的 flushPromises
+    // 才能正常 resolve。推进两个 tick（30ms/字）让「你」「好」逐字上屏。
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    try {
+      mockStreamOnce((handlers) => {
+        handlers.onDelta("你");
+        handlers.onDelta("好");
+      });
 
-    const wrapper = mountPage(pinia);
-    await ask(wrapper, "你好");
+      const wrapper = mountPage(pinia);
+      await ask(wrapper, "你好");
+      await vi.advanceTimersByTimeAsync(60);
 
-    expect(wrapper.text()).toContain("你好");
-    expect(wrapper.findAll(".msg")).toHaveLength(2);
+      expect(wrapper.text()).toContain("你好");
+      expect(wrapper.findAll(".msg")).toHaveLength(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("renders a clickable citation badge that locates the source on click", async () => {

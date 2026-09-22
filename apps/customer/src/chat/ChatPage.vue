@@ -7,11 +7,16 @@ import CiteChip from "./CiteChip.vue";
 import { streamChatMessage } from "./api";
 import ChatHistoryDrawer from "./ChatHistoryDrawer.vue";
 import { splitCitations } from "./citations";
+import { createTypewriter } from "./typewriter";
 
 // 断流时的兜底话术：客服链路的合规呈现面——客户必须始终有一条人工去路。
 // 热线号与后端 human_service_channel 的取值一致；后端目前不把它暴露成接口，
 // 改号时要两处一起改（回答文本里的号来自后端，不在这里）。
 const CONNECTION_FALLBACK = "对话连接已中断，请稍后重试，或拨打人工客服热线 95588。";
+
+// 打字机逐字间隔（毫秒）。假流式下答案是完整生成后全速推来的，不压节奏就
+// 看不出逐字效果；取「适中」档，调观感改这一处即可。
+const TYPEWRITER_INTERVAL_MS = 30;
 
 const chat = useChatStore();
 
@@ -70,16 +75,25 @@ async function send(): Promise<void> {
   const assistantId = chat.beginTurn(question);
   await scrollToBottom();
 
+  // 打字机限速：把「一瞬间到齐」的增量按最小间隔逐字上屏。done 通过 end() 排队——
+  // 等缓冲吐空才 finishTurn，而不是一到就覆盖，否则逐字节奏会被整段 answer 冲掉。
+  const typewriter = createTypewriter(TYPEWRITER_INTERVAL_MS, (char) => {
+    chat.appendDelta(assistantId, char);
+    void scrollToBottom();
+  });
+
   await streamChatMessage(question, {
     onDelta(delta) {
-      chat.appendDelta(assistantId, delta);
-      void scrollToBottom();
+      typewriter.push(delta);
     },
     onDone(payload) {
-      chat.finishTurn(assistantId, payload);
-      void scrollToBottom();
+      typewriter.end(() => {
+        chat.finishTurn(assistantId, payload);
+        void scrollToBottom();
+      });
     },
     onError() {
+      typewriter.flush();
       chat.failTurn(assistantId, CONNECTION_FALLBACK);
       void scrollToBottom();
     },
@@ -151,7 +165,7 @@ async function send(): Promise<void> {
           v-model="draft"
           name="chat-message"
           class="composer__input"
-          placeholder="继续追问，例如「最短持有期是多久」"
+          placeholder="请输入问题"
           :disabled="sending"
         />
         <el-button type="primary" native-type="submit" :loading="sending">发送</el-button>

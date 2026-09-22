@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app import degradation
 from app.agent import archive, debug_trace, memory
-from app.agent.citations import Citation, build_citations
+from app.agent.citations import Citation, reconcile_answer
 from app.agent.config import CUSTOMER_SERVICE_CONFIG
 from app.agent.fusion import fuse_and_rank
 from app.agent.intent import RETRIEVAL_INTENTS, Intent, classify_intent
@@ -270,11 +270,15 @@ def _build_graph(db: Session, settings: Settings, driver: Driver, graph_namespac
             # 返回预设兜底回答而不是把错误抛给使用者，并留一条降级痕迹。
             report_model_failure(db, exc)
             return {"answer": model_failure_answer(settings), "citations": []}
-        citations = build_citations(chunks, result.cited_chunk_numbers)
+        # 引用按正文 [N] 角标对齐：正文里悬空的角标（越界/模型没对应引用块）会被
+        # 剔除，正文没写角标时退回模型自报的 citations 列表——见 citations.reconcile_answer。
+        answer, citations = reconcile_answer(
+            chunks, result.cited_chunk_numbers, result.text
+        )
         # 提示词在这里按同一纯函数再拼一次，而不是从模型结果里取：留痕不该依赖
         # provider 有没有回传提示词，换掉 provider（或测试里打了桩）也不该丢这条。
         prompt = build_grounded_messages(state["question"], state["history"], chunks)
-        return {"answer": result.text, "citations": citations, "prompt": prompt}
+        return {"answer": answer, "citations": citations, "prompt": prompt}
 
     def fallback_node(state: AgentState) -> dict:
         return {"answer": fallback_message(settings), "citations": []}

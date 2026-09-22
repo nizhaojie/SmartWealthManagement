@@ -1,6 +1,6 @@
 <script setup lang="ts">
-// 交易流水：按时间与类型筛选自己的每一笔资金操作（申购、赎回、转账），用来核对账目。
-// 三类记录合并在一张表里读，形状由服务端统一（转账行没有产品名而有收款人）。
+// 交易流水：按时间与类型筛选自己的每一笔资金操作（申购、赎回、转账、充值），用来核对账目。
+// 四类记录合并在一张表里读，形状由服务端统一（转账行没有产品名而有收款人，充值行两者皆无）。
 import { onMounted, reactive, ref } from "vue";
 import { ApiError, formatDateTime, PanelCard } from "@wealth/shared";
 import { listTransactions } from "./api";
@@ -8,10 +8,10 @@ import type { TransactionFilters, TransactionRecord } from "./types";
 
 const EMPTY_HINT = "没有符合条件的交易记录。可放宽时间范围，或换成全部交易类型再查一次。";
 
-// 三类记录并排在同一张表里：转账是唯一的没有产品、有收款人的那一类（ADR-0019）。
-const TRANSACTION_TYPES = ["申购", "赎回", "转账"] as const;
+// 四类记录并排在同一张表里：转账与充值都没有产品，其中只有转账有收款人（ADR-0019、ADR-0023）。
+const TRANSACTION_TYPES = ["申购", "赎回", "转账", "充值"] as const;
 
-/** 转账没有产品，申赎没有收款人：缺失的一项显示为「—」，不编造、也不留空单元格。 */
+/** 产品位只对申赎成立、收款人位只对转账成立：缺失的一项显示为「—」，不编造、也不留空单元格。 */
 function productLabel(row: TransactionRecord): string {
   return row.product_name && row.product_code
     ? `${row.product_name}（${row.product_code}）`

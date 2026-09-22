@@ -3,13 +3,13 @@
  * 「交易」：客户侧第一个写操作页面。
  *
  * 它独立于只读的资产页，而不是长在资产页里——交易与看资产是两件事，把它们并在一起，
- * 客户会以为「买入」只是资产页的一个小动作。这里是可用余额 + 三个入口（申购 / 赎回 /
- * 转账），每一笔都由受理侧校验后当场成交（ADR-0018）：
+ * 客户会以为「买入」只是资产页的一个小动作。这里是可用余额 + 四个入口（申购 / 赎回 /
+ * 转账 / 充值），每一笔都由受理侧校验后当场成交（ADR-0018）：
  *
  * - 校验过不了（余额不足、越级、未测评、低于起投金额、不在售、份额不足）→ 渲染受理侧原文；
  * - 校验过了 → 成交、余额与持仓随之变动，这里把它们刷新一遍。
  *
- * 三条路径都走同一个入海口进风控（`app.risk_monitoring.alerting`），界面上看不见它，
+ * 四条路径都走同一个入海口进风控（`app.risk_monitoring.alerting`），界面上看不见它，
  * 也不该看见——风控是事后监测，不阻断本页的任何操作。
  */
 import { computed, onMounted, reactive, ref, watch } from "vue";
@@ -20,11 +20,11 @@ import { useAvailableBalance } from "../funding/useAvailableBalance";
 import { listProducts } from "../products/api";
 import type { Product } from "../products/types";
 import FailureNotice from "./FailureNotice.vue";
-import { purchase, redeem, transfer } from "./api";
+import { deposit, purchase, redeem, transfer } from "./api";
 import { describeAcceptanceFailure, type AcceptanceFailure } from "./failure";
 
 const BALANCE_HINT =
-  "可用余额是你在这里能立即动用的钱，与画像里的总资产不是一回事。申购与转账扣减它，赎回增加它。";
+  "可用余额是你在这里能立即动用的钱，与画像里的总资产不是一回事。申购与转账扣减它，赎回与充值增加它。";
 
 const { balance, error: balanceError, load: loadBalance } = useAvailableBalance();
 
@@ -38,6 +38,7 @@ const products = ref<Product[]>([]);
 const purchaseForm = reactive({ product_code: "", amount: "" });
 const redemptionForm = reactive({ product_code: "", shares: "" });
 const transferForm = reactive({ payee_name: "", payee_account: "", amount: "" });
+const depositForm = reactive({ amount: "" });
 
 const purchaseSubmitting = ref(false);
 const purchaseFailure = ref<AcceptanceFailure | null>(null);
@@ -50,6 +51,10 @@ const redemptionDone = ref<TransactionRecord | null>(null);
 const transferSubmitting = ref(false);
 const transferFailure = ref<AcceptanceFailure | null>(null);
 const transferDone = ref<TransactionRecord | null>(null);
+
+const depositSubmitting = ref(false);
+const depositFailure = ref<AcceptanceFailure | null>(null);
+const depositDone = ref<TransactionRecord | null>(null);
 
 const selectedHolding = computed(
   () =>
@@ -141,6 +146,22 @@ async function submitTransfer(): Promise<void> {
     transferFailure.value = describeAcceptanceFailure(error, "转账失败，请稍后重试");
   } finally {
     transferSubmitting.value = false;
+  }
+}
+
+async function submitDeposit(): Promise<void> {
+  depositFailure.value = null;
+  depositDone.value = null;
+  depositSubmitting.value = true;
+  try {
+    const result = await deposit(depositForm);
+    balance.value = result.available_balance;
+    depositDone.value = result.transaction;
+    depositForm.amount = "";
+  } catch (error) {
+    depositFailure.value = describeAcceptanceFailure(error, "充值失败，请稍后重试");
+  } finally {
+    depositSubmitting.value = false;
   }
 }
 
@@ -295,6 +316,30 @@ onMounted(() => {
       </p>
       <div v-if="transferFailure" data-testid="transfer-failure">
         <FailureNotice :failure="transferFailure" />
+      </div>
+    </PanelCard>
+
+    <PanelCard title="充值">
+      <form class="trade-form" data-testid="deposit-form" @submit.prevent="submitDeposit">
+        <label class="trade-form__field">
+          <span class="trade-form__label">金额（元）</span>
+          <el-input
+            v-model="depositForm.amount"
+            name="deposit-amount"
+            inputmode="decimal"
+            placeholder="请输入充值金额"
+          />
+        </label>
+        <el-button name="submit-deposit" native-type="submit" :loading="depositSubmitting">
+          确认充值
+        </el-button>
+      </form>
+
+      <p v-if="depositDone" class="trading__done" data-testid="deposit-done">
+        充值成功，流水号 {{ depositDone.transaction_no }}，到账金额 {{ depositDone.amount }} 元。
+      </p>
+      <div v-if="depositFailure" data-testid="deposit-failure">
+        <FailureNotice :failure="depositFailure" />
       </div>
     </PanelCard>
   </div>

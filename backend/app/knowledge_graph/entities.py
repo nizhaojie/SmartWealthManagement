@@ -8,6 +8,10 @@
 
 识别不到任何实体不是错误——调用方（app.knowledge_graph.graphrag）把
 空列表当成四类静默降级情形之一处理，这里只管识别，不管降级策略。
+
+`only_customer_id` 收的是客户侧提问者本人：图谱沿用调用方的身份（spec Out of
+Scope 的「沿用调用方的身份」），而客户可见视图里只有本人的持仓，因此客户
+节点只认他自己——别人的姓名即使能对应到图里的节点，也不算命中。
 """
 
 from __future__ import annotations
@@ -89,14 +93,25 @@ def _dedupe(entities: list[ResolvedEntity]) -> list[ResolvedEntity]:
 
 
 def extract_entities(
-    tx: ManagedTransaction, namespace: str, question: str
+    tx: ManagedTransaction,
+    namespace: str,
+    question: str,
+    *,
+    only_customer_id: int | None = None,
 ) -> list[ResolvedEntity]:
-    """事务函数：签名与 app.knowledge_graph.tools 里的查询函数一致，配 session.execute_read 使用。"""
+    """事务函数：签名与 app.knowledge_graph.tools 里的查询函数一致，配 session.execute_read 使用。
+
+    `only_customer_id` 非空表示调用方是客户侧的某位客户：客户节点只认他自己，
+    别人的姓名被当成匹配不上的文本丢弃（而不是丢弃整个问题——产品、行业、
+    基金经理这些非人实体照常解析）。
+    """
     gazetteer = _load_gazetteer(tx, namespace)
     resolved: list[ResolvedEntity] = []
 
     for row in gazetteer["customers"]:
         name = row["real_name"]
+        if only_customer_id is not None and int(row["customer_id"]) != only_customer_id:
+            continue
         if name and name in question:
             resolved.append(ResolvedEntity("customer", name, row["customer_id"]))
 

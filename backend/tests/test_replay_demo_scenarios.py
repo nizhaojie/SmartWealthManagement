@@ -365,10 +365,15 @@ def test_seven_demo_scenarios_replay_offline(replay_client: TestClient) -> None:
         assert data["degraded"] is False
         markers = [citation["marker"] for citation in data["citations"]]
         assert markers == list(preset.cited)
-        # 引用合法：角标指向真实检索命中（标题与段落路径来自预置分块）。
+        # 引用合法：相似度分块指向知识库文档，图谱段落的来源是「知识图谱」而不是
+        # 某个不存在的文件（负数 knowledge_id 是图谱段落的标识，见 agent/fusion.py）。
         for citation in data["citations"]:
-            assert citation["title"] == "客户常见问题"
-            assert citation["heading_path"][0] == "客户常见问题"
+            if citation["knowledge_id"] < 0:
+                assert citation["title"] == "知识图谱"
+                assert citation["source_file"].startswith("graph:")
+            else:
+                assert citation["title"] == "客户常见问题"
+                assert citation["heading_path"][0] == "客户常见问题"
         # 回答文本里的每个 [N] 角标都有结构化引用可点，前端不会渲染出裸文本。
         inline_markers = {int(number) for number in re.findall(r"\[(\d+)\]", data["answer"])}
         assert inline_markers == set(markers)
@@ -627,17 +632,47 @@ def test_chat_preset_chunks_quote_the_faq_seed_verbatim() -> None:
 
 
 def test_chat_presets_cite_legally() -> None:
-    """引用序号落在分块范围内，回答里的角标与 cited 一一对应。"""
+    """引用序号落在本次候选范围内，回答里的角标与 cited 一一对应。
+
+    候选范围是「相似度分块 + 图谱段落」：融合后顺序确定（向量块在前、图谱段落在后，
+    见 `CHAT_PRESETS` 里的说明），预置才敢把 `[N]` 写死。图谱段落必须挂角标——
+    它是论断的实际来源，写成裸文本就是「角标和实际不符」。
+    """
+    settings = get_settings()
     for preset in replay_library.CHAT_PRESETS:
         assert preset.cited, f"预置问题没有引用：{preset.question}"
-        assert max(preset.cited) <= len(preset.chunks)
-        inline = {int(number) for number in re.findall(r"\[(\d+)\]", preset.answer)}
-        assert inline == set(preset.cited)
+        assert all(
+            settings.graphrag_vector_weight * chunk.score
+            > settings.graphrag_graph_weight
+            for chunk in preset.chunks
+        ), f"图谱段落会插到分块前面，序号假设失效：{preset.question}"
+        candidates = len(preset.chunks) + len(preset.passages)
+        assert max(preset.cited) <= candidates
+        # 引用列表的顺序由正文角标决定（reconcile_answer 以正文为权威）：cited 按
+        # 角标在正文里出现的顺序写，接口返回的 markers 才会与它逐项相等。
+        inline_in_order = [int(number) for number in re.findall(r"\[(\d+)\]", preset.answer)]
+        assert list(dict.fromkeys(inline_in_order)) == list(preset.cited)
+        graph_markers = set(range(len(preset.chunks) + 1, candidates + 1))
+        assert graph_markers <= set(preset.cited), f"图谱段落未挂角标：{preset.question}"
         # 分块分数全部高于检索阈值（融合前证据分），且严格递减，融合后顺序确定。
-        threshold = get_settings().retrieval_score_threshold
         scores = [chunk.score for chunk in preset.chunks]
-        assert all(score >= threshold for score in scores)
+        assert all(score >= settings.retrieval_score_threshold for score in scores)
         assert scores == sorted(scores, reverse=True)
+
+
+def test_chat_presets_never_carry_a_customers_portfolio() -> None:
+    """回放预置与登录身份无关，因此不许预置任何一位客户的持仓或敞口。
+
+    客服侧是客户身份域，图谱只认登录客户本人（`agent/graph.py` 的 only_customer_id）。
+    预置一位客户的持仓，等于让任何登录客户都读到别人的数据（CONTEXT「客户可见视图」）。
+    """
+    for preset in replay_library.CHAT_PRESETS:
+        assert all(
+            passage.entity_type != "customer" for passage in preset.passages
+        ), f"预置携带了客户数据：{preset.question}"
+        assert all(
+            entity.get("type") != "customer" for entity in preset.matched_entities
+        ), f"预置识别了客户实体：{preset.question}"
 
 
 def test_analytics_presets_are_valid_readonly_queries() -> None:

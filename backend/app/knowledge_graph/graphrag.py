@@ -202,10 +202,19 @@ def _passages_for_risk_level(
 
 
 def _run_graph_retrieval(
-    driver: Driver, namespace: str, question: str
+    driver: Driver,
+    namespace: str,
+    question: str,
+    *,
+    only_customer_id: int | None = None,
 ) -> tuple[list[GraphPassage], list[ResolvedEntity]]:
     with driver.session() as session:
-        entities = session.execute_read(extract_entities, namespace, question)
+        entities = session.execute_read(
+            extract_entities,
+            namespace,
+            question,
+            only_customer_id=only_customer_id,
+        )
 
     passages: list[GraphPassage] = []
 
@@ -249,14 +258,27 @@ def augment_with_graph(
     namespace: str,
     question: str,
     timeout_seconds: float,
+    only_customer_id: int | None = None,
 ) -> GraphAugmentation:
+    """`only_customer_id` 非空表示调用方是客户侧：客户节点只认这位提问者本人。
+
+    图谱沿用调用方的身份（spec Out of Scope），不传就等于让客户按姓名查到任意
+    客户的持仓——那是客户可见视图之外的数据。内部入口不传，保持「识别到谁就能
+    查谁」的既有能力。
+    """
     if _graph_unavailable_for_rebuild(db):
         logger.info("GraphRAG 降级：图谱正在重建且旧图不可用")
         return GraphAugmentation(degraded=True, degradation_reason=DEGRADED_REBUILDING)
 
     executor = ThreadPoolExecutor(max_workers=1)
     try:
-        future = executor.submit(_run_graph_retrieval, driver, namespace, question)
+        future = executor.submit(
+            _run_graph_retrieval,
+            driver,
+            namespace,
+            question,
+            only_customer_id=only_customer_id,
+        )
         passages, entities = future.result(timeout=timeout_seconds)
     except FutureTimeoutError:
         logger.warning("GraphRAG 降级：图谱查询超时")

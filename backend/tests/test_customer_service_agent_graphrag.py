@@ -141,6 +141,40 @@ def test_graph_entity_hit_produces_grounded_answer_and_graph_citation(chat_clien
     assert fusion_call["output"]["retrieval_evidence"]["graph"] == 1.0
 
 
+def test_another_customers_name_does_not_bring_their_portfolio_into_the_context(chat_client):
+    """客户可见视图里只有本人的持仓：问句里出现别人的姓名，也不能把别人的持仓拉进上下文。
+
+    与 `test_knowledge_graph_graphrag.py` 的 `only_customer_id` 用例上下同源：
+    客服链路把登录客户标识传进图谱增强，别人的姓名因此解析不出实体，图谱按
+    「实体未命中」静默降级——客户看到的只是知识库回答或兜底话术。
+    """
+    token, session_id = _customer_login(chat_client)
+
+    response = _chat(chat_client, token, "赵启明的持仓集中在哪些行业")
+
+    assert response.status_code == 200
+    snippets = _debug_snippets(session_id)
+    assert not any("赵启明" in snippet["content"] for snippet in snippets)
+    rows = _archive_rows(session_id)
+    assistant_row = next(row for row in rows if row.role == "assistant")
+    fusion_call = next(call for call in assistant_row.tool_calls if call["tool"] == "graphrag_fusion")
+    assert fusion_call["output"]["matched_entities"] == []
+    assert fusion_call["output"]["degradation_reason"] == "entity_not_matched"
+
+
+def test_the_customers_own_name_still_reaches_the_graph(chat_client):
+    """收紧到本人不等于关掉图谱：登录客户自己的姓名照常命中。"""
+    token, session_id = _customer_login(chat_client)
+
+    response = _chat(chat_client, token, "王守成的持仓集中在哪些行业")
+
+    assert response.status_code == 200
+    snippets = _debug_snippets(session_id)
+    assert any("王守成" in snippet["content"] for snippet in snippets), (
+        "登录客户本人的持仓应当仍可由图谱命中"
+    )
+
+
 def test_no_entity_match_degrades_silently_and_records_reason(chat_client):
     token, session_id = _customer_login(chat_client)
 

@@ -95,6 +95,9 @@ def replay_graph_augmentation(question: str) -> GraphAugmentation:
 class AgentState(TypedDict, total=False):
     question: str
     history: list[dict]
+    # 登录客户的使用者标识。图谱增强用它把客户节点收成「只认本人」——客户侧提问
+    # 不能因为问句里出现别人的姓名就把别人的持仓拉进上下文（客户可见视图只有本人的）。
+    user_id: int
     intent: Intent
     chunks: list[ChunkResult]
     # 融合前的分臂证据集：{"vector": 最高余弦, "keyword": 最高 BM25, "graph": 有段落则 1.0}。
@@ -214,6 +217,9 @@ def _build_graph(db: Session, settings: Settings, driver: Driver, graph_namespac
                 namespace=graph_namespace,
                 question=state["question"],
                 timeout_seconds=settings.graphrag_query_timeout_seconds,
+                # 客服链路是客户侧：图谱只认登录客户本人，别人的姓名解析不出实体，
+                # 也就不会把别人的持仓或行业敞口融合进上下文（客户可见视图只有本人的）。
+                only_customer_id=state.get("user_id"),
             )
         if augmentation.degradation_reason in DEPENDENCY_DEGRADATION_REASONS:
             # 图谱是增强，超时/不可用不该中断回答；但这是一次降级，要能统计到。
@@ -435,7 +441,12 @@ def run_customer_service_turn(
     start_token_usage()
     started = time.monotonic()
     final_state: AgentState = graph.invoke(
-        {"question": question, "history": history, "tool_calls": []}
+        {
+            "question": question,
+            "history": history,
+            "tool_calls": [],
+            "user_id": user_id,
+        }
     )
     duration_ms = int((time.monotonic() - started) * 1000)
     token_usage = get_token_usage()

@@ -143,6 +143,48 @@ def test_augment_with_graph_returns_common_holdings_for_two_customers(
     assert result.passages, "张衡自身的持仓/行业分布应当产出图谱段落"
 
 
+def test_augment_with_graph_restricts_customer_entities_to_the_caller(
+    driver, namespace, zhangc3_id, zhaoc4_id
+):
+    """客户侧传入 only_customer_id 后，别人的姓名解析不出实体、也取不到数据。
+
+    与上一条同问题、同图谱：不限制时两个客户都命中，限制到张衡时只剩张衡——
+    别人的姓名被当成匹配不上的文本丢弃，而不是整题放弃（产品、行业等非人实体
+    照常解析）。
+    """
+    result = graphrag.augment_with_graph(
+        driver,
+        _FakeDbAlwaysIdle(),
+        namespace=namespace,
+        question="张衡和赵启明有没有共同持仓",
+        timeout_seconds=5.0,
+        only_customer_id=zhangc3_id,
+    )
+
+    assert result.degraded is False
+    assert {e["value"] for e in result.matched_entities} == {"张衡"}
+    assert all("赵启明" not in passage.content for passage in result.passages)
+    assert result.passages, "调用者本人的持仓仍然应当可见"
+
+
+def test_augment_with_graph_degrades_when_the_caller_is_the_only_unknown_name(
+    driver, namespace, zhangc3_id
+):
+    """只问到别人的姓名时，图谱按「实体未命中」静默降级，不返回任何段落。"""
+    result = graphrag.augment_with_graph(
+        driver,
+        _FakeDbAlwaysIdle(),
+        namespace=namespace,
+        question="赵启明的持仓集中在哪些行业",
+        timeout_seconds=5.0,
+        only_customer_id=zhangc3_id,
+    )
+
+    assert result.degraded is True
+    assert result.degradation_reason == graphrag.DEGRADED_NO_ENTITY
+    assert result.passages == []
+
+
 # ---------------------------------------------------------------------------
 # 四类静默降级
 # ---------------------------------------------------------------------------

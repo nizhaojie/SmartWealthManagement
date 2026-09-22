@@ -4,19 +4,34 @@
 
 每条问题后标注了会命中哪些图谱工具，方便对答时解释「这段回答是从哪条关系链路来的」。
 
+**客服侧只认本人**：智能客服是客户身份域，图谱增强只认**登录客户本人**
+（`agent/graph.py` 把登录客户标识传给 `knowledge_graph/augment_with_graph` 的
+`only_customer_id`，见 `knowledge_graph/entities.py`）。所以：
+
+- 问句里出现**别人的姓名**时，它在图谱里不算命中——不返回任何客户的持仓，
+  按「实体未命中」静默降级（客户可见的只有本人的持仓，CONTEXT「客户可见视图」）；
+- 「客户 A 与客户 B 的共同持仓」这类**跨客户关系**不在客服侧演示：一次提问最多
+  只解析出调用者一位客户。它由内部端的客户关系图（`GET /api/internal/graph/customers/{id}`）
+  与工具测试 `test_knowledge_graph_tools.py::test_multihop_common_holdings_between_customers` 覆盖；
+- 客户问自己的持仓时，用**本人登录的账号 + 本人姓名**（例如用 `zhangc3` 登录后问
+  「张衡的持仓集中在哪些行业？」），命中的是他自己的数据。
+
 ## 1. 行业集中度
 
-**问「张衡的持仓集中在哪些行业？」**
+**用 `zhangc3` 登录后问「张衡的持仓集中在哪些行业？」**
 
 - 纯向量：知识库里没有任何一段文本回答过这个问题，大概率触发兜底话术，引导转人工。
-- GraphRAG：识别出客户实体「张衡」，调用 `customer_industry_exposure` 走两跳（客户 → 持仓 → 产品 → 行业），拿到按市值降序的行业分布，模型据此给出具体占比。
+- GraphRAG：识别出客户实体「张衡」（= 调用者本人），调用 `customer_industry_exposure`
+  走两跳（客户 → 持仓 → 产品 → 行业），拿到按市值降序的行业分布，模型据此给出具体占比。
+- 换一位客户（如 `wangc1`）登录问同一个问题：张衡不是他的实体，图谱静默降级，
+  不会把张衡的持仓显示给王守成。
 
-## 2. 客户间共同持仓
+## 2. 客户间共同持仓（内部端）
 
-**问「张衡和赵启明有没有共同持仓？」**
-
-- 纯向量：同样答不上来，这类关系型问题不存在于任何一段知识库文本里。
-- GraphRAG：识别出两个客户实体，触发 `common_holdings`，直接返回两人重叠持有的产品（若种子数据当时没有重叠，可先在测试库插入一条重叠持仓再演示，见 `test_knowledge_graph_tools.py::test_multihop_common_holdings_between_customers` 的做法）。
+**「张衡和赵启明有没有共同持仓」不通过智能客服演示**（跨客户关系超出客户身份域）。
+改用两个内部面：客户关系图页面看一位客户的持仓网络；`common_holdings` 工具的多跳
+正确性由 `test_knowledge_graph_tools.py::test_multihop_common_holdings_between_customers`
+钉住（若种子数据当时没有重叠，可先在测试库插入一条重叠持仓）。
 
 ## 3. 基金经理层面的隐性集中
 

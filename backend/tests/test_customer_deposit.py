@@ -28,6 +28,7 @@ from app.db.models import (
     Customer,
     Deposit,
     FundingAccount,
+    Holding,
     RiskAlert,
     Transaction,
     Transfer,
@@ -38,13 +39,25 @@ SEEDED_PASSWORD = "Test@1234"
 
 DEPOSIT_PATH = "/api/customer/transactions/deposit"
 FUNDING_ACCOUNT_PATH = "/api/customer/funding-account"
+TRANSACTIONS_PATH = "/api/customer/assets/transactions"
+PURCHASE_PATH = "/api/customer/transactions/purchase"
+REDEMPTION_PATH = "/api/customer/transactions/redemption"
+TRANSFER_PATH = "/api/customer/transactions/transfer"
 
 # 测试自己造的事实都落在 2026 年之后；种子数据最晚一笔在 2023 年，两者不会混。
 TEST_EPOCH = datetime(2026, 1, 1)
 
-CUSTOMER_MODERATE = "zhangc3"  # C3，可用余额 100 万
+CUSTOMER_MODERATE = "zhangc3"  # C3，可用余额 100 万，持有 F000003
 CUSTOMER_LOW = "wangc1"  # C1，可用余额 2000
 
+PRODUCT_R3 = "F000003"  # 净值 1.500000，起投 1000，费率 1.20%
+
+PAYEE_NAME = "李四"
+PAYEE_ACCOUNT = "6222020200112233445"
+
+PURCHASE = "申购"
+REDEEM = "赎回"
+TRANSFER = "转账"
 DEPOSIT = "充值"
 
 # 充值的呈现形状：没有产品，也没有收款人——产品那几列与对手方那两列都为空。
@@ -80,6 +93,44 @@ def _deposit(
         headers=_headers(client, username),
         json={"amount": amount},
     )
+
+
+def _purchase(client: TestClient, amount: str = "100000.00"):
+    return client.post(
+        PURCHASE_PATH,
+        headers=_headers(client, CUSTOMER_MODERATE),
+        json={"product_code": PRODUCT_R3, "amount": amount},
+    )
+
+
+def _redeem(client: TestClient, shares: str = "16666.6667"):
+    return client.post(
+        REDEMPTION_PATH,
+        headers=_headers(client, CUSTOMER_MODERATE),
+        json={"product_code": PRODUCT_R3, "shares": shares},
+    )
+
+
+def _transfer(
+    client: TestClient,
+    *,
+    amount: str = "50000.00",
+    payee_name: str = PAYEE_NAME,
+    payee_account: str = PAYEE_ACCOUNT,
+):
+    return client.post(
+        TRANSFER_PATH,
+        headers=_headers(client, CUSTOMER_MODERATE),
+        json={"payee_name": payee_name, "payee_account": payee_account, "amount": amount},
+    )
+
+
+def _transactions(client: TestClient, username: str, **params) -> list[dict]:
+    response = client.get(
+        TRANSACTIONS_PATH, headers=_headers(client, username), params=params
+    )
+    assert response.status_code == 200
+    return response.json()["data"]["transactions"]
 
 
 def _available_balance(client: TestClient, username: str) -> str:
@@ -178,13 +229,25 @@ def _purge(engine) -> None:
 
 
 def _snapshot(engine) -> dict:
-    """成交会改余额；跑完要把演示的起点放回去。"""
+    """成交会改余额与持仓；跑完要把演示的起点放回去。"""
     with OrmSession(engine) as session:
         balances = {
             row.customer_id: row.available_balance
             for row in session.scalars(select(FundingAccount)).all()
         }
-    return {"balances": balances}
+        holdings = [
+            {
+                "id": row.id,
+                "shares": row.shares,
+                "cost_amount": row.cost_amount,
+                "current_value": row.current_value,
+                "profit_loss": row.profit_loss,
+                "profit_ratio": row.profit_ratio,
+                "status": row.status,
+            }
+            for row in session.scalars(select(Holding)).all()
+        ]
+    return {"balances": balances, "holdings": holdings}
 
 
 def _restore(engine, snapshot: dict) -> None:
@@ -196,6 +259,21 @@ def _restore(engine, snapshot: dict) -> None:
             )
             if account is not None:
                 account.available_balance = balance
+
+        known = {row["id"] for row in snapshot["holdings"]}
+        for row in session.scalars(select(Holding)).all():
+            if row.id not in known:
+                session.delete(row)
+        for saved in snapshot["holdings"]:
+            holding = session.get(Holding, saved["id"])
+            if holding is None:
+                continue
+            holding.shares = saved["shares"]
+            holding.cost_amount = saved["cost_amount"]
+            holding.current_value = saved["current_value"]
+            holding.profit_loss = saved["profit_loss"]
+            holding.profit_ratio = saved["profit_ratio"]
+            holding.status = saved["status"]
         session.commit()
 
 
@@ -362,3 +440,69 @@ def test_a_forged_customer_id_in_the_request_is_ignored(auth_client: TestClient)
     assert len(stored) == 1
     assert stored[0].customer_id == caller
     engine.dispose()
+
+
+def test_a_deposit_appears_in_the_customer_flow(auth_client: TestClient):
+    """充值必须出现在客户自己的合并流水里：漏读 `fin_deposit` 不会报错，只会整行消失。
+
+    与 ADR-0019 那次是同一个失败形态，所以这里专门盯「流水里有充值」这一行，而不是
+    充值能不能充（那是 #01 的断言）。
+    """
+    engine = _engine()
+    deposit_no = _deposit(auth_client, amount="50000.00").json()["data"]["transaction"][
+        "transaction_no"
+    ]
+    assert deposit_no.startswith("DP")
+
+    rows = _transactions(auth_client, CUSTOMER_MODERATE)
+    by_number = {row["transaction_no"]: row for row in rows}
+    assert deposit_no in by_number
+
+    deposit_row = by_number[deposit_no]
+    assert deposit_row["transaction_type"] == DEPOSIT
+    # 充值没有产品，也没有收款人：产品那几列与对手方那两列都为空。
+    assert all(deposit_row[field] is None for field in PRODUCT_FIELDS)
+    assert all(deposit_row[field] is None for field in PAYEE_FIELDS)
+    engine.dispose()
+
+
+def test_the_merged_history_lists_four_kinds_in_reverse_chronological_order(
+    auth_client: TestClient,
+):
+    """一张流水里有四类记录，按成交时间倒序。
+
+    申购、赎回、转账、充值分别落在三张表里，合并读要一张不漏地读回来。漏掉充值这一张
+    表不会报错，只会让那一行整行消失——这正是三表扇入要钉住的断言。
+    """
+    engine = _engine()
+
+    purchase_no = _purchase(auth_client).json()["data"]["transaction"]["transaction_no"]
+    redeem_no = _redeem(auth_client).json()["data"]["transaction"]["transaction_no"]
+    transfer_no = _transfer(auth_client).json()["data"]["transaction"]["transaction_no"]
+    deposit_no = _deposit(auth_client, amount="50000.00").json()["data"]["transaction"][
+        "transaction_no"
+    ]
+
+    rows = _transactions(auth_client, CUSTOMER_MODERATE)
+
+    assert set(row["transaction_type"] for row in rows) >= {
+        PURCHASE,
+        REDEEM,
+        TRANSFER,
+        DEPOSIT,
+    }
+    traded_at = [row["traded_at"] for row in rows]
+    assert traded_at == sorted(traded_at, reverse=True)
+
+    assert {purchase_no, redeem_no, transfer_no, deposit_no} <= {
+        row["transaction_no"] for row in rows
+    }
+    engine.dispose()
+
+
+def test_an_unknown_transaction_type_filter_returns_nothing(auth_client: TestClient):
+    """筛一个三张表都不认的类型，三张表都读不到东西——不做无差别的兜底。"""
+    assert _deposit(auth_client).status_code == 200
+    assert _transfer(auth_client).status_code == 200
+
+    assert _transactions(auth_client, CUSTOMER_MODERATE, transaction_type="转托管") == []

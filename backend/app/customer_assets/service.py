@@ -23,9 +23,13 @@ CONFIRMED_STATUS = "已确认"
 ZERO = Decimal("0.00")
 CENTS = Decimal("0.01")
 
-# 合并读的排序兜底：成交时间相同时用它把两张表分成确定的先后（见 `list_transactions`）。
+# 合并读的排序兜底：成交时间相同时用它把几张表分成确定的先后（见 `list_transactions`）。
+# 这是一处 N 表扇入：加第四类记录时，在这里给它一个来源序号、写一个同形的 `_xxx_rows`
+# 并把它挂进 `list_transactions` 的类型分支。漏掉哪一张表，那一类记录在客户眼前就是
+# 整行消失——不报错（ADR-0019 那次正是这个失败形态）。
 _FLOW_TRANSACTION = 0
 _FLOW_TRANSFER = 1
+_FLOW_DEPOSIT = 2
 
 
 def _format_amount(value: Decimal | None) -> str:
@@ -260,6 +264,27 @@ def _transfer_rows(
     ]
 
 
+def _deposit_rows(
+    db: Session,
+    *,
+    customer_id: int,
+    start_date: date | None,
+    end_date: date | None,
+) -> list[tuple[datetime, int, int, dict]]:
+    """充值：`fin_deposit` 里的行，没有产品，也没有收款人（ADR-0023）。"""
+    stmt = select(Deposit).where(Deposit.customer_id == customer_id)
+    stmt = _apply_time_range(
+        stmt,
+        create_time_column=Deposit.create_time,
+        start_date=start_date,
+        end_date=end_date,
+    )
+    return [
+        (deposit.create_time, _FLOW_DEPOSIT, deposit.id, serialize_deposit(deposit))
+        for deposit in db.scalars(stmt).all()
+    ]
+
+
 def list_transactions(
     db: Session,
     *,
@@ -270,13 +295,16 @@ def list_transactions(
 ) -> dict:
     """客户名下的全部资金操作，按成交时间倒序。
 
-    申赎在 `fin_transaction`、转账在 `fin_transfer`，一张列表因此要把两边都读上：
-    ADR-0019 说明了两表分家的理由，代价正是这里——漏掉哪一边，客户核对账目时就会
-    少看一笔，而且不会报错。两边的序列化共用一个形状（见 `serialize_transfer`）。
+    申赎在 `fin_transaction`、转账在 `fin_transfer`、充值在 `fin_deposit`，一张列表
+    因此要把三边都读上：ADR-0019 说明了分表的理由，ADR-0023 把它延续到充值，代价
+    正是这里——漏掉哪一边，客户核对账目时就会少看一笔，而且不会报错。三边的序列化
+    共用一个形状（见 `_serialize_flow`）。
     """
     records: list[tuple[datetime, int, int, dict]] = []
-    # 类型筛选决定要读哪几张表：筛「转账」时申赎那张表根本不用查，反之亦然。
-    if transaction_type != TRANSFER:
+    # 类型筛选决定要读哪几张表：筛「转账」时申赎那张表根本不用查，筛「充值」时
+    # 其余两张也不必查，反之亦然。这是一处 N 表扇入——加第四类记录时照着这个分支
+    # 写，漏掉一张表就是那一类记录整行消失。
+    if transaction_type != TRANSFER and transaction_type != DEPOSIT:
         records.extend(
             _transaction_rows(
                 db,
@@ -292,10 +320,16 @@ def list_transactions(
                 db, customer_id=customer_id, start_date=start_date, end_date=end_date
             )
         )
+    if not transaction_type or transaction_type == DEPOSIT:
+        records.extend(
+            _deposit_rows(
+                db, customer_id=customer_id, start_date=start_date, end_date=end_date
+            )
+        )
 
     # 成交时间是秒精度，同一秒里的两笔本来就没有客观先后（真实系统会给成交序号，
     # 这里没有）。用「表 + 行标识」兜底把它定成确定的一种顺序，免得同一个列表两次
-    # 读出来不一样——两张表的 id 各自从 1 开始，只比 id 会串。
+    # 读出来不一样——几张表的 id 各自从 1 开始，只比 id 会串。
     records.sort(key=lambda row: (row[0], row[1], row[2]), reverse=True)
     return {
         "transactions": [record for _occurred_at, _kind, _id, record in records]

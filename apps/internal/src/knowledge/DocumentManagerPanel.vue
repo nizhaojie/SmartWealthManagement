@@ -57,6 +57,21 @@ const {
 
 let pollTimer: number | null = null;
 
+/**
+ * 轮询那一拍正在路上。
+ *
+ * `loading` 被两种事点亮：人自己发起的那次取数（进入、改筛选、翻页、上传后回第一页），
+ * 和列表自己在后台刷新。筛选按钮只该反映前者——轮询每 1.5 秒来一拍，每一拍都把 `loading`
+ * 点亮再熄灭，按钮于是在 loading 与常态之间反复切换，也就是「筛选按钮一直在切换状态」。
+ *
+ * 分页条仍绑 `loading`：它置灰是为了挡住「取数在途时连点翻页打出两个请求」（见
+ * `PaginationBar` 的 `disabled`），轮询在途时同样需要那道闸，代价只是那几毫秒的置灰。
+ */
+const backgroundRefresh = ref(false);
+
+/** 筛选按钮的忙碌态：只算人自己发起的那次取数，后台刷新的那一拍不算。 */
+const userBusy = computed(() => loading.value && !backgroundRefresh.value);
+
 function statusTagType(status: DocumentStatus): "warning" | "success" | "danger" | "info" {
   if (status === "active") return "success";
   if (status === "failed") return "danger";
@@ -103,7 +118,13 @@ async function pollCurrentPage(): Promise<void> {
   if (loading.value) {
     return;
   }
-  await refresh();
+  // 标在 `refresh()` 外面而不是里面：`loading` 在里面才被点亮，标早一步才盖得住这一拍。
+  backgroundRefresh.value = true;
+  try {
+    await refresh();
+  } finally {
+    backgroundRefresh.value = false;
+  }
   syncPolling();
 }
 
@@ -256,7 +277,7 @@ const processingCount = computed(
             />
           </el-select>
         </label>
-        <el-button name="apply-document-filters" native-type="submit" :loading="loading">
+        <el-button name="apply-document-filters" native-type="submit" :loading="userBusy">
           筛选
         </el-button>
       </form>

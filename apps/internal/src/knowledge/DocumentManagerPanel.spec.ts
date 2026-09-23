@@ -95,6 +95,11 @@ function tableText(): string {
   return activeWrapper!.get('[data-testid="documents-table"]').text();
 }
 
+/** 筛选表单里只有这一个按钮：它的 loading 亮不亮就是「筛选按钮在不在切换状态」。 */
+function filterButton(wrapper: VueWrapper) {
+  return wrapper.get(".filters button");
+}
+
 describe("文档列表的筛选、分页与轮询", () => {
   beforeEach(() => {
     listDocuments.mockReset();
@@ -217,6 +222,49 @@ describe("文档列表的筛选、分页与轮询", () => {
 
     expect(settled).toBe(3);
     expect(listDocuments.mock.calls.length).toBe(settled);
+  });
+
+  it("shows the filter button busy while the person's own request is in flight", async () => {
+    let settle: (() => void) | null = null;
+    listDocuments.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          settle = () => resolve(makePage([], 0));
+        }),
+    );
+    const wrapper = await mountPanel();
+
+    expect(filterButton(wrapper).classes()).toContain("is-loading");
+
+    settle!();
+    await flushPromises();
+
+    expect(filterButton(wrapper).classes()).not.toContain("is-loading");
+  });
+
+  it("leaves the filter button alone while the list refreshes itself in the background", async () => {
+    let settlePoll: (() => void) | null = null;
+    let calls = 0;
+    listDocuments.mockImplementation((_filters, query: PageQuery) => {
+      calls += 1;
+      if (calls === 1) {
+        return Promise.resolve(makePage([makeDocument({ status: "processing" })], 45, query));
+      }
+      return new Promise((resolve) => {
+        settlePoll = () =>
+          resolve(makePage([makeDocument({ status: "processing" })], 45, query));
+      });
+    });
+    const wrapper = await mountPanel();
+    expect(filterButton(wrapper).classes()).not.toContain("is-loading");
+
+    // 一拍轮询还挂在路上：这是后台刷列表，不是人在等的那次取数。
+    vi.advanceTimersByTime(POLL_INTERVAL_MS);
+    await flushPromises();
+    expect(filterButton(wrapper).classes()).not.toContain("is-loading");
+
+    settlePoll!();
+    await flushPromises();
   });
 
   it("keeps an explanation and the pager on a page that turned out to be empty", async () => {

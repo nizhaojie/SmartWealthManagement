@@ -19,6 +19,7 @@ from app.knowledge.embeddings import embed_texts
 from app.knowledge.hybrid import arm_evidence, rrf_fuse, tokenize
 from app.knowledge.parsers import Section, is_supported, parse_document
 from app.knowledge.tokenizer import chunk_text
+from app.pagination import PageParams, count_matching
 from app.replay import library as replay_library
 from app.settings import Settings
 from app.tracing import get_trace_id
@@ -252,10 +253,19 @@ def ingest_document(
 def list_documents(
     db: Session,
     *,
+    page: PageParams,
     knowledge_type: str | None = None,
     status: str | None = None,
-) -> list[KnowledgeMeta]:
-    stmt = select(KnowledgeMeta).order_by(KnowledgeMeta.create_time.desc())
+) -> tuple[list[KnowledgeMeta], int]:
+    """文档列表的一页，以及**过滤后**的总数（ADR-0024）。
+
+    总数与这一页出自同一条查询条件（`count_matching`）：另写一条 count 把筛选抄第二遍，
+    漂移的表现是「共 N 条」与翻到底能看到的份数对不上，而两个数字都像是真的。
+
+    排序键是 `create_time` 倒序 + `id` 兜底：入库时间是秒精度，同一秒入库的两份文档
+    若不分先后，翻页会在两页之间来回跳——顺序不稳定，页数就切不准。
+    """
+    stmt = select(KnowledgeMeta)
     if knowledge_type:
         stmt = stmt.where(KnowledgeMeta.knowledge_type == knowledge_type)
     if status:
@@ -264,7 +274,16 @@ def list_documents(
         # 删除后文档要从列表消失（ticket 02），但状态筛选里仍然保留 expired
         # 选项供维护者按需查——所以只在没有显式按状态筛选时默认排掉它。
         stmt = stmt.where(KnowledgeMeta.status != STATUS_EXPIRED)
-    return list(db.scalars(stmt))
+
+    total = count_matching(db, stmt)
+    metas = list(
+        db.scalars(
+            stmt.order_by(KnowledgeMeta.create_time.desc(), KnowledgeMeta.id.desc())
+            .offset(page.offset)
+            .limit(page.page_size)
+        )
+    )
+    return metas, total
 
 
 def delete_document(db: Session, settings: Settings, knowledge_id: int) -> KnowledgeMeta:

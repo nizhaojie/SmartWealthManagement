@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, onUnmounted, ref, watch } from "vue";
-import { PanelCard } from "@wealth/shared";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import { PaginationBar, PanelCard, usePagination } from "@wealth/shared";
 import { ElMessage, ElMessageBox, type UploadFile } from "element-plus";
 import { errorMessage, formatDateTime } from "../format";
 import { deleteDocument, listDocuments, uploadDocument } from "./api";
@@ -17,12 +17,8 @@ import {
 
 /** 距过期不足 30 天算「即将过期」，与后端 expire_at 的语义一致。 */
 const NEAR_EXPIRY_MS = 30 * 24 * 60 * 60 * 1000;
-/** 有文档在 processing 时按这个间隔轮询，直到全部落定。 */
+/** 这一页还有文档在 processing 时按这个间隔轮询，直到它们全部落定。 */
 const POLL_INTERVAL_MS = 1500;
-
-const documents = ref<KnowledgeDocument[]>([]);
-const loading = ref(true);
-const loadError = ref("");
 
 const typeFilter = ref<KnowledgeType | "">("");
 const statusFilter = ref<DocumentStatus | "">("");
@@ -32,6 +28,32 @@ const uploadTitle = ref("");
 const selectedFile = ref<File | null>(null);
 const uploading = ref(false);
 const uploadError = ref("");
+
+// 删除失败的原因自己留一份，不复用列表的 `errorMessage`：`refresh()` 每次取数都会把那个
+// 清空，于是「删除失败」会在随后那次成功重取的瞬间消失，看起来像什么都没发生。
+const actionError = ref("");
+
+const {
+  items: documents,
+  total,
+  page,
+  pageSize,
+  loading,
+  errorMessage: documentError,
+  refresh,
+  goTo,
+  reset,
+} = usePagination<KnowledgeDocument>(
+  (query) =>
+    listDocuments(
+      {
+        knowledgeType: typeFilter.value || undefined,
+        status: statusFilter.value || undefined,
+      },
+      query,
+    ),
+  { failureMessage: "文档列表加载失败" },
+);
 
 let pollTimer: number | null = null;
 
@@ -61,27 +83,44 @@ function stopPolling(): void {
   }
 }
 
-async function loadDocuments(): Promise<void> {
-  loading.value = true;
-  loadError.value = "";
-  try {
-    documents.value = await listDocuments({
-      knowledgeType: typeFilter.value || undefined,
-      status: statusFilter.value || undefined,
-    });
-    // 只有真的还有处理中的文档才轮询，避免停在一个空转的定时器上。
-    stopPolling();
-    if (documents.value.some((document) => document.status === "processing")) {
-      pollTimer = window.setInterval(() => void loadDocuments(), POLL_INTERVAL_MS);
-    }
-  } catch (error) {
-    loadError.value = errorMessage(error, "文档列表加载失败");
-  } finally {
-    loading.value = false;
+/**
+ * 取完一页之后重新决定要不要轮询：只有**这一页**真的还有处理中的文档才留着定时器。
+ *
+ * 分页之后没有「全量列表」可看，轮询因此按页判定：这一页落定了就停下，别的页上的
+ * processing 由那一页自己的轮询负责——停在别人的页上只会空转，而且空转的每一次请求
+ * 都在刷新一张屏幕上没有的表。
+ */
+function syncPolling(): void {
+  stopPolling();
+  if (documents.value.some((document) => document.status === "processing")) {
+    pollTimer = window.setInterval(() => void pollCurrentPage(), POLL_INTERVAL_MS);
   }
 }
 
-watch([typeFilter, statusFilter], loadDocuments, { immediate: true });
+/** 轮询刷的是**当前这一页**，不是第一页：定时器把人拽回第一页，正在看的第 3 页就自己跑了。 */
+async function pollCurrentPage(): Promise<void> {
+  // 上一拍还没回来就跳过这一拍：两个请求各写一次 `items`，后到的那个会把先到的覆盖掉。
+  if (loading.value) {
+    return;
+  }
+  await refresh();
+  syncPolling();
+}
+
+/** 取第一页并在取完之后重新决定轮询：首次进入、改筛选、上传后回第一页都走这里。 */
+async function loadFirstPage(): Promise<void> {
+  await reset();
+  syncPolling();
+}
+
+async function turnTo(next: number): Promise<void> {
+  await goTo(next);
+  // 换了一页就是换了一批文档：有没有 processing 要重新判一次。
+  syncPolling();
+}
+
+watch([typeFilter, statusFilter], loadFirstPage);
+onMounted(loadFirstPage);
 onUnmounted(stopPolling);
 
 const selectedFileName = computed(() => selectedFile.value?.name ?? "");
@@ -107,7 +146,9 @@ async function submitUpload(): Promise<void> {
     ElMessage.success("已提交，正在处理中");
     selectedFile.value = null;
     uploadTitle.value = "";
-    await loadDocuments();
+    // 刚上传的文档按入库时间倒序排在第一页最前，而且多半还是 processing：回第一页
+    // 才看得到它，轮询也要跟着起来。
+    await loadFirstPage();
   } catch (error) {
     uploadError.value = errorMessage(error, "上传失败");
   } finally {
@@ -126,12 +167,16 @@ async function removeDocument(document: KnowledgeDocument): Promise<void> {
     // 取消确认不是错误：什么都不做。
     return;
   }
+  actionError.value = "";
   try {
     await deleteDocument(document.knowledge_id);
     ElMessage.success("已删除");
-    await loadDocuments();
+    // 重取当前这一页，不回到第一页：删掉的未必是这一页唯一一条。删空了也不会没有出路——
+    // 分页条留着（越界页 `items` 为空但 `total` 不变），人可以自己往回翻。
+    await refresh();
+    syncPolling();
   } catch (error) {
-    loadError.value = errorMessage(error, "删除失败");
+    actionError.value = errorMessage(error, "删除失败");
   }
 }
 
@@ -191,7 +236,7 @@ const processingCount = computed(
     </PanelCard>
 
     <PanelCard title="文档列表">
-      <form class="filters" @submit.prevent="loadDocuments">
+      <form class="filters" @submit.prevent="loadFirstPage">
         <label class="filters__field">
           <span class="filters__label">知识类型</span>
           <el-select v-model="typeFilter" name="filter-type" placeholder="全部">
@@ -216,14 +261,19 @@ const processingCount = computed(
         </el-button>
       </form>
 
-      <p v-if="loadError" class="documents__error" role="alert" data-testid="document-error">
-        {{ loadError }}
+      <p
+        v-if="documentError || actionError"
+        class="documents__error"
+        role="alert"
+        data-testid="document-error"
+      >
+        {{ documentError || actionError }}
       </p>
-      <p v-else-if="!loading && documents.length === 0" class="documents__empty">
-        还没有文档。先上传一份 FAQ 或产品资料。
+      <p v-else-if="!loading && documents.length === 0" class="documents__empty" data-testid="documents-empty">
+        没有符合条件的文档。
       </p>
       <p v-if="processingCount" class="documents__polling" data-testid="document-polling">
-        {{ processingCount }} 份文档处理中，列表会自动刷新。
+        本页 {{ processingCount }} 份文档处理中，列表会自动刷新。
       </p>
 
       <!--
@@ -271,6 +321,17 @@ const processingCount = computed(
           </template>
         </el-table-column>
       </el-table>
+
+      <!-- 取不到时 `total` 归零，分页条与表格同进同退；越界页 `items` 为空但 `total`
+           不变，所以它仍然留着——撤掉它，人就困在那一页上。 -->
+      <PaginationBar
+        v-if="total > 0"
+        :total="total"
+        :page="page"
+        :page-size="pageSize"
+        :disabled="loading"
+        @update:page="turnTo"
+      />
     </PanelCard>
   </div>
 </template>

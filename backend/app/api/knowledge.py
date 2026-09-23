@@ -26,6 +26,7 @@ from app.knowledge.service import (
     process_ingestion,
     search_chunks,
 )
+from app.pagination import PageParams, page_params, paginated_response
 from app.settings import Settings, get_settings
 
 router = APIRouter(prefix="/api/internal/knowledge")
@@ -86,11 +87,18 @@ def upload_document(
 def list_knowledge_documents(
     knowledge_type: KnowledgeType | None = None,
     status: str | None = None,
+    page: PageParams = Depends(page_params),
     db: Session = Depends(get_session),
     _auth: AuthContext = Depends(require_internal),
 ):
-    metas = list_documents(db, knowledge_type=knowledge_type, status=status)
-    return ok([_document_response(meta) for meta in metas])
+    metas, total = list_documents(
+        db, page=page, knowledge_type=knowledge_type, status=status
+    )
+    return ok(
+        paginated_response(
+            [_document_response(meta) for meta in metas], total=total, params=page
+        )
+    )
 
 
 @router.delete("/documents/{knowledge_id}")

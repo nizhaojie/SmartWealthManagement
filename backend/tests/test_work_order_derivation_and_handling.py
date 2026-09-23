@@ -485,7 +485,9 @@ def test_the_list_can_be_filtered_by_status_and_by_alert(auth_client: TestClient
     ).json()["data"]["id"]
 
     pending = auth_client.get(f"{WORK_ORDERS_PATH}?status=待处理", headers=headers).json()["data"]
-    assert {order["id"] for order in pending} == {derived_id, external}
+    assert {order["id"] for order in pending["items"]} == {derived_id, external}
+    # `total` 跟着筛选走：筛出来的是两张单，不是工单表的行数。
+    assert pending["total"] == 2
 
     auth_client.post(
         f"{WORK_ORDERS_PATH}/{derived_id}/accept", headers=headers, json={"reason": ACCEPT_REASON}
@@ -493,12 +495,12 @@ def test_the_list_can_be_filtered_by_status_and_by_alert(auth_client: TestClient
     in_progress = auth_client.get(
         f"{WORK_ORDERS_PATH}?status=处理中", headers=headers
     ).json()["data"]
-    assert [order["id"] for order in in_progress] == [derived_id]
+    assert [order["id"] for order in in_progress["items"]] == [derived_id]
 
     by_alert = auth_client.get(
         f"{WORK_ORDERS_PATH}?alert_id={alert_id}", headers=headers
     ).json()["data"]
-    assert [order["id"] for order in by_alert] == [derived_id]
+    assert [order["id"] for order in by_alert["items"]] == [derived_id]
 
 
 def test_the_work_order_detail_carries_the_transition_history(auth_client: TestClient):
@@ -578,10 +580,10 @@ def test_an_account_manager_only_sees_his_own_customers_work_orders(auth_client:
     ).json()["data"]["id"]
 
     first_list = auth_client.get(WORK_ORDERS_PATH, headers=first_manager).json()["data"]
-    assert [order["id"] for order in first_list] == [own_order]
+    assert [order["id"] for order in first_list["items"]] == [own_order]
 
     second_list = auth_client.get(WORK_ORDERS_PATH, headers=second_manager).json()["data"]
-    assert [order["id"] for order in second_list] == [other_order]
+    assert [order["id"] for order in second_list["items"]] == [other_order]
 
     forbidden = auth_client.get(f"{WORK_ORDERS_PATH}/{other_order}", headers=first_manager)
     assert forbidden.status_code == 403
@@ -589,8 +591,8 @@ def test_an_account_manager_only_sees_his_own_customers_work_orders(auth_client:
 
     assert auth_client.get(f"{WORK_ORDERS_PATH}/{other_order}", headers=second_manager).status_code == 200
     # 理财顾问与风控专员不受这条限制。
-    assert len(auth_client.get(WORK_ORDERS_PATH, headers=advisor).json()["data"]) == 2
-    assert len(auth_client.get(WORK_ORDERS_PATH, headers=officer).json()["data"]) == 2
+    assert len(auth_client.get(WORK_ORDERS_PATH, headers=advisor).json()["data"]["items"]) == 2
+    assert len(auth_client.get(WORK_ORDERS_PATH, headers=officer).json()["data"]["items"]) == 2
 
 
 def test_work_order_endpoints_reject_unauthenticated_calls(auth_client: TestClient):

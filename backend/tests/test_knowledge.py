@@ -83,14 +83,20 @@ def _delete(client: TestClient, knowledge_id: int):
 
 
 def _list(client: TestClient, *, knowledge_type: str | None = None, status: str | None = None):
+    """列表接口的一页的条目（ADR-0024：`data` 恒为 `{items, total, page, page_size}`）。
+
+    不带页码时是约定的第一页（20 条）：这里要断的是「刚上传/刚删除的那份在不在列表里」，
+    而它按入库时间倒序排在第一页之内。
+    """
     params = {}
     if knowledge_type is not None:
         params["knowledge_type"] = knowledge_type
     if status is not None:
         params["status"] = status
-    return client.get(
+    response = client.get(
         "/api/internal/knowledge/documents", headers=_auth_headers(client), params=params
     )
+    return response.json()["data"]["items"]
 
 
 def _find(documents: list[dict], knowledge_id: int) -> dict:
@@ -125,7 +131,7 @@ def test_upload_returns_processing_immediately_then_becomes_active(knowledge_cli
 
     # TestClient 在 client.post() 返回前已经把 BackgroundTasks 跑完，
     # 所以这里立刻查列表就能看到处理结束后的终态，不需要真的轮询等待。
-    listed = _find(_list(knowledge_client).json()["data"], data["knowledge_id"])
+    listed = _find(_list(knowledge_client), data["knowledge_id"])
     assert listed["status"] == "active"
     assert listed["chunk_count"] >= 1
 
@@ -314,7 +320,7 @@ def test_documents_list_returns_full_metadata_fields(knowledge_client):
     knowledge_id = upload_response.json()["data"]["knowledge_id"]
 
     try:
-        listed = _find(_list(knowledge_client).json()["data"], knowledge_id)
+        listed = _find(_list(knowledge_client), knowledge_id)
         for field in (
             "knowledge_type",
             "title",
@@ -348,16 +354,16 @@ def test_documents_list_can_be_filtered_by_type_and_status(knowledge_client):
     ).json()["data"]["knowledge_id"]
 
     try:
-        by_type = _list(knowledge_client, knowledge_type="政策").json()["data"]
+        by_type = _list(knowledge_client, knowledge_type="政策")
         assert any(doc["knowledge_id"] == policy_id for doc in by_type)
         assert all(doc["knowledge_id"] != faq_id for doc in by_type)
 
-        by_status = _list(knowledge_client, status="active").json()["data"]
+        by_status = _list(knowledge_client, status="active")
         active_ids = {doc["knowledge_id"] for doc in by_status}
         assert {faq_id, policy_id} <= active_ids
 
         _delete(knowledge_client, faq_id)
-        by_status_after_delete = _list(knowledge_client, status="expired").json()["data"]
+        by_status_after_delete = _list(knowledge_client, status="expired")
         assert any(doc["knowledge_id"] == faq_id for doc in by_status_after_delete)
     finally:
         _delete(knowledge_client, policy_id)
@@ -372,10 +378,10 @@ def test_deleted_document_disappears_from_the_default_unfiltered_list(knowledge_
 
     _delete(knowledge_client, knowledge_id)
 
-    default_list = _list(knowledge_client).json()["data"]
+    default_list = _list(knowledge_client)
     assert all(doc["knowledge_id"] != knowledge_id for doc in default_list)
 
-    expired_only = _list(knowledge_client, status="expired").json()["data"]
+    expired_only = _list(knowledge_client, status="expired")
     assert any(doc["knowledge_id"] == knowledge_id for doc in expired_only)
 
 
@@ -433,7 +439,7 @@ def test_policy_and_product_uploads_get_default_expiry_while_faq_does_not(knowle
     ).json()["data"]["knowledge_id"]
 
     try:
-        documents = _list(knowledge_client).json()["data"]
+        documents = _list(knowledge_client)
         faq_doc = _find(documents, faq_id)
         product_doc = _find(documents, product_id)
         policy_doc = _find(documents, policy_id)
@@ -460,7 +466,7 @@ def test_corrupt_docx_upload_is_marked_failed_with_parse_stage_and_reason(knowle
     knowledge_id = upload_response.json()["data"]["knowledge_id"]
 
     try:
-        listed = _find(_list(knowledge_client).json()["data"], knowledge_id)
+        listed = _find(_list(knowledge_client), knowledge_id)
         assert listed["status"] == "failed"
         assert listed["stage"] == "parse"
         assert listed["failure_reason"]
@@ -535,7 +541,7 @@ def test_plain_txt_still_chunks_on_the_sliding_window(knowledge_client):
     knowledge_id = upload_response.json()["data"]["knowledge_id"]
 
     try:
-        listed = _find(_list(knowledge_client).json()["data"], knowledge_id)
+        listed = _find(_list(knowledge_client), knowledge_id)
         expected = chunk_text(text, chunk_size=CHUNK_SIZE, overlap=CHUNK_OVERLAP)
         assert len(expected) > 1
         assert listed["chunk_count"] == len(expected)
@@ -553,7 +559,7 @@ def test_qa_pair_txt_is_chunked_one_pair_per_chunk(knowledge_client):
     knowledge_id = upload_response.json()["data"]["knowledge_id"]
 
     try:
-        listed = _find(_list(knowledge_client).json()["data"], knowledge_id)
+        listed = _find(_list(knowledge_client), knowledge_id)
         # 一组问答远短于 512 token，块数因此等于问答对数，不是滑动窗口切出来的块数。
         assert listed["chunk_count"] == 3
 

@@ -1,3 +1,4 @@
+import type { PageQuery, Paginated } from "@wealth/shared";
 import { http } from "../api/http";
 import { queryString } from "../api/query";
 import type { ExternalOrderType, WorkOrder, WorkOrderDetail, WorkOrderStatus } from "./types";
@@ -8,14 +9,22 @@ export type WorkOrderFilters = {
   customerId?: number;
 };
 
-export function listWorkOrders(filters: WorkOrderFilters = {}): Promise<WorkOrder[]> {
-  return http.get<WorkOrder[]>(
-    `/api/internal/work-orders${queryString({
-      status: filters.status,
-      alert_id: filters.alertId,
-      customer_id: filters.customerId,
-    })}`,
-  );
+/**
+ * 工单列表的一页。筛选与页码一起交给服务端（ADR-0024）：分页之后前端手里只有这一页，
+ * 本地筛选只筛得动这一页，而「共 N 条」是**过滤后**的总数。
+ */
+export function listWorkOrders(
+  filters: WorkOrderFilters = {},
+  query: PageQuery,
+): Promise<Paginated<WorkOrder>> {
+  const search = queryString({
+    status: filters.status,
+    alert_id: filters.alertId,
+    customer_id: filters.customerId,
+    page: query.page,
+    page_size: query.page_size,
+  });
+  return http.get<Paginated<WorkOrder>>(`/api/internal/work-orders${search}`);
 }
 
 export function getWorkOrder(workOrderId: number): Promise<WorkOrderDetail> {

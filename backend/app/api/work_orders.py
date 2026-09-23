@@ -20,6 +20,7 @@ from app.auth.roles import RISK_OFFICER
 from app.db.models import Employee
 from app.db.session import get_session
 from app.http import ok
+from app.pagination import PageParams, page_params
 from app.work_order import service
 
 router = APIRouter(prefix="/api/internal/work-orders")
@@ -49,6 +50,7 @@ def list_work_orders(
     status: str | None = None,
     alert_id: int | None = None,
     customer_id: int | None = None,
+    page: PageParams = Depends(page_params),
     employee: Employee = Depends(current_employee),
     db: Session = Depends(get_session),
 ):
@@ -56,6 +58,7 @@ def list_work_orders(
         service.list_work_orders(
             db,
             employee=employee,
+            page=page,
             status=status,
             alert_id=alert_id,
             customer_id=customer_id,

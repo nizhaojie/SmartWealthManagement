@@ -35,6 +35,7 @@ from app.customer_scope import is_under_management, restrict_to_own_customers
 from app.db.models import Customer, Employee, RiskAlert, WorkOrder, WorkOrderTransition
 from app.employees import names_by_id
 from app.exceptions import AppError
+from app.pagination import PageParams, count_matching, paginated_response
 from app.risk_monitoring.alert_status import ALERT_STATUS_OPEN
 from app.risk_monitoring.grading import LEVEL_LIGHT, LEVEL_MODERATE, LEVEL_SEVERE
 
@@ -263,33 +264,48 @@ def list_work_orders(
     db: Session,
     *,
     employee: Employee,
+    page: PageParams,
     status: str | None = None,
     alert_id: int | None = None,
     customer_id: int | None = None,
-) -> list[dict]:
-    """工单列表，按建单时间倒序。
+) -> dict:
+    """工单列表的一页，按建单时间倒序。
 
     筛选条件都是可选的事实字段；可见范围按角色收紧：**客户经理只看得到自己名下客户
     的工单**，其他内部角色不受限——这与审核流的查看权限是同一口径
     （`app.advisory.access`）。写操作才收紧到风控专员。
+
+    `total` 由同一条查询派生（`count_matching`），条件只写一遍：另写一条 count 把条件
+    抄第二遍，漂移的表现是「共 N 条」与翻到底能看到的条数对不上，而且两个数字都像是
+    真的。排序键是 `create_time` 倒序 + `id` 兜底：建单时间是秒精度，同一秒建的两张
+    单若不分先后，翻页时会在两页之间来回跳。
     """
-    query = select(WorkOrder, Employee.real_name).join(
+    conditions = []
+    if employee.employee_role == ACCOUNT_MANAGER:
+        # 内连接顺带把没有关联客户的工单挡在外面：那本来就不是「名下客户」的业务。
+        conditions.append(Customer.manager_id == employee.id)
+    if status is not None:
+        conditions.append(WorkOrder.status == status)
+    if alert_id is not None:
+        conditions.append(WorkOrder.source_alert_id == alert_id)
+    if customer_id is not None:
+        conditions.append(WorkOrder.customer_id == customer_id)
+
+    base = select(WorkOrder, Employee.real_name).join(
         Employee, Employee.id == WorkOrder.handler_id, isouter=True
     )
     if employee.employee_role == ACCOUNT_MANAGER:
-        # 内连接顺带把没有关联客户的工单挡在外面：那本来就不是「名下客户」的业务。
-        query = query.join(Customer, Customer.id == WorkOrder.customer_id).where(
-            Customer.manager_id == employee.id
-        )
-    if status is not None:
-        query = query.where(WorkOrder.status == status)
-    if alert_id is not None:
-        query = query.where(WorkOrder.source_alert_id == alert_id)
-    if customer_id is not None:
-        query = query.where(WorkOrder.customer_id == customer_id)
+        base = base.join(Customer, Customer.id == WorkOrder.customer_id)
+    base = base.where(*conditions)
 
-    rows = db.execute(query.order_by(WorkOrder.create_time.desc(), WorkOrder.id.desc())).all()
-    return [serialize(work_order, handler_name=name or "") for work_order, name in rows]
+    total = count_matching(db, base)
+    rows = db.execute(
+        base.order_by(WorkOrder.create_time.desc(), WorkOrder.id.desc())
+        .offset(page.offset)
+        .limit(page.page_size)
+    ).all()
+    items = [serialize(work_order, handler_name=name or "") for work_order, name in rows]
+    return paginated_response(items, total=total, params=page)
 
 
 def detail(db: Session, work_order_id: int, *, employee: Employee) -> dict:

@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
-import { PageHeader, PanelCard } from "@wealth/shared";
+import { PageHeader, PaginationBar, PanelCard, usePagination } from "@wealth/shared";
 import { listAllCustomers } from "../customers/api";
 import type { CustomerListItem } from "../customers/types";
-import { errorMessage, formatDateTime } from "../format";
+import { formatDateTime } from "../format";
 import SummaryCard from "../inspector/SummaryCard.vue";
 import { useInspector } from "../shell/pageSlots";
 import { useAuthStore } from "../stores/auth";
@@ -18,17 +18,39 @@ import { canCreateWorkOrder, workOrderTagType } from "./workOrderView";
  *
  * 工单从风控监测拆到一级模块后，「处置完预警去办工单」变成一次跨模块跳转，
  * 换来的是工单不再被当成预警的附属物。
+ *
+ * 列表分页与筛选都由服务端说话（ADR-0024）：筛选条件与页码一起交给接口，「共 N 条」
+ * 是过滤后的总数。客户筛选的下拉是例外——它要的是**全部**客户，不是这一页
+ * （`listAllCustomers`），否则第 101 位客户在选中框里根本不存在。
  */
 const router = useRouter();
 const auth = useAuthStore();
 
-const workOrders = ref<WorkOrder[]>([]);
-const loading = ref(true);
-const loadError = ref("");
-
 const statusFilter = ref<WorkOrderStatus | "">("");
 const customerFilter = ref<number | null>(null);
 const alertFilter = ref<number | null>(null);
+
+const {
+  items: workOrders,
+  total,
+  page,
+  pageSize,
+  loading,
+  errorMessage: loadError,
+  goTo,
+  reset,
+} = usePagination<WorkOrder>(
+  (query) =>
+    listWorkOrders(
+      {
+        status: statusFilter.value || undefined,
+        customerId: customerFilter.value ?? undefined,
+        alertId: alertFilter.value ?? undefined,
+      },
+      query,
+    ),
+  { failureMessage: "工单列表加载失败" },
+);
 
 const customers = ref<CustomerListItem[]>([]);
 const showCreate = ref(false);
@@ -50,23 +72,6 @@ async function loadCustomers(): Promise<void> {
   }
 }
 
-async function loadWorkOrders(): Promise<void> {
-  loading.value = true;
-  loadError.value = "";
-  try {
-    workOrders.value = await listWorkOrders({
-      status: statusFilter.value || undefined,
-      customerId: customerFilter.value ?? undefined,
-      alertId: alertFilter.value ?? undefined,
-    });
-  } catch (error) {
-    workOrders.value = [];
-    loadError.value = errorMessage(error, "工单列表加载失败");
-  } finally {
-    loading.value = false;
-  }
-}
-
 function openDetail(workOrderId: number): void {
   void router.push({ name: "work-order-detail", params: { workOrderId } });
 }
@@ -77,13 +82,17 @@ function toggleCreate(): void {
 
 async function onCreated(): Promise<void> {
   showCreate.value = false;
-  await loadWorkOrders();
+  // 新单按建单时间倒序排在最前，回第一页才看得到它：停在原来的第 3 页上，
+  // 建完单看起来「什么都没发生」。
+  await reset();
 }
 
-watch([statusFilter, customerFilter, alertFilter], loadWorkOrders);
+// 改筛选是「换了一批数据」，回到第一页重取：停在第 3 页会看到「筛选后为空」，
+// 而那不是筛选的结果，是页码的。
+watch([statusFilter, customerFilter, alertFilter], reset);
 
 onMounted(async () => {
-  await Promise.all([loadCustomers(), loadWorkOrders()]);
+  await Promise.all([loadCustomers(), reset()]);
 });
 
 // 注入模块自己的筛选摘要（右侧检查器）。
@@ -100,8 +109,9 @@ useInspector(() => ({
         testId: "work-order-summary-filters",
       },
       {
-        label: "当前列表",
-        value: `${workOrders.value.length} 条`,
+        // 过滤后的总数，不是本页条数：分页一开，本页条数会随翻页变。
+        label: "工单总数",
+        value: `共 ${total.value} 条`,
         testId: "work-order-summary-count",
       },
     ],
@@ -116,7 +126,7 @@ useInspector(() => ({
     <PageHeader title="工单管理" :breadcrumb="['工单管理']" />
 
     <PanelCard title="筛选">
-      <form class="filters" data-testid="work-order-filters" @submit.prevent="loadWorkOrders">
+      <form class="filters" data-testid="work-order-filters" @submit.prevent="reset">
         <label class="filters__field">
           <span class="filters__label">状态</span>
           <el-select
@@ -204,6 +214,17 @@ useInspector(() => ({
           </template>
         </el-table-column>
       </el-table>
+
+      <!-- 取不到时 `total` 归零，分页条与表格同进同退；越界页 `items` 为空但 `total`
+           不变，所以它仍然留着——撤掉它，人就困在那一页上。 -->
+      <PaginationBar
+        v-if="total > 0"
+        :total="total"
+        :page="page"
+        :page-size="pageSize"
+        :disabled="loading"
+        @update:page="goTo"
+      />
     </PanelCard>
   </div>
 </template>

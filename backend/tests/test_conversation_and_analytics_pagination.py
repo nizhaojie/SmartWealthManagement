@@ -57,7 +57,7 @@ OTHER_SESSION_COUNT = 6
 HISTORY_COUNT = 55
 
 # 默认页长与上限（ADR-0024）。
-DEFAULT_PAGE_SIZE = 20
+DEFAULT_PAGE_SIZE = 10
 MAX_PAGE_SIZE = 100
 
 # 前 102 场会话各占一秒，最后三场挤在同一秒里——同秒是排序兜底唯一会暴露的地方。

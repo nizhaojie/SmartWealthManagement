@@ -50,7 +50,7 @@ function makePage(
   items: OperationAdvice[],
   overrides: Partial<Paginated<OperationAdvice>> = {},
 ): Paginated<OperationAdvice> {
-  return { items, total: items.length, page: 1, page_size: 20, ...overrides };
+  return { items, total: items.length, page: 1, page_size: 10, ...overrides };
 }
 
 let pinia: Pinia;
@@ -143,7 +143,7 @@ describe("AdvicePage", () => {
     wrapper.findComponent(PaginationBar).vm.$emit("update:page", 2);
     await flushPromises();
 
-    expect(listMyAdvice).toHaveBeenLastCalledWith({ page: 2, page_size: 20 });
+    expect(listMyAdvice).toHaveBeenLastCalledWith({ page: 2, page_size: 10 });
     // 分组按**这一页**的内容现分：第 2 页上只有一条已拒绝的，就没有「待决定」那一组。
     expect(wrapper.find('[data-testid="advice-pending"]').exists()).toBe(false);
     expect(wrapper.get('[data-testid="advice-rejected"]').text()).toContain("已拒绝");
@@ -206,7 +206,7 @@ describe("AdvicePage", () => {
 
     expect(countAwaitingAdvice).toHaveBeenCalledTimes(1);
     // 列表这一路只取混合状态的一页：两个读法各自只管自己那一件事（是否待决定 vs 这一页）。
-    expect(listMyAdvice).toHaveBeenCalledWith({ page: 1, page_size: 20 });
+    expect(listMyAdvice).toHaveBeenCalledWith({ page: 1, page_size: 10 });
     expect(wrapper.find('[data-testid="advice-pending"]').exists()).toBe(false);
     expect(wrapper.find('[data-testid="advice-accepted"]').exists()).toBe(true);
   });

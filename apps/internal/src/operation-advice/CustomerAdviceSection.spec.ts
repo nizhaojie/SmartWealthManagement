@@ -107,7 +107,7 @@ let optionsByDirection: Record<string, { direction: string; products: AdviceOpti
 
 /** 进度接口返回的那一页：形状恒为 `{items, total, page, page_size}`。 */
 function progressPage() {
-  return { items: progress, total: progressTotal, page: 1, page_size: 20 };
+  return { items: progress, total: progressTotal, page: 1, page_size: 10 };
 }
 
 async function mountSection(): Promise<VueWrapper> {
@@ -414,7 +414,7 @@ describe("客户经理的操作建议入口", () => {
     await selectCustomer(page, 9);
 
     const fetchMock = vi.mocked(globalThis.fetch);
-    expect(requestedUrls(fetchMock, "page=1&page_size=20")).toHaveLength(1);
+    expect(requestedUrls(fetchMock, "page=1&page_size=10")).toHaveLength(1);
     // 「共 N 条」是过滤后的总数，不是本页条数。
     expect(page.get('[data-testid="pagination-total"]').text()).toContain("25");
 
@@ -423,7 +423,7 @@ describe("客户经理的操作建议入口", () => {
     page.findComponent(PaginationBar).vm.$emit("update:page", 2);
     await flushPromises();
 
-    expect(requestedUrls(fetchMock, "page=2&page_size=20")).toHaveLength(1);
+    expect(requestedUrls(fetchMock, "page=2&page_size=10")).toHaveLength(1);
     const rows = page.get('[data-testid="advice-progress-table"]').findAll("tbody tr");
     expect(rows).toHaveLength(1);
     expect(rows[0].text()).toContain("均衡配置二号");

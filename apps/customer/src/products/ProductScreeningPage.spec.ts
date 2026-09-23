@@ -286,7 +286,7 @@ describe("ProductScreeningPage", () => {
     const codesOnPage2 = wrapper.findAll("tbody tr").map((row) => row.get("td").text());
     expect(codesOnPage2).toEqual(
       productsOfCount(25)
-        .slice(20, 25)
+        .slice(10, 20)
         .map((product) => product.product_code),
     );
   });

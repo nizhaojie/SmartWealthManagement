@@ -218,8 +218,8 @@ describe("AdvisoryPlanPage", () => {
       page: 2,
       page_size: DEFAULT_PAGE_SIZE,
     });
-    expect(wrapper.findAll('[data-testid="advisory-request"]')).toHaveLength(5);
-    expect(wrapper.get('[data-testid="advisory-requests"]').text()).toContain("AR-25");
+    expect(wrapper.findAll('[data-testid="advisory-request"]')).toHaveLength(DEFAULT_PAGE_SIZE);
+    expect(wrapper.get('[data-testid="advisory-requests"]').text()).toContain("AR-20");
     // 翻请求不牵动方案那一段：它还在第 1 页，也没有被重新取过。
     expect(listReleasedPlans).toHaveBeenCalledTimes(1);
     expect(wrapper.get('[data-testid="released-plans"]').text()).toContain("出具顾问：李文");

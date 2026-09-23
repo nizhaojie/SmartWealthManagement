@@ -21,7 +21,7 @@ vi.mock("./api", () => ({
 
 import WorkOrdersPage from "./WorkOrdersPage.vue";
 
-const PAGE_SIZE = 20;
+const PAGE_SIZE = 10;
 const TOTAL = 45;
 
 function makeOrder(overrides: Partial<WorkOrder> = {}): WorkOrder {

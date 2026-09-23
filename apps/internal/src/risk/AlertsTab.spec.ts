@@ -20,7 +20,7 @@ vi.mock("./api", () => ({ listAlerts }));
 
 import AlertsTab from "./AlertsTab.vue";
 
-const PAGE_SIZE = 20;
+const PAGE_SIZE = 10;
 const TOTAL = 45;
 
 function makeAlert(overrides: Partial<AlertSummary> = {}): AlertSummary {

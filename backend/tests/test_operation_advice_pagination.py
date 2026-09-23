@@ -67,7 +67,7 @@ DECISION_ACCEPT = "接受"
 DECISION_REJECT = "拒绝"
 
 # 默认页长与上限（ADR-0024）。
-DEFAULT_PAGE_SIZE = 20
+DEFAULT_PAGE_SIZE = 10
 MAX_PAGE_SIZE = 100
 
 # 发起时刻的窗口落在 2026-06：别的用例造的行都在「现在」附近，两者不会混。
@@ -563,7 +563,7 @@ def test_a_progress_page_size_above_the_ceiling_is_clamped_not_rejected(
 def test_the_defaults_are_page_one_and_twenty_rows(
     auth_client: TestClient, seeded_advice: dict
 ):
-    """不带参数时是第 1 页、每页 20 条：默认值只有后台那一处（ADR-0024）。"""
+    """不带参数时是第 1 页、每页 10 条：默认值只有后台那一处（ADR-0024）。"""
     page = _read_progress(auth_client, seeded_advice)
 
     _shape_holds(page, page_number=1)

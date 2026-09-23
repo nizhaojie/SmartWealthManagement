@@ -18,7 +18,7 @@ vi.mock("./history", () => ({ listCustomerConversations, getCustomerConversation
 
 import ChatHistoryDrawer from "./ChatHistoryDrawer.vue";
 
-const PAGE_SIZE = 20;
+const PAGE_SIZE = 10;
 
 function makeSession(sessionId: string): CustomerSessionSummary {
   return {

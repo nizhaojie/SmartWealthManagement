@@ -42,7 +42,7 @@ WINDOW_START = datetime(2026, 3, 1, 9, 0, 0)
 # 25 条，刻意凑成「一页装不下、两页有余」。
 ROW_COUNT = 25
 # 默认页长与上限（ADR-0024）。
-DEFAULT_PAGE_SIZE = 20
+DEFAULT_PAGE_SIZE = 10
 MAX_PAGE_SIZE = 100
 
 # 前 22 条各占一秒，最后三条挤在同一秒里——同秒是排序兜底唯一会暴露的地方。

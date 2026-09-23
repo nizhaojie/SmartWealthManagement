@@ -60,7 +60,7 @@ STATUS_CLOSED = "已关闭"
 CONTENT_TYPE_PLAN = "方案"
 
 # 默认页长与上限（ADR-0024）。
-DEFAULT_PAGE_SIZE = 20
+DEFAULT_PAGE_SIZE = 10
 MAX_PAGE_SIZE = 100
 
 # 每张列表 25 条：刻意凑成「一页装不下、两页有余」。

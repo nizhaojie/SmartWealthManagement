@@ -18,7 +18,7 @@ vi.mock("./api", () => ({ listTransactions }));
 
 import TransactionHistory from "./TransactionHistory.vue";
 
-const PAGE_SIZE = 20;
+const PAGE_SIZE = 10;
 
 function makeFlow(overrides: Partial<TransactionRecord> = {}): TransactionRecord {
   return {

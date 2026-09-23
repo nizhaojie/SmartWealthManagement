@@ -1,7 +1,7 @@
 // 客户关系的名下客户列表：表格翻页（ADR-0024），以及同页上「操作建议」选中框的口径。
 //
 // 后者是本页唯一的分叉：表格要的是**这一页**，选中框要的是**全部**客户。两者共用一个
-// 接口，所以这里分别断「表格按 20 条一页取」与「目录被翻完再给选中框」。
+// 接口，所以这里分别断「表格按 10 条一页取」与「目录被翻完再给选中框」。
 import ElementPlus from "element-plus";
 import { flushPromises, mount, type VueWrapper } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -10,7 +10,7 @@ import type { CustomerListItem } from "../customers/types";
 import { requestedUrls, stubApiFetch, type ApiResponder } from "../testing";
 import CustomerRelationsPage from "./CustomerRelationsPage.vue";
 
-const PAGE_SIZE = 20;
+const PAGE_SIZE = 10;
 const DIRECTORY_SIZE = 120;
 
 function makeCustomer(id: number): CustomerListItem {
@@ -102,11 +102,11 @@ describe("客户关系的名下客户列表", () => {
     await page.get(".pagination-bar .btn-next").trigger("click");
     await flushPromises();
 
-    expect(requestedUrls(fetchMock, "page=2&page_size=20")).not.toHaveLength(0);
+    expect(requestedUrls(fetchMock, "page=2&page_size=10")).not.toHaveLength(0);
     expect(tableRows(page)).toHaveLength(PAGE_SIZE);
-    expect(tableRows(page)[0].text()).toContain("客户21");
-    // 第 2 页是 客户21–40：上一页的人一个都不该还在表里。
-    expect(page.get('[data-testid="relations-table"]').text()).not.toContain("客户1");
+    expect(tableRows(page)[0].text()).toContain("客户11");
+    // 第 2 页是 客户11–20：上一页的人一个都不该还在表里。
+    expect(page.get('[data-testid="relations-table"]').text()).not.toContain("客户10");
   });
 
   it("says so when there is no customer to show", async () => {

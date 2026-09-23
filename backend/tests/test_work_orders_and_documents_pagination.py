@@ -48,7 +48,7 @@ WORK_ORDER_NO_PREFIX = "WO2704"
 SOURCE_FILE_PREFIX = "pagination-case-"
 
 # 默认页长与上限（ADR-0024）。
-DEFAULT_PAGE_SIZE = 20
+DEFAULT_PAGE_SIZE = 10
 MAX_PAGE_SIZE = 100
 
 # 25 行：刻意凑成「一页装不下、两页有余」。

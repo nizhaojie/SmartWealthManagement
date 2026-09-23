@@ -5,7 +5,7 @@
 「切片本身不重不漏、越界与钳制符合契约、且这条排序跨页仍然成立」——不是重新验证
 护栏本身（那已经在 `test_product_screening.py` 里钉住了）。
 
-造数直接写 `fin_product`：种子库只有 5 只产品，装不满一页（默认页长 20），分页现象
+造数直接写 `fin_product`：种子库只有 5 只产品，装不满一页（默认页长 10），分页现象
 （跨页、越界、钳制）看不见。造出来的这一批用一个专属 `product_type`（种子里不存在
 的值）标记，筛选时按它收窄，不与种子的 5 只、也不与别的测试用例混在一起。
 """
@@ -29,7 +29,7 @@ SEEDED_PASSWORD = "Test@1234"
 CUSTOMER_USERNAME = "wangc1"
 PRODUCTS_PATH = "/api/customer/products"
 
-DEFAULT_PAGE_SIZE = 20
+DEFAULT_PAGE_SIZE = 10
 MAX_PAGE_SIZE = 100
 
 # 25 只产品：一页装不下、两页有余。product_type 是种子里不存在的标记值，筛选时用它

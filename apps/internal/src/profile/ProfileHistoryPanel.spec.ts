@@ -9,7 +9,7 @@ import type { RiskAssessmentRecord } from "./types";
 import { apiError, requestedUrls, stubApiFetch, type ApiResponder } from "../testing";
 import ProfileHistoryPanel from "./ProfileHistoryPanel.vue";
 
-const PAGE_SIZE = 20;
+const PAGE_SIZE = 10;
 
 function makeAssessment(id: number): RiskAssessmentRecord {
   return {
@@ -73,7 +73,7 @@ describe("历次风险评测的分页", () => {
   it("takes the first page of this customer and shows the total", async () => {
     const panel = await mountPanel(7);
 
-    expect(lastHistoryUrl()).toContain("/customers/7/risk-assessments?page=1&page_size=20");
+    expect(lastHistoryUrl()).toContain("/customers/7/risk-assessments?page=1&page_size=10");
     expect(panel.get('[data-testid="pagination-total"]').text()).toBe("共 25 条");
     expect(panel.get('[data-testid="assessment-history"]').findAll("li")).toHaveLength(PAGE_SIZE);
   });
@@ -84,8 +84,8 @@ describe("历次风险评测的分页", () => {
     await panel.get(".pagination-bar .btn-next").trigger("click");
     await flushPromises();
 
-    expect(lastHistoryUrl()).toContain("page=2&page_size=20");
-    expect(panel.get('[data-testid="assessment-history"]').findAll("li")).toHaveLength(5);
+    expect(lastHistoryUrl()).toContain("page=2&page_size=10");
+    expect(panel.get('[data-testid="assessment-history"]').findAll("li")).toHaveLength(PAGE_SIZE);
   });
 
   it("goes back to the first page when another customer is picked", async () => {

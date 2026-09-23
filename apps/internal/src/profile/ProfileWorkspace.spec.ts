@@ -11,7 +11,7 @@ import type { CustomerListItem } from "../customers/types";
 import { apiError, requestedUrls, stubApiFetch, type ApiResponder } from "../testing";
 import ProfileWorkspace from "./ProfileWorkspace.vue";
 
-const PAGE_SIZE = 20;
+const PAGE_SIZE = 10;
 
 function makeCustomer(id: number): CustomerListItem {
   return {
@@ -87,14 +87,14 @@ describe("客户画像的客户目录分页", () => {
     const page = await mountWorkspace();
 
     expect(customerUrls()).toHaveLength(1);
-    expect(lastCustomerUrl()).toContain("page=1&page_size=20");
+    expect(lastCustomerUrl()).toContain("page=1&page_size=10");
     expect(page.get('[data-testid="pagination-total"]').text()).toBe("共 25 条");
     expect(page.findAll(".list__item")).toHaveLength(PAGE_SIZE);
   });
 
   it("searches the whole directory on the server, not just the page in hand", async () => {
-    // 「客户2」命中 客户20–25 共 6 位：第 1 页（客户01–20）里只有客户20 一位。
-    // 本地过滤当前页只会留下那一位，且总数仍然是 25。
+    // 「客户2」命中 客户20–25 共 6 位：第 1 页（客户01–10）里一位都不在。
+    // 本地过滤当前页只会得到空表，且总数仍然是 25。
     const page = await mountWorkspace();
 
     await search("客户2");
@@ -114,8 +114,8 @@ describe("客户画像的客户目录分页", () => {
 
     // 少了关键字，第 2 页会变成「全部客户的第 2 页」，与搜索框里留着的字对不上。
     expect(lastCustomerUrl()).toContain("keyword=客户&page=2");
-    expect(page.findAll(".list__item")).toHaveLength(5);
-    expect(page.text()).toContain("客户25");
+    expect(page.findAll(".list__item")).toHaveLength(PAGE_SIZE);
+    expect(page.text()).toContain("客户20");
   });
 
   it("goes back to the first page when the keyword changes", async () => {

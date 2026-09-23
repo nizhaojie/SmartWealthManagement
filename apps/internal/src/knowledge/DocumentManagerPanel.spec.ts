@@ -22,7 +22,7 @@ vi.mock("./api", () => ({ listDocuments, deleteDocument, uploadDocument }));
 
 import DocumentManagerPanel from "./DocumentManagerPanel.vue";
 
-const PAGE_SIZE = 20;
+const PAGE_SIZE = 10;
 const POLL_INTERVAL_MS = 1500;
 
 function makeDocument(overrides: Partial<KnowledgeDocument> = {}): KnowledgeDocument {

@@ -246,7 +246,7 @@ def test_no_released_plan_yields_an_empty_list_not_a_404(auth_client: TestClient
 
     headers = _customer_headers(auth_client, username)
     empty = auth_client.get("/api/customer/advisory/plans", headers=headers).json()["data"]
-    assert empty == {"items": [], "total": 0, "page": 1, "page_size": 20}
+    assert empty == {"items": [], "total": 0, "page": 1, "page_size": 10}
     # 尚无已放行的方案时，最新一份那个出口仍是 404（语义不变）。
     assert auth_client.get("/api/customer/advisory/plan", headers=headers).status_code == 404
 

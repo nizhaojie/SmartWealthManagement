@@ -30,7 +30,7 @@ let wrapper: VueWrapper | null = null;
 
 /** 列表接口的一页（ADR-0024）：形状恒为 `{items, total, page, page_size}`。 */
 function emptyPage() {
-  return { items: [], total: 0, page: 1, page_size: 20 };
+  return { items: [], total: 0, page: 1, page_size: 10 };
 }
 
 beforeEach(async () => {

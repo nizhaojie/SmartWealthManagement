@@ -14,7 +14,7 @@ vi.mock("./api", () => ({ listRiskFocus }));
 
 import RiskFocusTab from "./RiskFocusTab.vue";
 
-const PAGE_SIZE = 20;
+const PAGE_SIZE = 10;
 const TOTAL = 45;
 
 function makeFocus(overrides: Partial<RiskFocus> = {}): RiskFocus {

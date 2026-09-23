@@ -118,7 +118,7 @@ describe("TradingPage", () => {
     listAllProducts.mockReset();
 
     getFundingAccount.mockResolvedValue({ available_balance: "100000.00" });
-    listTransactions.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 20 });
+    listTransactions.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 10 });
     getAssets.mockResolvedValue({
       risk_level: "C1",
       risk_level_valid_until: "2027-03-15",
@@ -238,7 +238,7 @@ describe("TradingPage", () => {
       items: [makeTransaction()],
       total: 1,
       page: 1,
-      page_size: 20,
+      page_size: 10,
     });
     const wrapper = await mountPage();
 

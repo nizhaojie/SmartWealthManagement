@@ -43,7 +43,7 @@ PROFILE_TABLE = "fin_customer_profile"
 CUSTOMER_TABLE = "sys_customer"
 
 # 默认页长与上限（ADR-0024）。
-DEFAULT_PAGE_SIZE = 20
+DEFAULT_PAGE_SIZE = 10
 MAX_PAGE_SIZE = 100
 
 # 25 位客户：刻意凑成「一页装不下、两页有余」。

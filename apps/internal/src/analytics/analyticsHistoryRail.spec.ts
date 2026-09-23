@@ -40,7 +40,7 @@ function historyPage(
   items: unknown[] = HISTORY_ITEMS,
   overrides: Record<string, unknown> = {},
 ) {
-  return { items, total: items.length, page: 1, page_size: 20, ...overrides };
+  return { items, total: items.length, page: 1, page_size: 10, ...overrides };
 }
 
 const HISTORY = historyPage();

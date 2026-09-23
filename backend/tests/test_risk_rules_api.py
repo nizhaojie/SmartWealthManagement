@@ -105,13 +105,17 @@ def test_rule_list_returns_the_twenty_rules_with_their_configuration(
     auth_client: TestClient,
 ):
     headers = _headers(auth_client, RISK_OFFICER_USERNAME)
-    response = auth_client.get("/api/internal/risk-rules", headers=headers)
+    # 规则清单走统一分页（ADR-0024）：这一条要的是**全部**规则的载荷形状，
+    # 所以显式把页长开到上限，不依赖默认页长装得下多少条。
+    response = auth_client.get(
+        "/api/internal/risk-rules", headers=headers, params={"page_size": 100}
+    )
 
     assert response.status_code == 200
     page = response.json()["data"]
-    assert page["total"] == 20
+    assert page["total"] == len(RISK_RULE_SEEDS)
     rules = page["items"]
-    assert len(rules) == 20
+    assert len(rules) == len(RISK_RULE_SEEDS)
 
     first = rules[0]
     for key in (

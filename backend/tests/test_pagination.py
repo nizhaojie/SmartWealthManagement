@@ -178,20 +178,20 @@ def _numbers(page: dict) -> list[str]:
     return [row["transaction_no"] for row in page["items"]]
 
 
-def test_the_default_page_is_twenty_and_the_total_counts_everything(
+def test_the_default_page_is_ten_and_the_total_counts_everything(
     auth_client: TestClient, seeded_flow_rows: None
 ):
     """响应的形状只有 `{items, total, page, page_size}` 这一套（旧的 `transactions` 不并存）。
 
-    默认页长 20、页码从 1 起，`total` 是过滤后的总条数而不是本页条数。
+    默认页长 10、页码从 1 起，`total` 是过滤后的总条数而不是本页条数。
     """
     page = _page(auth_client)
 
     assert set(page) == {"items", "total", "page", "page_size"}
     assert page["page"] == 1
-    assert page["page_size"] == 20
+    assert page["page_size"] == 10
     assert page["total"] == ROW_COUNT
-    assert len(page["items"]) == 20
+    assert len(page["items"]) == 10
 
 
 def test_turning_the_pages_yields_every_record_exactly_once(

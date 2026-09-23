@@ -1,14 +1,14 @@
 /**
  * 分页契约的前端一侧（ADR-0024）：列表接口的 `data` 恒为 `{items, total, page, page_size}`。
  *
- * 这份类型与那个 composable 是两端共用的：`page` 从 1 起、`page_size` 默认 20，
+ * 这份类型与那个 composable 是两端共用的：`page` 从 1 起、`page_size` 默认 10，
  * 都是后端 `app/pagination.py` 的同名口径。前端的页码与后端的页码一旦各有一套默认值，
- * 表现就是「第一页少了 20 条」这种没人会去查的错位。
+ * 表现就是「第一页少了 10 条」这种没人会去查的错位。
  */
 import { ref, shallowRef, type Ref } from "vue";
 import { ApiError } from "./http";
 
-export const DEFAULT_PAGE_SIZE = 20;
+export const DEFAULT_PAGE_SIZE = 10;
 
 /** 列表接口 `data` 的统一形状。 */
 export type Paginated<T> = {

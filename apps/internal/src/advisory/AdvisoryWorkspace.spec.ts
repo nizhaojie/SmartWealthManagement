@@ -265,8 +265,8 @@ describe("投顾工作台的三段列表分页", () => {
 
     await turnPage(page, 0);
 
-    expect(table().findAll("tbody tr")).toHaveLength(5);
-    expect(table().text()).toContain("AR202609180025");
+    expect(table().findAll("tbody tr")).toHaveLength(DEFAULT_PAGE_SIZE);
+    expect(table().text()).toContain("AR202609180020");
     expect(table().text()).not.toContain("AR202609180001");
     // 总数不随翻页变：它是过滤后的总数，不是本页条数。
     expect(pager(page, 0).get('[data-testid="pagination-total"]').text()).toBe("共 25 条");
@@ -285,8 +285,8 @@ describe("投顾工作台的三段列表分页", () => {
 
     await turnPage(page, 1);
 
-    expect(checks()).toHaveLength(5);
-    // 数本页会把「还有 25 件在等」说成「20 件」——角标与卡片标题读的都是同一个总数。
+    expect(checks()).toHaveLength(DEFAULT_PAGE_SIZE);
+    // 数本页会把「还有 25 件在等」说成「10 件」——角标与卡片标题读的都是同一个总数。
     expect(page.text()).toContain("待审核（25）");
     expect(useAdvisoryQueueStore(pinia).pendingReviewCount).toBe(25);
   });
@@ -300,8 +300,10 @@ describe("投顾工作台的三段列表分页", () => {
 
     await turnPage(page, 2);
 
-    expect(page.get('[data-testid="history-table"]').findAll("tbody tr")).toHaveLength(5);
-    expect(page.get('[data-testid="history-table"]').text()).toContain("客户25");
+    expect(page.get('[data-testid="history-table"]').findAll("tbody tr")).toHaveLength(
+      DEFAULT_PAGE_SIZE,
+    );
+    expect(page.get('[data-testid="history-table"]').text()).toContain("客户20");
     // 翻历史不会动另外两段：待审仍在它自己的第 1 页，待生成请求也还在。
     expect(page.get('[data-testid="pending-reviews-table"]').findAll("tbody tr")).toHaveLength(
       DEFAULT_PAGE_SIZE,

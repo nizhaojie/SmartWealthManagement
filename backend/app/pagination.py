@@ -4,7 +4,7 @@
 形状只有这一份定义：二十余个列表接口各写一遍的话，参数命名、响应形状与 `total`
 口径必然漂移，而前端要靠同一个 `Paginated<T>` 泛型读它们。
 
-`page` 从 1 起，`page_size` 默认 20、上限 100。上限是**钳制**而不是拒收：客户端的
+`page` 从 1 起，`page_size` 默认 10、上限 100。上限是**钳制**而不是拒收：客户端的
 页长越界是一个可以就地纠正的请求，为它返回 400 只会让翻页在数据变多时突然失效。
 """
 
@@ -18,7 +18,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 from sqlalchemy.sql import Select
 
-DEFAULT_PAGE_SIZE = 20
+DEFAULT_PAGE_SIZE = 10
 MAX_PAGE_SIZE = 100
 
 ItemT = TypeVar("ItemT")

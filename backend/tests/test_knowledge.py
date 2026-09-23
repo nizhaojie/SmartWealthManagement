@@ -85,7 +85,7 @@ def _delete(client: TestClient, knowledge_id: int):
 def _list(client: TestClient, *, knowledge_type: str | None = None, status: str | None = None):
     """列表接口的一页的条目（ADR-0024：`data` 恒为 `{items, total, page, page_size}`）。
 
-    不带页码时是约定的第一页（20 条）：这里要断的是「刚上传/刚删除的那份在不在列表里」，
+    不带页码时是约定的第一页（10 条）：这里要断的是「刚上传/刚删除的那份在不在列表里」，
     而它按入库时间倒序排在第一页之内。
     """
     params = {}

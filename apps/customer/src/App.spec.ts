@@ -58,7 +58,7 @@ let activeWrapper: VueWrapper | null = null;
 
 /** 列表接口的一页（ADR-0024）：形状恒为 `{items, total, page, page_size}`。 */
 function emptyPage() {
-  return { items: [], total: 0, page: 1, page_size: 20 };
+  return { items: [], total: 0, page: 1, page_size: 10 };
 }
 
 function mountApp(): VueWrapper {
@@ -115,7 +115,7 @@ describe("客户应用·门控与路由", () => {
       items: [],
       total: 0,
       page: 1,
-      page_size: 20,
+      page_size: 10,
     });
     vi.mocked(listProducts).mockResolvedValue(emptyPage());
     vi.mocked(listAllProducts).mockResolvedValue([]);
@@ -308,7 +308,7 @@ describe("客户应用·门控与路由", () => {
       items: [decided],
       total: 25,
       page: 1,
-      page_size: 20,
+      page_size: 10,
     });
     vi.mocked(countAwaitingAdvice).mockResolvedValue(4);
     const wrapper = mountApp();

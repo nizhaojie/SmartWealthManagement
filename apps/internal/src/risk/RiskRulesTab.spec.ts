@@ -25,7 +25,7 @@ vi.mock("./api", () => ({
 
 import RiskRulesTab from "./RiskRulesTab.vue";
 
-const PAGE_SIZE = 20;
+const PAGE_SIZE = 10;
 const TOTAL = 25;
 
 function makeRule(overrides: Partial<RiskRule> = {}): RiskRule {

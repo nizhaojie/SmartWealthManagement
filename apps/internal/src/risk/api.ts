@@ -97,8 +97,12 @@ export function setRiskRuleThreshold(
   return http.patch<RiskRule>(`/api/internal/risk-rules/${ruleId}/threshold`, { threshold, reason });
 }
 
+// 风控问答仍自持页面级会话标识，每次提问都带——它的会话语义与数据分析不同
+// （后端只在数据分析那条链路上回落登录凭证里的 sid），所以这里要求标识必给。
+type RiskQueryInput = AnalyticsQueryInput & { sessionId: string };
+
 export function askRiskQuestion(
-  input: AnalyticsQueryInput,
+  input: RiskQueryInput,
 ): Promise<AnalyticsQueryResponse> {
   // 走风控监测 Agent 自己的查询入口：视图范围收窄到风控域，与数据分析
   // 模块互不影响（同一条受限查询链路，不同的 Agent 配置）。

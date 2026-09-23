@@ -6,7 +6,9 @@ from pydantic import BaseModel
 
 class AnalyticsQueryRequest(BaseModel):
     question: str
-    # 多轮追问的会话标识：缺省时本轮不带历史，单次提问。
+    # 多轮追问的会话标识。缺省时由数据分析路由取登录会话（凭证里的 sid）；
+    # 显式带值时以它为准——界面「清空对话」据此换一段上下文。
+    # 风控问答路由不取凭证：它缺省即单次提问，会话语义与数据分析不同。
     session_id: str | None = None
 
 

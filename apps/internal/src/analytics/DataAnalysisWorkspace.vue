@@ -9,9 +9,6 @@ import AnalyticsResultView from "./AnalyticsResultView.vue";
 import { listAnalyticsExamples, listAnalyticsHistory, runAnalyticsQuery } from "./api";
 import type { AnalyticsExampleItem, AnalyticsHistoryItem, AnalyticsQueryResponse } from "./types";
 
-// 页面级会话标识：同一页内的多轮追问共享它，刷新页面即新会话。
-const sessionId = crypto.randomUUID();
-
 const question = ref("");
 const asking = ref(false);
 const result = ref<AnalyticsQueryResponse | null>(null);
@@ -57,7 +54,8 @@ async function ask(): Promise<void> {
   }
   asking.value = true;
   try {
-    result.value = await runAnalyticsQuery({ question: question.value, sessionId });
+    // 不带会话标识：会话由登录凭证承载，同一次登录里的追问共用一个上下文。
+    result.value = await runAnalyticsQuery({ question: question.value });
     // 主区已经有新的结果了，先前点开的那条历史记录就该收起；这一轮的留痕是最新的一条，
     // 因此回到第一页取——停在原来的页上，刚问完的这一条不会出现。
     selectedHistoryId.value = null;

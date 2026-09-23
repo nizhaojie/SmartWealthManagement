@@ -38,6 +38,8 @@ QUERY_PATH = "/api/internal/risk-monitoring/query"
 EXAMPLES_PATH = "/api/internal/risk-monitoring/examples"
 
 HIGH_RISK_QUESTION = "今天有哪些高风险预警"
+# 不含任何视图关键词，只在上一轮的问题进了上下文时才成立。
+FOLLOW_UP_QUESTION = "那昨天呢"
 ALERT_LEVEL_COLUMN = "alert_level"
 ALERT_ROWS_SQL = (
     "SELECT alert_id, customer_id, alert_type, alert_level, alert_status, alerted_at"
@@ -290,20 +292,46 @@ def test_follow_up_question_sees_the_previous_turn(risk_query_client: TestClient
     headers = _headers(risk_query_client)
     session_id = f"risk-query-{uuid4().hex[:8]}"
     analytics_llm.register_fake_query(HIGH_RISK_QUESTION, ALERT_ROWS_SQL)
-    analytics_llm.register_fake_query("那昨天呢", ALERT_ROWS_SQL)
+    analytics_llm.register_fake_query(FOLLOW_UP_QUESTION, ALERT_ROWS_SQL)
 
     first = _ask(risk_query_client, headers, HIGH_RISK_QUESTION, session_id)
     assert first.json()["code"] == 200
-    response = _ask(risk_query_client, headers, "那昨天呢", session_id)
+    response = _ask(risk_query_client, headers, FOLLOW_UP_QUESTION, session_id)
 
     assert response.status_code == 200
     assert response.json()["code"] == 200
     call = analytics_llm.fake_generation_calls[-1]
-    assert call.question == "那昨天呢"
+    assert call.question == FOLLOW_UP_QUESTION
     assert any(
         message["role"] == "user" and message["content"] == HIGH_RISK_QUESTION
         for message in call.history
     )
+
+
+def test_the_risk_route_never_borrows_the_login_session(
+    risk_query_client: TestClient,
+):
+    # 会话语义未变：凭证里的 sid 只被数据分析那一条路由取用，风控路由继续只认
+    # 请求体里的值。两次都不带标识时，同一次登录里的两问仍互不共享。
+    headers = _headers(risk_query_client)
+    analytics_llm.register_fake_query(HIGH_RISK_QUESTION, ALERT_ROWS_SQL)
+
+    first = _ask(risk_query_client, headers, HIGH_RISK_QUESTION)
+    assert first.json()["code"] == 200
+
+    # 「那昨天呢」不含视图关键词，上下文里没有上一轮就在选视图一步出局。
+    # 若风控路由也回落到登录凭证，上一问就在同一场登录里，这一问会变成 200。
+    assert _ask(risk_query_client, headers, FOLLOW_UP_QUESTION).json()["code"] == 1101
+
+    # 两个不同的页面级标识仍然互不共享（页面级会话语义本身没动）。
+    first_page = f"risk-page-{uuid4().hex[:8]}"
+    second_page = f"risk-page-{uuid4().hex[:8]}"
+    assert _ask(risk_query_client, headers, HIGH_RISK_QUESTION, first_page).json()[
+        "code"
+    ] == 200
+    assert _ask(risk_query_client, headers, FOLLOW_UP_QUESTION, second_page).json()[
+        "code"
+    ] == 1101
 
 
 # ---- 模型不参与阈值判断：查询只读预警事实 -------------------------------------

@@ -11,6 +11,7 @@ from uuid import uuid4
 
 import jwt as pyjwt
 import pytest
+import redis as redis_lib
 from fastapi.testclient import TestClient
 from sqlalchemy import bindparam, create_engine, select, text
 from sqlalchemy.orm import Session as OrmSession
@@ -69,12 +70,16 @@ def _employee_headers(client: TestClient, username: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
-def _ask(client: TestClient, headers: dict[str, str], question: str):
-    return client.post(
-        "/api/internal/analytics/query",
-        headers=headers,
-        json={"question": question},
-    )
+def _ask(
+    client: TestClient,
+    headers: dict[str, str],
+    question: str,
+    session_id: str | None = None,
+):
+    body: dict = {"question": question}
+    if session_id is not None:
+        body["session_id"] = session_id
+    return client.post("/api/internal/analytics/query", headers=headers, json=body)
 
 
 def test_employee_asks_in_plain_language_and_gets_rows(analytics_client: TestClient):
@@ -441,6 +446,125 @@ def test_rejected_query_is_also_recorded(analytics_client: TestClient):
     assert record.generated_sql == sql
     assert record.error_code == 1103
     assert record.row_count is None
+
+
+# ---- 会话标识来自登录凭证（ticket 01） -----------------------------------------
+
+# 「那上个季度呢」本身不含任何视图关键词，只有在上一轮的问题进了上下文时才成立。
+FOLLOW_UP_QUESTION = "那上个季度呢"
+MEMORY_KEY_PREFIX = "agent:memory:"
+
+
+@pytest.fixture
+def analytics_cache() -> Iterator[redis_lib.Redis]:
+    cache = redis_lib.Redis.from_url(get_settings().test_redis_url, decode_responses=True)
+    try:
+        yield cache
+    finally:
+        cache.close()
+
+
+def _employee_login(
+    client: TestClient, username: str
+) -> tuple[dict[str, str], str]:
+    """登录：返回请求头与这张凭证里的 ``sid``——它就是这一场登录的会话标识。"""
+    headers = _employee_headers(client, username)
+    token = headers["Authorization"].split(" ", 1)[1]
+    return headers, pyjwt.decode(token, options={"verify_signature": False})["sid"]
+
+
+def _memory_key(employee_id: int, session_id: str) -> str:
+    # 与 ``service._memory_session`` 同构：命名空间 + 员工 + 会话标识。
+    return f"{MEMORY_KEY_PREFIX}analytics:{employee_id}:{session_id}"
+
+
+def _turns_in(cache: redis_lib.Redis, key: str) -> list[dict]:
+    return [json.loads(raw) for raw in cache.lrange(key, 0, -1)]
+
+
+def test_questions_without_a_session_id_share_the_login_session(
+    analytics_client: TestClient, analytics_cache: redis_lib.Redis
+):
+    # 会话不再由前端页面生成：请求体不带 session_id 时取凭证里的 sid，于是同一次
+    # 登录里的两问共用一个上下文，「那上个季度呢」不必自己带视图关键词。
+    analytics_llm.register_fake_query(HOLDING_QUESTION, HOLDING_SQL)
+    analytics_llm.register_fake_query(FOLLOW_UP_QUESTION, HOLDING_SQL)
+    headers, session_id = _employee_login(analytics_client, "advisor1")
+    key = _memory_key(_employee_id(analytics_client, headers), session_id)
+
+    first = _ask(analytics_client, headers, HOLDING_QUESTION)
+    second = _ask(analytics_client, headers, FOLLOW_UP_QUESTION)
+
+    assert first.status_code == 200
+    assert first.json()["code"] == 200
+    # 缺省不是「报错」也不是「没有会话」：第二问正常作答。
+    assert second.status_code == 200
+    assert second.json()["code"] == 200
+    call = analytics_llm.fake_generation_calls[-1]
+    assert call.question == FOLLOW_UP_QUESTION
+    assert any(
+        message["role"] == "user" and message["content"] == HOLDING_QUESTION
+        for message in call.history
+    )
+    # 两问落在同一个记忆键上：走的是凭证里的 sid，不是每次请求现编一个。
+    turns = _turns_in(analytics_cache, key)
+    assert [turn["content"] for turn in turns if turn["role"] == "user"] == [
+        HOLDING_QUESTION,
+        FOLLOW_UP_QUESTION,
+    ]
+
+
+def test_explicit_session_id_overrides_the_credential(
+    analytics_client: TestClient, analytics_cache: redis_lib.Redis
+):
+    # 「清空对话」的机制前提：显式带了 session_id 时它是唯一的会话标识，凭证里的
+    # sid 不参与。界面上清空之后带新的标识覆盖，走的就是这一支。
+    cleared_session = f"cleared-{uuid4().hex[:8]}"
+    analytics_llm.register_fake_query(HOLDING_QUESTION, HOLDING_SQL)
+    analytics_llm.register_fake_query(FOLLOW_UP_QUESTION, HOLDING_SQL)
+    headers, login_session = _employee_login(analytics_client, "advisor1")
+    employee_id = _employee_id(analytics_client, headers)
+    cleared_key = _memory_key(employee_id, cleared_session)
+    login_key = _memory_key(employee_id, login_session)
+
+    assert (
+        _ask(analytics_client, headers, HOLDING_QUESTION, cleared_session).json()["code"]
+        == 200
+    )
+    # 带标识的那一轮落在覆盖出来的会话里，登录会话里一条都没有。
+    assert _turns_in(analytics_cache, cleared_key)
+    assert _turns_in(analytics_cache, login_key) == []
+
+    response = _ask(analytics_client, headers, FOLLOW_UP_QUESTION, cleared_session)
+
+    assert response.json()["code"] == 200
+    call = analytics_llm.fake_generation_calls[-1]
+    assert any(
+        message["role"] == "user" and message["content"] == HOLDING_QUESTION
+        for message in call.history
+    )
+
+
+def test_a_new_login_starts_without_the_previous_context(
+    analytics_client: TestClient, analytics_cache: redis_lib.Redis
+):
+    # 验收的另一半：会话不跨登录延续。保证来自 Redis 白名单（每次登录签发新的
+    # sid），不靠前端自觉。
+    analytics_llm.register_fake_query(HOLDING_QUESTION, HOLDING_SQL)
+    headers, first_session = _employee_login(analytics_client, "advisor1")
+    employee_id = _employee_id(analytics_client, headers)
+    assert _ask(analytics_client, headers, HOLDING_QUESTION).json()["code"] == 200
+    assert _turns_in(analytics_cache, _memory_key(employee_id, first_session))
+
+    headers, second_session = _employee_login(analytics_client, "advisor1")
+
+    assert second_session != first_session
+    assert _turns_in(analytics_cache, _memory_key(employee_id, second_session)) == []
+    # 同一句追问在新登录里连候选视图都选不出来：上一场的语境已经不在了。
+    assert _ask(analytics_client, headers, FOLLOW_UP_QUESTION).json()["code"] == 1101
+    # 而自带关键词的问题照常作答，只是不再带着上一次的上下文作答。
+    assert _ask(analytics_client, headers, HOLDING_QUESTION).json()["code"] == 200
+    assert analytics_llm.fake_generation_calls[-1].history == []
 
 
 # ---- 连接清理：归还连接池前清除员工身份 ----------------------------------------

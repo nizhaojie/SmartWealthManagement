@@ -2,7 +2,13 @@
 // 形状——两条路径是同一链条上的两份 Agent 配置。
 export type AnalyticsQueryInput = {
   question: string;
-  sessionId: string;
+  /**
+   * 会话标识。**唯一的用途是覆盖**：缺省时不送出去，后端取登录凭证里的 sid，
+   * 于是同一次登录的追问共用一个上下文，刷新与切模块都不打断。只有界面
+   * 「清空对话」之后才带一个新的标识，用它把上下文换掉。
+   * 风控问答是另一份会话语义：它自持页面级标识，每次提问都带。
+   */
+  sessionId?: string;
 };
 
 export type AnalyticsQueryResponse = {

@@ -35,6 +35,8 @@
 
 再一条横切 slice（2026-09-22）：`customer-deposit` —— **资金账户的入口**。出口一直有（申购、转账），入口没有：`available_balance` 的四个写入点除赎回外全是「减少」，而开户建出的资金账户余额为 0，于是新客户在应用里**永久不能动钱**（能登录、能做完风评、能看到产品，然后被「可用余额不足」永久挡住），演示只能靠种子给足余额、花完就换一位客户重来。本 slice 给客户加上**充值**：钱从机构之外进入自己的资金账户，余额增加；它是交易流水的一类（独立表 `fin_deposit`，ADR-0019 的延续，客户侧合并读升为**三表扇入**）、也照常是一笔交易事件（风控第一次看得见入金，13 条只建在金额/笔数/时段上的规则直接吃它），受理通过即入账、不记来源、只对客户自助开放。受理侧只拦「金额必须为正」——**大额入金交给规则引擎而不在受理侧拒收**。它**推翻**两处已实现的既有决定：`operation-advice-and-customer-trading` 的 Q20（「种子给足余额，不做入金」）与 `onboarding-funding-account-and-target-allocation` 的 Out of Scope 第一条（「入金仍然不在范围内」），清算单见该 spec 的头表。拆为四份 issue，已全部完成；**第一份做完就有可演示的完整状态**（客户端充值一笔 → 余额涨 → 预警列表出现对应预警）。
 
+再一条横切 slice（2026-09-23）：`analytics-chat-ui` —— **数据分析的界面换成对话形态**。多轮追问在后端早就成立（提问带着 `session_id`，后端拿它做 Redis 短期记忆，`select_views_node` 甚至专门把上一轮的提问并进视图匹配的语境），但界面是表单范式、结果只有一个槽、每次提问覆盖上一条——问答不成串，于是「可以追问」在界面上不成立。本 slice 把主区换成一条对话线程（用户气泡 + 助手气泡，底部多行输入），助手气泡里按固定次序装着口径解读 / 结果表 / 可折叠 SQL / 元信息，五种业务码（1101–1105）各自成文案；**逐字感用前端打字机复刻**（客服的推流本身也是「整轮跑完再逐字转帧」，无需新流式端点）；历史查询从右栏搬进顶栏抽屉、第三栏因此塌陷为两栏。会话从页面级改为登录级——`session_id` 缺省取登录凭证里的 `sid`，这是**本 slice 唯一的后端改动**——并补一个页头「清空对话」作为换话题的出口，因为这次改动连同线程持久化一起关掉了员工今天唯一的重置手段（刷新即新会话）。**风控问答不动**：它共用同一份请求模型却是另一页，因此两页会话寿命不同，这一处不一致已记为已知决定而非疏漏。拆五份 issue，顺序推进。
+
 上面两份新 spec 共拆 7 份 ticket（`advisor-review-reminder` 2 份：计数 store → 导航角标；`operation-advice-product-choice` 5 份：可选项端点 → 发起受理接手产品与金额 → 赎回按份额成交 → 发起表单 → 端到端与既有断言收口）。全部 spec 已拆成 ticket，存于 `.scratch/<slug>/issues/`，共 83 个（其中 `customer-deposit` 的四份在链尾：它的前置 `operation-advice-and-customer-trading` 与 `onboarding-funding-account-and-target-allocation` 都已实现，因此那四份里的 #01 可直接开始）。依赖是一条串行链：每份 spec 的第一个 ticket 被上一份 spec 的最后一个 ticket 阻塞，spec 内部亦为顺序推进。唯一的例外是 `foundation-and-customer-service-slice #07`（共享包边界检查），它只依赖 #01，可提前做。
 
 **当前 frontier**：待重新核对。`.scratch/*/issues/*.md` 里的 `Status:` 标记已经落后于代码——例如 `advisory-plan-visibility` 的三份仍标 `ready-for-agent`，但 `apps/customer/src/advisory/AdvisoryPlanPage.vue` 与 `backend/app/advisory/final.py` 的 `serialize_final_for_customer` 都已经存在；`advisory-agent-and-review-flow` 的 #01–#03 同理。在逐份核对 `Status:` 之前，本行不作断言——写一个过时的答案比留白更容易误导人。
@@ -139,6 +141,7 @@
 - [ ] 错误重试与降级（指数退避、Milvus 超时降级、Neo4j 超时跳过）
 - [ ] 回放模式预置数据（见 ADR-0008）
 - [ ] 前端从零重做（`frontend-rebuild`：按 `02-企业浅色.html` 重写两端骨架与页面，取代 `frontend-restyle`）
+- [ ] 数据分析界面改对话式（`analytics-chat-ui`：数据分析页换成线程与追问，历史查询进抽屉，会话改走登录凭证）
 - [ ] 答辩材料：PPT、API 文档、数据库文档、架构说明
 - [x] 端到端演示脚本：`docs/demo-script.md`（`operation-advice-and-customer-trading` 的验收标准、重度预警的讲法与断言索引）
 - [ ] 会议纪要补齐（评分表 -5，成本近零）

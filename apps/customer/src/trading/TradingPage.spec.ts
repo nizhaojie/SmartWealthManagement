@@ -19,12 +19,12 @@ const { purchase, redeem, transfer, deposit, listTransactions } = vi.hoisted(() 
 }));
 const { getFundingAccount } = vi.hoisted(() => ({ getFundingAccount: vi.fn() }));
 const { getAssets } = vi.hoisted(() => ({ getAssets: vi.fn() }));
-const { listProducts } = vi.hoisted(() => ({ listProducts: vi.fn() }));
+const { listAllProducts } = vi.hoisted(() => ({ listAllProducts: vi.fn() }));
 
 vi.mock("./api", () => ({ purchase, redeem, transfer, deposit, listTransactions }));
 vi.mock("../funding/api", () => ({ getFundingAccount }));
 vi.mock("../assets/api", () => ({ getAssets }));
-vi.mock("../products/api", () => ({ listProducts }));
+vi.mock("../products/api", () => ({ listAllProducts }));
 
 import TradingPage from "./TradingPage.vue";
 
@@ -115,7 +115,7 @@ describe("TradingPage", () => {
     listTransactions.mockReset();
     getFundingAccount.mockReset();
     getAssets.mockReset();
-    listProducts.mockReset();
+    listAllProducts.mockReset();
 
     getFundingAccount.mockResolvedValue({ available_balance: "100000.00" });
     listTransactions.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 20 });
@@ -126,7 +126,7 @@ describe("TradingPage", () => {
       holding_count: 1,
       holdings: [makeHolding()],
     });
-    listProducts.mockResolvedValue({ products: [makeProduct()] });
+    listAllProducts.mockResolvedValue([makeProduct()]);
   });
 
   afterEach(() => {
@@ -210,7 +210,7 @@ describe("TradingPage", () => {
   // 并不存在的问题，而且不会有人知道接口其实挂了。
   it("does not present a failed holdings load as an empty portfolio", async () => {
     getAssets.mockRejectedValue(apiError(500, "服务内部错误"));
-    listProducts.mockRejectedValue(apiError(500, "服务内部错误"));
+    listAllProducts.mockRejectedValue(apiError(500, "服务内部错误"));
     const wrapper = await mountPage();
 
     expect(wrapper.get('[data-testid="holdings-error"]').text()).toContain("服务内部错误");

@@ -1,5 +1,7 @@
+import type { PageQuery, Paginated } from "@wealth/shared";
 import { http } from "../api/http";
-import type { CandidatePool, Product, ProductFilters, ProductList } from "./types";
+import { queryString } from "../api/query";
+import type { CandidatePool, Product, ProductFilters } from "./types";
 
 /**
  * 去掉空条件：「填了才算数」这条约定只写一处——查询串与方案请求体共用它，
@@ -15,13 +17,39 @@ export function compactFilters(filters: ProductFilters): Record<string, string> 
   return filled;
 }
 
-function queryString(filters: ProductFilters): string {
-  const query = new URLSearchParams(compactFilters(filters)).toString();
-  return query ? `?${query}` : "";
+/** 可购范围内的一页产品，恒按产品代码升序（ADR-0005），筛选条件随页码一并传给服务端。 */
+export function listProducts(
+  query: PageQuery,
+  filters: ProductFilters = {},
+): Promise<Paginated<Product>> {
+  const search = queryString({
+    ...compactFilters(filters),
+    page: query.page,
+    page_size: query.page_size,
+  });
+  return http.get<Paginated<Product>>(`/api/customer/products${search}`);
 }
 
-export function listProducts(filters: ProductFilters = {}): Promise<ProductList> {
-  return http.get<ProductList>(`/api/customer/products${queryString(filters)}`);
+/** 后端页长上限（`app/pagination.py` 的 `MAX_PAGE_SIZE`）。 */
+const ALL_PAGE_SIZE = 100;
+
+/**
+ * 全量在售产品：交易页的申购/赎回下拉要的是**全部**产品，不是某一页。
+ *
+ * 下拉选项不是分页对象（spec 的范围排除项），但它与产品筛选共用同一个已分页的接口：
+ * 只取第一页的话，第 101 只产品会从下拉里消失，而界面上没有任何一处会显示少了产品。
+ */
+export async function listAllProducts(): Promise<Product[]> {
+  const products: Product[] = [];
+  let page = 1;
+  for (;;) {
+    const result = await listProducts({ page, page_size: ALL_PAGE_SIZE });
+    products.push(...result.items);
+    if (!result.items.length || products.length >= result.total) {
+      return products;
+    }
+    page += 1;
+  }
 }
 
 export function getProduct(productCode: string): Promise<Product> {

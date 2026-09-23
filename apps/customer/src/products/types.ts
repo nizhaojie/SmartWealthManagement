@@ -33,10 +33,6 @@ export type ProductFilters = {
   max_term_days?: string;
 };
 
-export type ProductList = {
-  products: Product[];
-};
-
 /** 适当性硬过滤的结果：客户的风险承受等级，以及由此可购买的产品风险等级范围。 */
 export type CandidatePool = {
   assessment_id: number;

@@ -1,11 +1,13 @@
 // 产品筛选页的合规呈现面：适当性说明与「不是推荐」常驻，且清单不提供任何可排序表头。
 // 方案请求的进度列表不在这页——它迁去了「我的方案」页，这里只留提交按钮。
+// 清单分页（ADR-0024）：排序恒按 product_code 升序（ADR-0005），分页只是在这条固定
+// 顺序上切片——护栏测试 4 的 seam（不接受客户端排序参数）不能被翻页动摇。
 import ElementPlus from "element-plus";
 import { flushPromises, mount, type VueWrapper } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { h } from "vue";
 import { createMemoryHistory, createRouter, type Router } from "vue-router";
-import { ApiError } from "@wealth/shared";
+import { ApiError, DEFAULT_PAGE_SIZE, type PageQuery, type Paginated } from "@wealth/shared";
 import type { AdvisoryRequest } from "../advisory/types";
 import type { CandidatePool, Product } from "./types";
 
@@ -29,6 +31,27 @@ vi.mock("../advisory/api", () => ({ submitAdvisoryRequest }));
 import ProductScreeningPage from "./ProductScreeningPage.vue";
 
 const DISCLAIMER = "这是符合条件的产品清单，不是推荐";
+
+function pageOf(items: Product[], total = items.length, query?: PageQuery): Paginated<Product> {
+  return {
+    items,
+    total,
+    page: query?.page ?? 1,
+    page_size: query?.page_size ?? DEFAULT_PAGE_SIZE,
+  };
+}
+
+/** 按查询里的页码切一页——服务端切片的替身，list 已按 product_code 升序排好。 */
+function productPages(products: Product[]): (query: PageQuery) => Promise<Paginated<Product>> {
+  return (query) =>
+    Promise.resolve(
+      pageOf(
+        products.slice((query.page - 1) * query.page_size, query.page * query.page_size),
+        products.length,
+        query,
+      ),
+    );
+}
 
 function makeProduct(overrides: Partial<Product> = {}): Product {
   return {
@@ -102,6 +125,11 @@ async function mountPage(): Promise<VueWrapper> {
 // jsdom 不实现 scrollIntoView，这里替身记录「谁被滚进了视野」。
 const scrollIntoView = vi.fn();
 
+async function turnPage(page: VueWrapper): Promise<void> {
+  await page.get(".pagination-bar .btn-next").trigger("click");
+  await flushPromises();
+}
+
 describe("ProductScreeningPage", () => {
   beforeEach(() => {
     listProducts.mockReset();
@@ -111,7 +139,7 @@ describe("ProductScreeningPage", () => {
     scrollIntoView.mockReset();
     Element.prototype.scrollIntoView = scrollIntoView;
 
-    listProducts.mockResolvedValue({ products: [makeProduct()] });
+    listProducts.mockResolvedValue(pageOf([makeProduct()]));
     getCandidatePool.mockResolvedValue(makeCandidatePool());
   });
 
@@ -141,7 +169,7 @@ describe("ProductScreeningPage", () => {
   });
 
   it.each([1, 2, 20])("keeps the not-a-recommendation notice when there are %s products", async (count) => {
-    listProducts.mockResolvedValue({ products: productsOfCount(count) });
+    listProducts.mockResolvedValue(pageOf(productsOfCount(count)));
     const wrapper = await mountPage();
 
     expect(wrapper.get('[data-testid="not-recommendation"]').text()).toBe(DISCLAIMER);
@@ -149,8 +177,8 @@ describe("ProductScreeningPage", () => {
   });
 
   it("does not render sortable table headers, so clicking 业绩基准 cannot reorder rows", async () => {
-    listProducts.mockResolvedValue({
-      products: [
+    listProducts.mockResolvedValue(
+      pageOf([
         makeProduct({ product_code: "F000001", expected_return: "2.1000" }),
         makeProduct({
           product_code: "F000002",
@@ -159,8 +187,8 @@ describe("ProductScreeningPage", () => {
           risk_level: "R2",
           expected_return: "18.0000",
         }),
-      ],
-    });
+      ]),
+    );
     const wrapper = await mountPage();
 
     const headers = wrapper.findAll("table thead th");
@@ -227,7 +255,7 @@ describe("ProductScreeningPage", () => {
   });
 
   it("explains that empty results come from filters that are too strict", async () => {
-    listProducts.mockResolvedValue({ products: [] });
+    listProducts.mockResolvedValue(pageOf([]));
     const wrapper = await mountPage();
 
     expect(wrapper.find("table").exists()).toBe(false);
@@ -235,5 +263,75 @@ describe("ProductScreeningPage", () => {
     expect(hint).toContain("过严");
     expect(hint).toContain("放宽");
     expect(wrapper.get('[data-testid="not-recommendation"]').text()).toBe(DISCLAIMER);
+  });
+
+  it("asks for the first page and shows the server total", async () => {
+    listProducts.mockResolvedValue(pageOf([makeProduct()], 45));
+    const wrapper = await mountPage();
+
+    expect(listProducts).toHaveBeenCalledWith({ page: 1, page_size: DEFAULT_PAGE_SIZE }, expect.anything());
+    expect(wrapper.get('[data-testid="pagination-total"]').text()).toBe("共 45 条");
+  });
+
+  it("turns the page while keeping the product-code order", async () => {
+    listProducts.mockImplementation(productPages(productsOfCount(25)));
+    const wrapper = await mountPage();
+
+    await turnPage(wrapper);
+
+    expect(listProducts).toHaveBeenLastCalledWith(
+      { page: 2, page_size: DEFAULT_PAGE_SIZE },
+      expect.anything(),
+    );
+    const codesOnPage2 = wrapper.findAll("tbody tr").map((row) => row.get("td").text());
+    expect(codesOnPage2).toEqual(
+      productsOfCount(25)
+        .slice(20, 25)
+        .map((product) => product.product_code),
+    );
+  });
+
+  it("returns to the first page after the filters are reapplied", async () => {
+    listProducts.mockImplementation(productPages(productsOfCount(25)));
+    const wrapper = await mountPage();
+
+    await turnPage(wrapper);
+    expect(listProducts).toHaveBeenLastCalledWith(
+      { page: 2, page_size: DEFAULT_PAGE_SIZE },
+      expect.anything(),
+    );
+
+    await wrapper.get('form.filters').trigger("submit");
+    await flushPromises();
+
+    expect(listProducts).toHaveBeenLastCalledWith(
+      { page: 1, page_size: DEFAULT_PAGE_SIZE },
+      expect.anything(),
+    );
+  });
+
+  it("keeps the pager on a page that turned out to be empty, without losing the total", async () => {
+    // 翻到的那一页没有产品（越界，或记录在这两次取数之间变少了）：服务端给空 items
+    // 而 total 不变。空态要说清楚，但翻页条必须留着——撤掉它，人就困在这一页上。
+    listProducts.mockImplementation((query) =>
+      Promise.resolve(pageOf(query.page === 1 ? [makeProduct()] : [], 21, query)),
+    );
+    const wrapper = await mountPage();
+
+    await turnPage(wrapper);
+
+    expect(wrapper.find('[data-testid="products-table"]').exists()).toBe(false);
+    expect(wrapper.get('[data-testid="empty-hint"]').text()).toContain("没有符合条件的产品");
+    expect(wrapper.get('[data-testid="pagination-total"]').text()).toBe("共 21 条");
+    expect(wrapper.find('[data-testid="pagination-bar"]').exists()).toBe(true);
+  });
+
+  it("maps a 404 from the products page to the missing-assessment explanation", async () => {
+    listProducts.mockRejectedValue(
+      new ApiError({ code: 404, message: "暂无风险测评记录", data: null, trace_id: "" }),
+    );
+    const wrapper = await mountPage();
+
+    expect(wrapper.get('[data-testid="products-error"]').text()).toContain("尚未完成风险测评");
   });
 });

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { nextTick, onMounted, reactive, ref } from "vue";
 import { useRouter } from "vue-router";
-import { ApiError, PageHeader, PanelCard } from "@wealth/shared";
+import { ApiError, PageHeader, PaginationBar, PanelCard, usePagination } from "@wealth/shared";
 import { submitAdvisoryRequest } from "../advisory/api";
 import ProductDetailPanel from "./ProductDetailPanel.vue";
 import { compactFilters, getCandidatePool, getProduct, listProducts } from "./api";
@@ -28,10 +28,6 @@ const filters = reactive<ProductFilters>({
   max_term_days: "",
 });
 
-const products = ref<Product[]>([]);
-const loading = ref(true);
-const errorMessage = ref("");
-
 const selected = ref<Product | null>(null);
 const detailError = ref("");
 // 详情面板挂在清单下方，需要被滚进视野才能算作「点了有反应」。
@@ -45,24 +41,43 @@ const advisorySubmitting = ref(false);
 
 const router = useRouter();
 
-async function loadProducts(): Promise<void> {
-  loading.value = true;
-  errorMessage.value = "";
+/**
+ * 产品清单的一页（ADR-0024），排序恒为 `product_code` 升序（ADR-0005）——分页只是
+ * 在这条固定顺序上切片，筛选条件在取数闭包里每次现读，改完条件调 `applyFilters()`
+ * 回到第一页重取。
+ */
+const {
+  items: products,
+  total: productsTotal,
+  page: productsPage,
+  pageSize: productsPageSize,
+  loading,
+  errorMessage,
+  goTo: goToProductsPage,
+  reset: resetProducts,
+} = usePagination<Product>(
+  async (query) => {
+    try {
+      return await listProducts(query, filters);
+    } catch (error) {
+      // 未完成风险测评时可购范围无法确定：这一句比服务端的原始 404 文案更明确该做什么。
+      if (error instanceof ApiError && error.code === 404) {
+        throw new ApiError({
+          code: error.code,
+          message: SUITABILITY_UNAVAILABLE,
+          data: null,
+          trace_id: error.traceId,
+        });
+      }
+      throw error;
+    }
+  },
+  { failureMessage: "产品清单加载失败" },
+);
+
+async function applyFilters(): Promise<void> {
   selected.value = null;
-  try {
-    const payload = await listProducts(filters);
-    products.value = payload.products;
-  } catch (error) {
-    products.value = [];
-    errorMessage.value =
-      error instanceof ApiError && error.code === 404
-        ? SUITABILITY_UNAVAILABLE
-        : error instanceof ApiError
-          ? error.message
-          : "产品清单加载失败";
-  } finally {
-    loading.value = false;
-  }
+  await resetProducts();
 }
 
 async function loadSuitability(): Promise<void> {
@@ -108,7 +123,7 @@ async function requestAdvisory(): Promise<void> {
 }
 
 onMounted(async () => {
-  await Promise.all([loadProducts(), loadSuitability()]);
+  await Promise.all([resetProducts(), loadSuitability()]);
 });
 </script>
 
@@ -119,7 +134,7 @@ onMounted(async () => {
     <PanelCard title="筛选条件">
       <p class="screening__disclaimer" data-testid="not-recommendation">{{ DISCLAIMER }}</p>
 
-      <form class="filters" @submit.prevent="loadProducts">
+      <form class="filters" @submit.prevent="applyFilters">
         <label class="filters__field">
           <span class="filters__label">产品类型</span>
           <el-select v-model="filters.product_type" name="product_type" placeholder="全部">
@@ -213,6 +228,16 @@ onMounted(async () => {
           </tbody>
         </table>
       </div>
+
+      <!-- 取不到或空筛选结果时 `total` 归零，分页条与列表同进同退。 -->
+      <PaginationBar
+        v-if="productsTotal > 0"
+        :total="productsTotal"
+        :page="productsPage"
+        :page-size="productsPageSize"
+        :disabled="loading"
+        @update:page="goToProductsPage"
+      />
 
       <div class="screening__actions">
         <el-button name="request-advisory" :loading="advisorySubmitting" @click="requestAdvisory">

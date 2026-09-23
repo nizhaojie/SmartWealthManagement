@@ -17,7 +17,7 @@ import { ApiError, PageHeader, PanelCard, StatCard } from "@wealth/shared";
 import { getAssets } from "../assets/api";
 import type { Holding } from "../assets/types";
 import { useAvailableBalance } from "../funding/useAvailableBalance";
-import { listProducts } from "../products/api";
+import { listAllProducts } from "../products/api";
 import type { Product } from "../products/types";
 import FailureNotice from "./FailureNotice.vue";
 import TransactionHistory from "./TransactionHistory.vue";
@@ -83,7 +83,7 @@ async function loadHoldings(): Promise<void> {
 async function loadProducts(): Promise<void> {
   productsError.value = "";
   try {
-    products.value = (await listProducts()).products;
+    products.value = await listAllProducts();
   } catch (error) {
     products.value = [];
     productsError.value = error instanceof ApiError ? error.message : "在售产品加载失败";

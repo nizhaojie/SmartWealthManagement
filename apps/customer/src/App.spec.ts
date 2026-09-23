@@ -15,7 +15,7 @@ import { forgetUsername } from "./auth/username";
 import { getFundingAccount } from "./funding/api";
 import { countAwaitingAdvice, listMyAdvice } from "./operation-advice/api";
 import type { OperationAdvice } from "./operation-advice/types";
-import { getCandidatePool, listProducts } from "./products/api";
+import { getCandidatePool, listAllProducts, listProducts } from "./products/api";
 import { getCurrentAssessment } from "./risk-assessment/api";
 import { router, routes } from "./router";
 import { useAuthStore } from "./stores/auth";
@@ -42,6 +42,7 @@ vi.mock("./risk-assessment/api", () => ({
 vi.mock("./products/api", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./products/api")>()),
   listProducts: vi.fn(),
+  listAllProducts: vi.fn(),
   getProduct: vi.fn(),
   getCandidatePool: vi.fn(),
 }));
@@ -94,6 +95,7 @@ describe("客户应用·门控与路由", () => {
     vi.mocked(getAssets).mockReset();
     vi.mocked(listTransactions).mockReset();
     vi.mocked(listProducts).mockReset();
+    vi.mocked(listAllProducts).mockReset();
     vi.mocked(getCandidatePool).mockReset();
     vi.mocked(listAdvisoryRequests).mockReset();
     vi.mocked(listReleasedPlans).mockReset();
@@ -115,7 +117,8 @@ describe("客户应用·门控与路由", () => {
       page: 1,
       page_size: 20,
     });
-    vi.mocked(listProducts).mockResolvedValue({ products: [] });
+    vi.mocked(listProducts).mockResolvedValue(emptyPage());
+    vi.mocked(listAllProducts).mockResolvedValue([]);
     vi.mocked(getCandidatePool).mockResolvedValue({
       assessment_id: 1,
       customer_risk_level: "C4",

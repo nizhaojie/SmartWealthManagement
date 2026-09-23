@@ -537,7 +537,7 @@ def _walk_full_journey(
     # ---- 产品筛选：只看得到适当性允许的产品；越级产品连详情都不可见 ----
     products = client.get("/api/customer/products", headers=customer)
     assert products.status_code == 200, products.text
-    listed = products.json()["data"]["products"]
+    listed = products.json()["data"]["items"]
     codes = [product["product_code"] for product in listed]
     assert codes == sorted(codes) and codes
     if is_private_banking_customer:

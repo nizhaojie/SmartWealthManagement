@@ -79,7 +79,7 @@ def _submit_assessment(client: TestClient, headers: dict[str, str], option_index
 
 
 def _product_codes(payload: dict) -> list[str]:
-    return [product["product_code"] for product in payload["data"]["products"]]
+    return [product["product_code"] for product in payload["data"]["items"]]
 
 
 def test_product_list_ignores_client_sort_params_and_stays_ordered_by_product_code(
@@ -115,7 +115,7 @@ def test_product_list_ignores_client_sort_params_and_stays_ordered_by_product_co
 def _list_products(client: TestClient, headers: dict[str, str], **params):
     response = client.get("/api/customer/products", headers=headers, params=params)
     assert response.status_code == 200
-    products = response.json()["data"]["products"]
+    products = response.json()["data"]["items"]
     assert products
     return products
 
@@ -148,7 +148,7 @@ def test_screening_params_cannot_raise_the_suitability_cap(auth_client: TestClie
         },
     )
     assert response.status_code == 200
-    products = response.json()["data"]["products"]
+    products = response.json()["data"]["items"]
     levels = {product["risk_level"] for product in products}
     assert levels.isdisjoint(OVERGRADE_LEVELS)
 

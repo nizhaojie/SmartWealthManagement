@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.auth.dependencies import AuthContext, require_customer
 from app.db.session import get_session
 from app.http import ok
+from app.pagination import PageParams, page_params
 from app.product_screening.service import get_product, list_products
 
 router = APIRouter(prefix="/api/customer/products")
@@ -20,6 +21,7 @@ def _now() -> datetime:
 def customer_products(
     auth: AuthContext = Depends(require_customer),
     db: Session = Depends(get_session),
+    page: PageParams = Depends(page_params),
     product_type: str | None = None,
     risk_level: str | None = None,
     min_amount: Decimal | None = Query(default=None),
@@ -31,6 +33,7 @@ def customer_products(
             db,
             customer_id=auth.subject_id,
             now=_now(),
+            page=page,
             product_type=product_type,
             risk_level=risk_level,
             min_amount=min_amount,

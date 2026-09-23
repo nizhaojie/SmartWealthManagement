@@ -387,7 +387,7 @@ def test_seven_demo_scenarios_replay_offline(replay_client: TestClient) -> None:
     # 且只出现适当性允许的风险等级（C2 → R1/R2）。
     response = client.get("/api/customer/products", headers=demo)
     assert response.status_code == 200
-    products = response.json()["data"]["products"]
+    products = response.json()["data"]["items"]
     codes = [product["product_code"] for product in products]
     assert codes == sorted(codes)
     assert codes

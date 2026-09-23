@@ -28,6 +28,7 @@ from sqlalchemy.orm import Session
 
 from app.customer_scope import restrict_to_own_customers
 from app.db.models import Customer, Employee, RiskFocus
+from app.pagination import PageParams, count_matching, paginated_response
 
 FOCUS_RISK_ALERT = "风控预警"
 FOCUS_RISK_INTENT = "高风险意图"
@@ -111,25 +112,36 @@ def focus_facts(focus: RiskFocus) -> dict:
 
 
 def list_recent(
-    db: Session, *, employee: Employee, focus_type: str | None = None
-) -> list[dict]:
-    """风险关注列表，最近的在前。
+    db: Session, *, employee: Employee, page: PageParams, focus_type: str | None = None
+) -> dict:
+    """风险关注列表的一页，最近的在前。
 
     可见范围与预警、工单同一口径：客户经理只看得到自己名下客户的记录，其他内部
     角色不受限（`app.customer_scope`）。
-    """
-    query = select(RiskFocus, Customer.real_name).join(
-        Customer, Customer.id == RiskFocus.customer_id
-    )
-    if restrict_to_own_customers(employee):
-        query = query.where(Customer.manager_id == employee.id)
-    if focus_type is not None:
-        query = query.where(RiskFocus.focus_type == focus_type)
 
+    排序键是 `occurred_at` 倒序 + `id` 兜底：时间只有秒精度，同一秒落下的多条记录
+    若不分先后，翻页时会在两页之间来回跳——顺序不稳定，页数就切不准。
+    """
+    conditions = []
+    if restrict_to_own_customers(employee):
+        conditions.append(Customer.manager_id == employee.id)
+    if focus_type is not None:
+        conditions.append(RiskFocus.focus_type == focus_type)
+
+    # `total` 由这条查询派生（`count_matching`），条件只写一遍：各写一遍必然漂移。
+    base = (
+        select(RiskFocus, Customer.real_name)
+        .join(Customer, Customer.id == RiskFocus.customer_id)
+        .where(*conditions)
+    )
+    total = count_matching(db, base)
     rows = db.execute(
-        query.order_by(RiskFocus.occurred_at.desc(), RiskFocus.id.desc())
+        base.order_by(RiskFocus.occurred_at.desc(), RiskFocus.id.desc())
+        .offset(page.offset)
+        .limit(page.page_size)
     ).all()
-    return [
+    items = [
         {**focus_facts(focus), "occurred_at": focus.occurred_at.isoformat(), "customer_name": name}
         for focus, name in rows
     ]
+    return paginated_response(items, total=total or 0, params=page)

@@ -1,4 +1,5 @@
 import { vi } from "vitest";
+import { DEFAULT_PAGE_SIZE } from "@wealth/shared";
 
 /**
  * 测试用的 fetch 替身：按 URL 给统一响应信封，而不是逐个 vi.mock API 模块。
@@ -12,11 +13,16 @@ export function envelope(data: unknown, code = 200, message = "success") {
   return { code, message, data, trace_id: "test-trace" };
 }
 
+/** 列表接口的一页（ADR-0024）：形状恒为 `{items, total, page, page_size}`。 */
+function emptyPage(pageSize = DEFAULT_PAGE_SIZE) {
+  return { items: [], total: 0, page: 1, page_size: pageSize };
+}
+
 const DEFAULTS: [string, unknown][] = [
   ["/api/internal/customers", []],
-  ["/api/internal/risk-alerts", []],
-  ["/api/internal/risk-focus", []],
-  ["/api/internal/risk-rules", []],
+  ["/api/internal/risk-alerts", emptyPage()],
+  ["/api/internal/risk-focus", emptyPage()],
+  ["/api/internal/risk-rules", emptyPage()],
   ["/api/internal/work-orders", []],
   ["/api/internal/knowledge/documents", []],
   ["/api/internal/analytics/history", []],

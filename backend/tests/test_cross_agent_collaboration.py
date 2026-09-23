@@ -485,7 +485,7 @@ def test_customer_service_flags_a_high_risk_intent_to_risk_monitoring(
 
     listed = chat_client.get(FOCUS_PATH, headers=_employee_headers(chat_client))
     assert listed.status_code == 200
-    rows = [row for row in listed.json()["data"] if row["customer_id"] == customer_id]
+    rows = [row for row in listed.json()["data"]["items"] if row["customer_id"] == customer_id]
 
     assert rows, "客服察觉到的高风险意图应当出现在风控的风险关注里"
     assert {row["focus_type"] for row in rows} == {"高风险意图"}
@@ -555,7 +555,7 @@ def test_the_focus_list_can_be_narrowed_to_the_high_risk_intents(chat_client: Te
     )
 
     assert response.status_code == 200
-    rows = [row for row in response.json()["data"] if row["customer_id"] == customer_id]
+    rows = [row for row in response.json()["data"]["items"] if row["customer_id"] == customer_id]
     assert [row["focus_type"] for row in rows] == ["高风险意图"]
 
 

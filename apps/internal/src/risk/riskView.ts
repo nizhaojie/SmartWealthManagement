@@ -1,10 +1,15 @@
 import { RISK_OFFICER, type EmployeeRole } from "../auth/identity";
-import type { AlertLevel, AlertSource, AlertStatus, AlertSummary } from "./types";
+import type { AlertLevel, AlertOrder, AlertSource, AlertStatus } from "./types";
 
-export type AlertSort = "created_desc" | "confidence_desc" | "confidence_asc";
-
-export const ALERT_SORT_OPTIONS: { value: AlertSort; label: string }[] = [
+/**
+ * 排序下拉的选项：每一档就是接口认识的一个 `order_by`。
+ *
+ * 排序结果由服务端给出（ADR-0024），这里只提供「按哪一种排」的选择与它的说法——
+ * 组件里不再留一份本地排序，两份排序必然在某一次翻页时对不上。
+ */
+export const ALERT_SORT_OPTIONS: { value: AlertOrder; label: string }[] = [
   { value: "created_desc", label: "按产生时间（最新在前）" },
+  { value: "level_desc", label: "按等级（重到轻）" },
   { value: "confidence_desc", label: "按置信度（高到低）" },
   { value: "confidence_asc", label: "按置信度（低到高）" },
 ];
@@ -43,24 +48,6 @@ export function statusTagType(status: AlertStatus): "warning" | "success" | "inf
   if (status === "已排除") return "info";
   if (status === "已升级") return "success";
   return "warning";
-}
-
-/**
- * 排序只发生在拿回来的这一批上：筛选在服务端做，服务端返回的已经是「最新的在最
- * 前面」，而置信度是同一批数据的另一种排列，不必再往返一次。
- */
-export function sortAlerts(alerts: AlertSummary[], sortBy: AlertSort): AlertSummary[] {
-  if (sortBy === "created_desc") {
-    return alerts;
-  }
-  const direction = sortBy === "confidence_desc" ? -1 : 1;
-  return [...alerts].sort((left, right) => {
-    if (left.confidence !== right.confidence) {
-      return direction * (left.confidence - right.confidence);
-    }
-    // 并列时新的在前：排序要稳定，也不能让两条同分预警的顺序随机漂。
-    return right.id - left.id;
-  });
 }
 
 /** 风控规则是风控专员的口径，启停与阈值调整都只放开给他。 */

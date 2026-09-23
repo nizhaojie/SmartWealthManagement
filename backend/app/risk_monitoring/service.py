@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 
 from app.db.models import Employee, RiskRule, RiskRuleChange
 from app.exceptions import AppError
+from app.pagination import PageParams, count_matching
 from app.risk_monitoring.context import MonitoringContext, RuleHit, RuleSpec
 from app.risk_monitoring.evaluator import match_rules
 from app.risk_monitoring.fields import FIELD_REGISTRY
@@ -55,8 +56,21 @@ def spec_from_model(rule: RiskRule) -> RuleSpec:
     )
 
 
-def list_rules(db: Session) -> list[RiskRule]:
-    return list(db.scalars(select(RiskRule).order_by(RiskRule.rule_code.asc())).all())
+def list_rules(db: Session, *, page: PageParams) -> tuple[list[RiskRule], int]:
+    """规则的一页，按编号升序，外加规则总数。
+
+    排序键是 `rule_code`：它 `unique`，本身就是一个稳定全序，不必再补兜底列。规则是
+    按编号命名的配置项，编号顺序就是它该有的顺序——换成「时间倒序」只会把 R001 到
+    R020 打散，且不换来任何稳定性（产品列表沿用编号升序是同一条理由）。
+    """
+    base = select(RiskRule)
+    total = count_matching(db, base)
+    rules = list(
+        db.scalars(
+            base.order_by(RiskRule.rule_code.asc()).offset(page.offset).limit(page.page_size)
+        ).all()
+    )
+    return rules, total
 
 
 def get_rule(db: Session, rule_id: int) -> RiskRule:

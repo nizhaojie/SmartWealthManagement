@@ -7,7 +7,7 @@
 
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -16,7 +16,9 @@ from app.auth.roles import RISK_OFFICER
 from app.db.models import Employee, RiskAlert
 from app.db.session import get_session
 from app.http import ok
+from app.pagination import PageParams, page_params
 from app.risk_monitoring import alert_service, alerting, disposition
+from app.risk_monitoring.alert_service import AlertOrder
 from app.work_order import service as work_orders
 
 router = APIRouter(prefix="/api/internal/risk-alerts")
@@ -42,8 +44,11 @@ def _disposition_response(alert: RiskAlert, employee: Employee) -> dict:
 def list_risk_alerts(
     alert_level: str | None = None,
     status: str | None = None,
+    customer_id: int | None = None,
     created_from: datetime | None = None,
     created_to: datetime | None = None,
+    order_by: AlertOrder = Query(default="created_desc", description="排序方式"),
+    page: PageParams = Depends(page_params),
     employee: Employee = Depends(current_employee),
     db: Session = Depends(get_session),
 ):
@@ -51,10 +56,13 @@ def list_risk_alerts(
         alert_service.list_alerts(
             db,
             employee=employee,
+            page=page,
             alert_level=alert_level,
             status=status,
+            customer_id=customer_id,
             created_from=created_from,
             created_to=created_to,
+            order_by=order_by,
         )
     )
 

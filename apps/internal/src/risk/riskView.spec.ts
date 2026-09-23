@@ -1,34 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { ACCOUNT_MANAGER, ADVISOR, RISK_OFFICER } from "../auth/identity";
 import {
+  ALERT_SORT_OPTIONS,
   alertSourceNote,
   alertSourceTagType,
   canDeriveWorkOrder,
   canDispose,
   levelTagType,
-  sortAlerts,
   statusTagType,
 } from "./riskView";
-import type { AlertSummary } from "./types";
-
-function alert(id: number, confidence: number): AlertSummary {
-  return {
-    id,
-    customer_id: 1,
-    customer_name: "王客户",
-    alert_type: "大额转账",
-    alert_level: "重度",
-    confidence,
-    rule_codes: ["R001"],
-    rule_count: 1,
-    transaction_ids: [],
-    status: "未处理",
-    source: "客户发起",
-    created_at: "2026-09-18T10:00:00",
-    work_order_id: null,
-    work_order_status: null,
-  };
-}
 
 describe("预警的处置权限", () => {
   it("只有风控专员能处置未处理的预警", () => {
@@ -45,20 +25,17 @@ describe("预警的处置权限", () => {
   });
 });
 
-describe("预警排序与标签", () => {
-  it("默认保持服务端顺序（最新在前）", () => {
-    const alerts = [alert(3, 0.2), alert(2, 0.9)];
-    expect(sortAlerts(alerts, "created_desc").map((item) => item.id)).toEqual([3, 2]);
+describe("预警排序选项", () => {
+  it("排序都在服务端做：选项里给出「按等级（重到轻）」，且默认最新在前", () => {
+    // 这里不排序，只交代下拉里有哪些档、默认是哪一档——排序结果由后端给出
+    // （ADR-0024），前端不再留一份本地排序。
+    expect(ALERT_SORT_OPTIONS[0].value).toBe("created_desc");
+    expect(ALERT_SORT_OPTIONS.map((option) => option.value)).toContain("level_desc");
+    expect(ALERT_SORT_OPTIONS.every((option) => option.label.length > 0)).toBe(true);
   });
+});
 
-  it("按置信度排序时并列的新的在前，且不改动原数组", () => {
-    const alerts = [alert(3, 0.5), alert(1, 0.5), alert(2, 0.9)];
-    const sorted = sortAlerts(alerts, "confidence_desc");
-
-    expect(sorted.map((item) => item.id)).toEqual([2, 3, 1]);
-    expect(alerts.map((item) => item.id)).toEqual([3, 1, 2]);
-  });
-
+describe("预警标签", () => {
   it("等级与状态映射到标签色", () => {
     expect(levelTagType("重度")).toBe("danger");
     expect(levelTagType("轻度")).toBe("info");

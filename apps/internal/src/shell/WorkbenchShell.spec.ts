@@ -1,5 +1,8 @@
 // 侧栏底部的「今日风险预警」小卡三个角色都可见；N=0 给空态文案而不是隐藏，
 // 加载失败给「暂不可用」——它是壳层对 GET /api/internal/risk-alerts 的一次额外调用。
+//
+// 小卡显示的是**过滤后的总数**（ADR-0024），不是第一页的条数：它只要一个数字，
+// 所以请求里带的是 `page_size=1`，读的是响应里的 `total`。
 import ElementPlus from "element-plus";
 import { createPinia, setActivePinia, type Pinia } from "pinia";
 import { flushPromises, mount, type VueWrapper } from "@vue/test-utils";
@@ -30,6 +33,11 @@ function alertRow(id: number) {
     work_order_id: null,
     work_order_status: null,
   };
+}
+
+/** 列表接口的一页：**总数与这一页的条数可以不同**，小卡要读的是前者。 */
+function alertPage(rows: unknown[], total = rows.length) {
+  return { items: rows, total, page: 1, page_size: 1 };
 }
 
 async function mountApp(responder: (url: string) => unknown): Promise<VueWrapper> {
@@ -66,8 +74,11 @@ afterEach(() => {
 
 describe("今日风险预警小卡", () => {
   it("有未处理预警时显示待处置条数", async () => {
+    // 只回来一条而总数是 2：小卡读的是 `total`，数 `items` 会少报 1 条。
     const app = await mountApp((url) =>
-      url.includes("/api/internal/risk-alerts") ? [alertRow(1), alertRow(2)] : undefined,
+      url.includes("/api/internal/risk-alerts")
+        ? alertPage([alertRow(1)], 2)
+        : undefined,
     );
 
     expect(app.get('[data-testid="today-risk-alerts-count"]').text()).toBe("2");
@@ -76,7 +87,7 @@ describe("今日风险预警小卡", () => {
 
   it("N=0 时给空态文案，而不是把卡片藏起来", async () => {
     const app = await mountApp((url) =>
-      url.includes("/api/internal/risk-alerts") ? [] : undefined,
+      url.includes("/api/internal/risk-alerts") ? alertPage([]) : undefined,
     );
 
     expect(app.find('[data-testid="today-risk-alerts"]').exists()).toBe(true);

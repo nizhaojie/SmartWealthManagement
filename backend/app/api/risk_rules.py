@@ -10,6 +10,7 @@ from app.auth.roles import RISK_OFFICER
 from app.db.models import Employee
 from app.db.session import get_session
 from app.http import ok
+from app.pagination import PageParams, page_params, paginated_response
 from app.risk_monitoring import service
 
 router = APIRouter(prefix="/api/internal/risk-rules")
@@ -31,10 +32,16 @@ class ThresholdUpdateRequest(BaseModel):
 
 @router.get("")
 def list_risk_rules(
+    page: PageParams = Depends(page_params),
     db: Session = Depends(get_session),
     _auth: AuthContext = Depends(require_internal),
 ):
-    return ok([service.rule_response(rule) for rule in service.list_rules(db)])
+    rules, total = service.list_rules(db, page=page)
+    return ok(
+        paginated_response(
+            [service.rule_response(rule) for rule in rules], total=total, params=page
+        )
+    )
 
 
 @router.get("/{rule_id}/changes")

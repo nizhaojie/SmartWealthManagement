@@ -14,6 +14,9 @@ from typing import Any, Generic, TypeVar
 
 from fastapi import Depends, Query
 from pydantic import BaseModel
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session
+from sqlalchemy.sql import Select
 
 DEFAULT_PAGE_SIZE = 20
 MAX_PAGE_SIZE = 100
@@ -56,6 +59,33 @@ def page_params(
     return PageParams(page=page, page_size=min(page_size, MAX_PAGE_SIZE))
 
 
+def count_matching(db: Session, statement: Select) -> int:
+    """这条查询一共命中多少行——`total` 的取法。
+
+    把筛选条件、连接与可见范围写成**一条**查询，`total` 从它派生，而不是另写一条
+    `select(func.count())` 把条件再抄一遍：抄第二遍就会漂，而漂的表现是「共 N 条」与
+    翻到底能看到的条数对不上——两个数字都像是真的，谁也不报错。
+
+    排序在这里被去掉（`order_by(None)`）：子查询里的顺序不参与计数，留着只会让数据库
+    多做一次排序。
+    """
+    inner = statement.order_by(None).subquery()
+    return db.scalar(select(func.count()).select_from(inner)) or 0
+
+
+def paginated_response(
+    items: Sequence[ItemT], *, total: int, params: PageParams
+) -> dict[str, Any]:
+    """当前页的条目 + 过滤后总数 → 统一响应形状。
+
+    形状只在这里拼一次。调用方分两种：`paginate` 拿全量列表在内存里切片；SQL 层自己
+    `offset`/`limit` 的接口把切好的页和另一条 count 查询给来的 `total` 交给这里。
+    """
+    return PaginatedResponse(
+        items=list(items), total=total, page=params.page, page_size=params.page_size
+    ).model_dump()
+
+
 def paginate(items: Sequence[ItemT], *, params: PageParams) -> dict[str, Any]:
     """把**过滤之后的全量**列表切成当前页。
 
@@ -65,6 +95,4 @@ def paginate(items: Sequence[ItemT], *, params: PageParams) -> dict[str, Any]:
     `total` 是全集而顺序只在页内成立。
     """
     window = list(items[params.offset : params.offset + params.page_size])
-    return PaginatedResponse(
-        items=window, total=len(items), page=params.page, page_size=params.page_size
-    ).model_dump()
+    return paginated_response(window, total=len(items), params=params)

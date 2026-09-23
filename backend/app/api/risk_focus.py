@@ -15,6 +15,7 @@ from app.auth.dependencies import current_employee
 from app.db.models import Employee
 from app.db.session import get_session
 from app.http import ok
+from app.pagination import PageParams, page_params
 
 router = APIRouter(prefix="/api/internal/risk-focus")
 
@@ -22,7 +23,12 @@ router = APIRouter(prefix="/api/internal/risk-focus")
 @router.get("")
 def list_risk_focus(
     focus_type: str | None = None,
+    page: PageParams = Depends(page_params),
     employee: Employee = Depends(current_employee),
     db: Session = Depends(get_session),
 ):
-    return ok(risk_focus.list_recent(db, employee=employee, focus_type=focus_type))
+    return ok(
+        risk_focus.list_recent(
+            db, employee=employee, page=page, focus_type=focus_type
+        )
+    )

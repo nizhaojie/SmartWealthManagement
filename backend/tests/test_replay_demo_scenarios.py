@@ -511,7 +511,11 @@ def test_seven_demo_scenarios_replay_offline(replay_client: TestClient) -> None:
         headers=risk_officer,
     )
     assert response.status_code == 200
-    assert any(alert["customer_id"] == demo_id for alert in response.json()["data"])
+    # 刚造出来的那条是最新的，排序是「最新的在前」（`create_time` 倒序），所以它一定在
+    # 第一页上——即使这张表跨运行累积到装不下一页。
+    assert any(
+        alert["customer_id"] == demo_id for alert in response.json()["data"]["items"]
+    )
 
     # 场景七的自然语言查询：预置 SQL + 解读，统计数字来自刚落库的预警。
     risk_preset = replay_library.ANALYTICS_PRESETS[1]
@@ -538,7 +542,7 @@ def test_high_risk_intent_reaches_risk_focus_in_replay(replay_client: TestClient
     risk_officer = _employee_headers(client, "risk1")
     response = client.get("/api/internal/risk-focus", headers=risk_officer)
     assert response.status_code == 200
-    entries = response.json()["data"]
+    entries = response.json()["data"]["items"]
     assert any(
         entry["customer_id"] == demo_id and entry["focus_type"] == "高风险意图"
         for entry in entries

@@ -34,6 +34,11 @@ function alertRow(id: number) {
   };
 }
 
+/** 列表接口的一页（ADR-0024）。 */
+function alertPage(rows: unknown[], total = rows.length) {
+  return { items: rows, total, page: 1, page_size: 1 };
+}
+
 async function mountApp(responder?: (url: string) => unknown): Promise<VueWrapper> {
   stubApiFetch((url) => {
     if (url.includes("/api/internal/auth/me")) {
@@ -108,7 +113,9 @@ describe("侧栏折叠下的 footer 小卡", () => {
     localStorage.setItem(SIDEBAR_KEY, "true");
     role = ADVISOR;
     const app = await mountApp((url) =>
-      url.includes("/api/internal/risk-alerts") ? [alertRow(1), alertRow(2)] : undefined,
+      url.includes("/api/internal/risk-alerts")
+        ? alertPage([alertRow(1)], 2)
+        : undefined,
     );
 
     expect(app.find('[data-testid="today-risk-alerts-icon"]').exists()).toBe(true);
@@ -122,7 +129,7 @@ describe("侧栏折叠下的 footer 小卡", () => {
     localStorage.setItem(SIDEBAR_KEY, "true");
     role = ADVISOR;
     const app = await mountApp((url) =>
-      url.includes("/api/internal/risk-alerts") ? [] : undefined,
+      url.includes("/api/internal/risk-alerts") ? alertPage([]) : undefined,
     );
 
     expect(app.find('[data-testid="today-risk-alerts-icon"]').exists()).toBe(true);

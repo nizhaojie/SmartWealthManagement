@@ -14,8 +14,9 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
-from sqlalchemy import select
+from sqlalchemy import case, select
 from sqlalchemy.orm import Session
 
 from app.customer_scope import is_under_management, restrict_to_own_customers
@@ -30,8 +31,32 @@ from app.db.models import (
 )
 from app.employees import names_by_id
 from app.exceptions import AppError
+from app.pagination import PageParams, count_matching, paginated_response
 from app.risk_monitoring import alerting, disposition
+from app.risk_monitoring.grading import LEVEL_RANK
 from app.work_order import service as work_orders
+
+# 列表可以按哪几种方式排。排序**在服务端做**（ADR-0024）：分页之后前端手里的只有
+# 当前页，本地排序会让「按等级」只在这一页内成立，翻页即乱，而每一页单看都是排好的。
+AlertOrder = Literal["created_desc", "confidence_desc", "confidence_asc", "level_desc"]
+
+# 置信度是两位小数、等级只有三档，两者都会大面积并列；并列时用 `id` 倒序兜底
+# （编号随时间增长，等价于「新的在前」），顺序因此不随查询计划漂。
+#
+# 等级的次序取自 `grading.LEVEL_RANK`：中文标签的字典序是「中度 < 轻度 < 重度」，
+# 与轻重无关。
+_LEVEL_RANK_CASE = case(LEVEL_RANK, value=RiskAlert.alert_level, else_=len(LEVEL_RANK))
+
+_ORDERINGS: dict[AlertOrder, tuple] = {
+    "created_desc": (RiskAlert.create_time.desc(), RiskAlert.id.desc()),
+    "confidence_desc": (RiskAlert.confidence.desc(), RiskAlert.id.desc()),
+    "confidence_asc": (RiskAlert.confidence.asc(), RiskAlert.id.desc()),
+    "level_desc": (
+        _LEVEL_RANK_CASE.asc(),
+        RiskAlert.create_time.desc(),
+        RiskAlert.id.desc(),
+    ),
+}
 
 # 历史预警只取最近这些条：判断「偶发还是模式」看的是近期行为，而把一位客户的
 # 全部预警铺在详情页上会把当前这条淹掉。
@@ -82,36 +107,53 @@ def list_alerts(
     db: Session,
     *,
     employee: Employee,
+    page: PageParams,
     alert_level: str | None = None,
     status: str | None = None,
+    customer_id: int | None = None,
     created_from: datetime | None = None,
     created_to: datetime | None = None,
-) -> list[dict]:
-    """预警列表，按产生时间倒序。
+    order_by: AlertOrder = "created_desc",
+) -> dict:
+    """预警列表的一页。
 
-    筛选条件都是可选的事实字段：等级、状态、时间范围。默认顺序是「最新的在最前面」
-    ——预警是越新越需要看的东西；置信度排序由调用方在本地做，那是同一批数据的另一种
-    排列，不必再往返一次。
+    筛选条件都是可选的事实字段：等级、状态、客户、时间范围。默认顺序是「最新的在最
+    前面」——预警是越新越需要看的东西；排序方式由调用方指定，**在服务端生效**，所以
+    翻到第 3 页看到的仍然是「全部结果里第 3 页该有的那一段」。
+
+    `customer_id` 是给右侧检查器用的：它要看的是「这位客户的预警」，靠自己在前端过滤
+    只过滤得动已经拿回来的那一页。
     """
-    query = select(RiskAlert, Customer.real_name).join(
-        Customer, Customer.id == RiskAlert.customer_id
-    )
+    conditions = []
     if restrict_to_own_customers(employee):
-        query = query.where(Customer.manager_id == employee.id)
+        conditions.append(Customer.manager_id == employee.id)
     if alert_level is not None:
-        query = query.where(RiskAlert.alert_level == alert_level)
+        conditions.append(RiskAlert.alert_level == alert_level)
     if status is not None:
-        query = query.where(RiskAlert.status == status)
+        conditions.append(RiskAlert.status == status)
+    if customer_id is not None:
+        conditions.append(RiskAlert.customer_id == customer_id)
     if created_from is not None:
-        query = query.where(RiskAlert.create_time >= created_from)
+        conditions.append(RiskAlert.create_time >= created_from)
     if created_to is not None:
-        query = query.where(RiskAlert.create_time <= created_to)
+        conditions.append(RiskAlert.create_time <= created_to)
 
-    rows = db.execute(query.order_by(RiskAlert.create_time.desc(), RiskAlert.id.desc())).all()
+    # `total` 由这条查询派生（`count_matching`），条件只写一遍：各写一遍必然漂移。
+    base = (
+        select(RiskAlert, Customer.real_name)
+        .join(Customer, Customer.id == RiskAlert.customer_id)
+        .where(*conditions)
+    )
+    total = count_matching(db, base)
+    rows = db.execute(
+        base.order_by(*_ORDERINGS[order_by]).offset(page.offset).limit(page.page_size)
+    ).all()
+
+    # 工单与来源只查这一页的行：逐行查是 N 次往返，全表查则等于没分页。
     alerts = [alert for alert, _name in rows]
     orders = _work_orders_by_alert(db, {alert.id for alert in alerts})
     sources = alerting.alert_sources(db, alerts)
-    return [
+    items = [
         _summary(
             alert,
             customer_name=name,
@@ -120,6 +162,7 @@ def list_alerts(
         )
         for alert, name in rows
     ]
+    return paginated_response(items, total=total or 0, params=page)
 
 
 def _transactions(db: Session, transaction_ids: list[int]) -> list[dict]:

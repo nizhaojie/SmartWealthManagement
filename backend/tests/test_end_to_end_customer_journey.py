@@ -816,7 +816,7 @@ def _walk_full_journey(
     assert focus.status_code == 200
     assert any(
         row["customer_id"] == customer_id and row["focus_type"] == "风控预警"
-        for row in focus.json()["data"]
+        for row in focus.json()["data"]["items"]
     )
 
     # ---- 工单处置：预警派生工单 → 受理 → 办结，每次流转都有理由 ----
@@ -904,7 +904,7 @@ def _walk_full_journey(
     )
     assert focus.status_code == 200
     intent_rows = [
-        row for row in focus.json()["data"] if row["customer_id"] == customer_id
+        row for row in focus.json()["data"]["items"] if row["customer_id"] == customer_id
     ]
     assert intent_rows and intent_rows[0]["trace_id"] == trace_id
 

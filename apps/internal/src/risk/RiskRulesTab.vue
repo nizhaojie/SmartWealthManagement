@@ -1,6 +1,10 @@
 <script setup lang="ts">
+// 规则管理：启停与阈值调整都只放开给风控专员，其他角色看到的是只读表格。
+//
+// 列表分页由 `usePagination` 接管（ADR-0024）。规则按编号升序，是唯一一个排序键
+// 本来就稳定（编号唯一）的列表，所以这里没有排序控件。
 import { computed, onMounted, ref } from "vue";
-import { PanelCard } from "@wealth/shared";
+import { PaginationBar, PanelCard, usePagination } from "@wealth/shared";
 import { ElMessage } from "element-plus";
 import { errorMessage } from "../format";
 import { useAuthStore } from "../stores/auth";
@@ -9,15 +13,10 @@ import type { RiskRule } from "./types";
 import { canManageRiskRules, type TabSummary } from "./riskView";
 import { useTabSummary } from "./useTabSummary";
 
-// 规则管理：启停与阈值调整都只放开给风控专员，其他角色看到的是只读表格。
 const emit = defineEmits<{ summary: [value: TabSummary] }>();
 
 const auth = useAuthStore();
 const canManage = computed(() => canManageRiskRules(auth.currentEmployee?.employee_role));
-
-const rules = ref<RiskRule[]>([]);
-const loading = ref(true);
-const ruleError = ref("");
 
 const editing = ref<RiskRule | null>(null);
 const dialogOpen = ref(false);
@@ -26,33 +25,39 @@ const thresholdReason = ref("");
 const thresholdError = ref("");
 const saving = ref(false);
 
-const enabledCount = computed(() => rules.value.filter((rule) => rule.enabled).length);
+// 写操作的失败原因自己留一份，不复用列表的 `errorMessage`：`refresh()` 每次取数都会
+// 把那个清空，于是「启停变更失败」会在随后那次成功重取的瞬间消失，只剩一个退回去的
+// 开关，看起来像什么都没发生。
+const actionError = ref("");
 
-async function loadRules(): Promise<void> {
-  loading.value = true;
-  ruleError.value = "";
-  try {
-    rules.value = await listRiskRules();
-  } catch (error) {
-    rules.value = [];
-    ruleError.value = errorMessage(error, "规则列表加载失败");
-  } finally {
-    loading.value = false;
-  }
-}
+const {
+  items: rules,
+  total,
+  page,
+  pageSize,
+  loading,
+  errorMessage: ruleError,
+  refresh,
+  goTo,
+  reset,
+} = usePagination<RiskRule>((query) => listRiskRules(query), {
+  failureMessage: "规则列表加载失败",
+});
+
+const enabledCount = computed(() => rules.value.filter((rule) => rule.enabled).length);
 
 function replaceRule(next: RiskRule): void {
   rules.value = rules.value.map((rule) => (rule.id === next.id ? next : rule));
 }
 
 async function toggleRule(rule: RiskRule, value: string | number | boolean): Promise<void> {
-  ruleError.value = "";
+  actionError.value = "";
   try {
     replaceRule(await setRiskRuleEnabled(rule.id, Boolean(value)));
   } catch (error) {
-    ruleError.value = errorMessage(error, "启停变更失败");
-    // 变更失败时以服务端为准重新拉一次，别让开关停在一个假的档位上。
-    await loadRules();
+    actionError.value = errorMessage(error, "启停变更失败");
+    // 变更失败时以服务端为准重取当前这一页，别让开关停在一个假的档位上。
+    await refresh();
   }
 }
 
@@ -84,13 +89,17 @@ async function submitThreshold(): Promise<void> {
   }
 }
 
-onMounted(loadRules);
+onMounted(() => {
+  void reset();
+});
 
 useTabSummary(
   (value) => emit("summary", value),
   () => ({
-    headline: `共 ${rules.value.length} 条规则 · ${enabledCount.value} 条启用`,
-    count: rules.value.length,
+    // 「共 N 条」是过滤后的总数，不是本页条数；启用条数只数得到本页，因此说清是「本页」，
+    // 否则分页一开，这个数字会随翻页变。
+    headline: `共 ${total.value} 条规则 · 本页 ${enabledCount.value} 条启用`,
+    count: total.value,
   }),
 );
 </script>
@@ -98,8 +107,13 @@ useTabSummary(
 <template>
   <div class="rules">
     <PanelCard title="规则管理">
-      <p v-if="ruleError" class="rules__error" role="alert" data-testid="rule-error">
-        {{ ruleError }}
+      <p
+        v-if="ruleError || actionError"
+        class="rules__error"
+        role="alert"
+        data-testid="rule-error"
+      >
+        {{ ruleError || actionError }}
       </p>
       <p v-if="!loading && !rules.length && !ruleError" class="rules__empty">还没有风控规则。</p>
       <p v-else-if="!canManage" class="rules__hint" data-testid="rule-read-only">
@@ -136,6 +150,16 @@ useTabSummary(
           </template>
         </el-table-column>
       </el-table>
+
+      <!-- 取不到时 `total` 归零，分页条与表格同进同退：没有规则时它不该出现。 -->
+      <PaginationBar
+        v-if="total > 0"
+        :total="total"
+        :page="page"
+        :page-size="pageSize"
+        :disabled="loading"
+        @update:page="goTo"
+      />
     </PanelCard>
 
     <el-dialog v-model="dialogOpen" :title="editing ? `调整阈值：${editing.rule_name}` : '调整阈值'" width="440px">

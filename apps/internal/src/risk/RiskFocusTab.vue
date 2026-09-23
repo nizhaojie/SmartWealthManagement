@@ -1,41 +1,44 @@
 <script setup lang="ts">
+// 风险关注是只读的：它是别的 Agent 留下的提示记录，要处置就另开工单。
+//
+// 分页由 `usePagination` 接管（ADR-0024）：改类型筛选是「换了一批数据」，回到第一页
+// 再取；翻页只换页码，筛选条件留在表单里不动。
 import { onMounted, ref, watch } from "vue";
-import { PanelCard } from "@wealth/shared";
-import { errorMessage, formatDateTime } from "../format";
+import { PaginationBar, PanelCard, usePagination } from "@wealth/shared";
+import { formatDateTime } from "../format";
 import { listRiskFocus } from "./api";
 import { FOCUS_TYPES, type FocusType, type RiskFocus } from "./types";
 import { focusSourceLabel, type TabSummary } from "./riskView";
 import { useTabSummary } from "./useTabSummary";
 
-// 风险关注是只读的：它是别的 Agent 留下的提示记录，要处置就另开工单。
 const emit = defineEmits<{ summary: [value: TabSummary] }>();
 
-const focus = ref<RiskFocus[]>([]);
-const loading = ref(true);
-const focusError = ref("");
 const focusTypeFilter = ref<FocusType | "">("");
 
-async function loadFocus(): Promise<void> {
-  loading.value = true;
-  focusError.value = "";
-  try {
-    focus.value = await listRiskFocus(focusTypeFilter.value || undefined);
-  } catch (error) {
-    focus.value = [];
-    focusError.value = errorMessage(error, "风险关注加载失败");
-  } finally {
-    loading.value = false;
-  }
-}
+const {
+  items,
+  total,
+  page,
+  pageSize,
+  loading,
+  errorMessage: focusError,
+  goTo,
+  reset,
+} = usePagination<RiskFocus>(
+  (query) => listRiskFocus({ focusType: focusTypeFilter.value || undefined }, query),
+  { failureMessage: "风险关注加载失败" },
+);
 
-watch(focusTypeFilter, loadFocus);
-onMounted(loadFocus);
+watch(focusTypeFilter, reset);
+onMounted(() => {
+  void reset();
+});
 
 useTabSummary(
   (value) => emit("summary", value),
   () => ({
     headline: `类型 ${focusTypeFilter.value || "全部"} · 只读`,
-    count: focus.value.length,
+    count: total.value,
   }),
 );
 </script>
@@ -61,11 +64,11 @@ useTabSummary(
       <p v-if="focusError" class="focus__error" role="alert" data-testid="focus-error">
         {{ focusError }}
       </p>
-      <p v-else-if="!loading && !focus.length" class="focus__empty" data-testid="focus-empty">
+      <p v-else-if="!loading && !items.length" class="focus__empty" data-testid="focus-empty">
         暂无风险关注
       </p>
 
-      <el-table v-if="focus.length" :data="focus" data-testid="focus-table">
+      <el-table v-if="items.length" :data="items" data-testid="focus-table">
         <el-table-column label="时间" width="180">
           <template #default="{ row }">{{ formatDateTime(row.occurred_at) }}</template>
         </el-table-column>
@@ -79,6 +82,16 @@ useTabSummary(
           <template #default="{ row }">{{ focusSourceLabel(row.source) }}</template>
         </el-table-column>
       </el-table>
+
+      <!-- 取不到时 `total` 归零，分页条与表格同进同退：没有记录时它不该出现。 -->
+      <PaginationBar
+        v-if="total > 0"
+        :total="total"
+        :page="page"
+        :page-size="pageSize"
+        :disabled="loading"
+        @update:page="goTo"
+      />
     </PanelCard>
   </div>
 </template>

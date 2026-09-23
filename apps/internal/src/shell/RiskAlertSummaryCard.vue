@@ -28,7 +28,10 @@ const collapsed = computed(() => layout.sidebarCollapsed);
 async function load(): Promise<void> {
   state.value = "loading";
   try {
-    pendingCount.value = (await listAlerts({ status: "未处理" })).length;
+    // 只要「有多少条待处置」这一个数字，所以只取一条、读它的 `total`：列表接口的
+    // 总数是过滤后的总数（ADR-0024），拿 `items.length` 数出来的只是第一页。
+    const page = await listAlerts({ status: "未处理" }, { page: 1, page_size: 1 });
+    pendingCount.value = page.total;
     state.value = "ready";
   } catch {
     state.value = "failed";

@@ -70,8 +70,8 @@ def _headers(client: TestClient, username: str) -> dict[str, str]:
 
 
 def _rule_id(client: TestClient, rule_code: str, headers: dict[str, str]) -> int:
-    rules = client.get("/api/internal/risk-rules", headers=headers).json()["data"]
-    return next(rule["id"] for rule in rules if rule["rule_code"] == rule_code)
+    page = client.get("/api/internal/risk-rules", headers=headers).json()["data"]
+    return next(rule["id"] for rule in page["items"] if rule["rule_code"] == rule_code)
 
 
 def _context(amount: str) -> MonitoringContext:
@@ -108,7 +108,9 @@ def test_rule_list_returns_the_twenty_rules_with_their_configuration(
     response = auth_client.get("/api/internal/risk-rules", headers=headers)
 
     assert response.status_code == 200
-    rules = response.json()["data"]
+    page = response.json()["data"]
+    assert page["total"] == 20
+    rules = page["items"]
     assert len(rules) == 20
 
     first = rules[0]

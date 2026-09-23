@@ -116,9 +116,13 @@ def _transfer(client: TestClient, *, amount: str, username: str = CUSTOMER, **ex
 
 
 def _list_alerts(client: TestClient, headers: dict[str, str]) -> list[dict]:
+    """列出来的预警（列表接口的一页，形状是 `{items, total, page, page_size}`）。
+
+    这些用例只造个位数的预警，取不满一页；分页本身另有断言（`test_risk_lists_pagination`）。
+    """
     response = client.get(ALERTS_PATH, headers=headers)
     assert response.status_code == 200, response.text
-    return response.json()["data"]
+    return response.json()["data"]["items"]
 
 
 def _detail(client: TestClient, headers: dict[str, str], alert_id: int) -> dict:

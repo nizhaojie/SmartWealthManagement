@@ -1,3 +1,4 @@
+import type { PageQuery, Paginated } from "@wealth/shared";
 import { http } from "../api/http";
 import { queryString } from "../api/query";
 import type { AnalyticsQueryInput, AnalyticsQueryResponse } from "../analytics/types";
@@ -5,6 +6,7 @@ import type { WorkOrder } from "../work-orders/types";
 import type {
   AlertDetail,
   AlertLevel,
+  AlertOrder,
   AlertStatus,
   AlertSummary,
   FocusType,
@@ -12,22 +14,36 @@ import type {
   RiskRule,
 } from "./types";
 
+/**
+ * 预警列表的查询条件：筛选与排序都在这里。
+ *
+ * 排序方式也是查询条件之一（`order_by`），排序由服务端执行（ADR-0024）——分页之后
+ * 本地排序只排得动当前页。
+ */
 export type AlertFilters = {
   alertLevel?: AlertLevel;
   status?: AlertStatus;
+  customerId?: number;
   createdFrom?: string;
   createdTo?: string;
+  orderBy?: AlertOrder;
 };
 
-export function listAlerts(filters: AlertFilters = {}): Promise<AlertSummary[]> {
-  return http.get<AlertSummary[]>(
-    `/api/internal/risk-alerts${queryString({
-      alert_level: filters.alertLevel,
-      status: filters.status,
-      created_from: filters.createdFrom,
-      created_to: filters.createdTo,
-    })}`,
-  );
+export function listAlerts(
+  filters: AlertFilters = {},
+  query: PageQuery,
+): Promise<Paginated<AlertSummary>> {
+  const search = queryString({
+    alert_level: filters.alertLevel,
+    status: filters.status,
+    customer_id: filters.customerId,
+    created_from: filters.createdFrom,
+    created_to: filters.createdTo,
+    order_by: filters.orderBy,
+    page: query.page,
+    page_size: query.page_size,
+  });
+  return http.get<Paginated<AlertSummary>>(`/api/internal/risk-alerts${search}`);
 }
 
 export function getAlert(alertId: number): Promise<AlertDetail> {
@@ -47,12 +63,21 @@ export function deriveWorkOrder(alertId: number, reason: string): Promise<WorkOr
   return http.post<WorkOrder>(`/api/internal/risk-alerts/${alertId}/work-orders`, { reason });
 }
 
-export function listRiskFocus(focusType?: FocusType): Promise<RiskFocus[]> {
-  return http.get<RiskFocus[]>(`/api/internal/risk-focus${queryString({ focus_type: focusType })}`);
+export function listRiskFocus(
+  filters: { focusType?: FocusType } = {},
+  query: PageQuery,
+): Promise<Paginated<RiskFocus>> {
+  const search = queryString({
+    focus_type: filters.focusType,
+    page: query.page,
+    page_size: query.page_size,
+  });
+  return http.get<Paginated<RiskFocus>>(`/api/internal/risk-focus${search}`);
 }
 
-export function listRiskRules(): Promise<RiskRule[]> {
-  return http.get<RiskRule[]>("/api/internal/risk-rules");
+export function listRiskRules(query: PageQuery): Promise<Paginated<RiskRule>> {
+  const search = queryString({ page: query.page, page_size: query.page_size });
+  return http.get<Paginated<RiskRule>>(`/api/internal/risk-rules${search}`);
 }
 
 export function setRiskRuleEnabled(ruleId: number, enabled: boolean): Promise<RiskRule> {

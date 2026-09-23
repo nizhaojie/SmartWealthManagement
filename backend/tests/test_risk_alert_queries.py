@@ -146,7 +146,7 @@ def _submit_alert(
 def _list(client: TestClient, headers: dict[str, str], **params) -> list[dict]:
     response = client.get(ALERTS_PATH, headers=headers, params=params)
     assert response.status_code == 200, response.text
-    return response.json()["data"]
+    return response.json()["data"]["items"]
 
 
 def _detail(client: TestClient, headers: dict[str, str], alert_id: int) -> dict:
@@ -310,7 +310,7 @@ def test_the_threshold_in_the_evidence_is_the_one_that_was_in_force_when_it_fire
     alert = _submit_alert(auth_client, engine, headers, amount=LIGHT_AMOUNT)
     assert _hit(_detail(auth_client, headers, alert["id"]), "R001")["threshold"] == "50000"
 
-    rules = auth_client.get("/api/internal/risk-rules", headers=headers).json()["data"]
+    rules = auth_client.get("/api/internal/risk-rules", headers=headers).json()["data"]["items"]
     r001 = next(rule for rule in rules if rule["rule_code"] == "R001")
     try:
         raised = auth_client.patch(

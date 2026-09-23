@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch, type Ref } from "vue";
-import { MeterBar, PanelCard, type Accent } from "@wealth/shared";
+import { MeterBar, PanelCard, type Accent, type Paginated } from "@wealth/shared";
 import {
   formatConfidence,
   formatDateTime,
@@ -27,15 +27,19 @@ import type { InspectorLoadState } from "./types";
  * 外加一次 `GET /api/internal/customers` 只为拿客户分层——接口里没有单客户详情，
  * 而分层是客户卡要展示的字段之一。
  *
- * `GET /api/internal/risk-alerts` 没有 `customer_id` 过滤，只能拉列表后按
- * `customer_id` 前端过滤；列表本身已按角色收窄（客户经理只看得到名下客户）。
+ * 预警那一路直接带上 `customer_id` 过滤并只取三条：列表分页之后，拉回来再在前端
+ * 过滤只过滤得动当前页——「这位客户的预警」会变成「这位客户排在首页的那几条」，
+ * 而卡片上仍然写着「共 N 条」。总数由服务端给的 `total` 说话。
  */
 const store = useCurrentCustomerStore();
 const customerId = computed(() => store.currentCustomerId);
 
+// 卡片只列最近三条，就只要三条：多余的记录取回来也没地方放。
+const ALERTS_SHOWN = 3;
+
 const profile = ref<CustomerProfileView | null>(null);
 const assets = ref<CustomerAssets | null>(null);
-const alerts = ref<AlertSummary[] | null>(null);
+const alerts = ref<Paginated<AlertSummary> | null>(null);
 const directory = ref<CustomerListItem[] | null>(null);
 
 const profileState = ref<InspectorLoadState>("loading");
@@ -89,7 +93,16 @@ function load(id: number): void {
 
   void loadBlock(() => getCustomerProfile(id), profile, profileState, token);
   void loadBlock(() => getCustomerAssets(id), assets, assetsState, token);
-  void loadBlock(() => listAlerts(), alerts, alertsState, token);
+  void loadBlock(
+    () =>
+      listAlerts(
+        { customerId: id },
+        { page: 1, page_size: ALERTS_SHOWN },
+      ),
+    alerts,
+    alertsState,
+    token,
+  );
   void loadBlock(() => listCustomers(), directory, directoryState, token);
 }
 
@@ -126,10 +139,10 @@ const cardState = computed<InspectorLoadState>(() => {
   return "ready";
 });
 
-const customerAlerts = computed(() => {
-  if (!alerts.value || customerId.value === null) return [];
-  return alerts.value.filter((alert) => alert.customer_id === customerId.value);
-});
+// 条目与总数都由服务端给：这一页就是「这位客户最近的几条」，`total` 是他名下的
+// 预警总数——两者不再需要（也无法）在前端对齐。
+const customerAlerts = computed(() => (customerId.value === null ? [] : (alerts.value?.items ?? [])));
+const customerAlertTotal = computed(() => (customerId.value === null ? 0 : (alerts.value?.total ?? 0)));
 
 const holdings = computed(() => assets.value?.holdings ?? []);
 
@@ -247,11 +260,11 @@ function confidenceAccent(tag: ProfileTag): Accent {
       <InspectorBlock
         title="风险预警"
         :state="alertsState"
-        :empty="customerAlerts.length === 0"
+        :empty="customerAlertTotal === 0"
         empty-text="该客户暂无预警记录。"
       >
         <ul class="alerts" data-testid="inspector-alerts">
-          <li v-for="alert in customerAlerts.slice(0, 3)" :key="alert.id" class="alerts__row">
+          <li v-for="alert in customerAlerts" :key="alert.id" class="alerts__row">
             <span class="alerts__type">{{ alert.alert_type }}</span>
             <span :class="`alerts__level--${levelTagType(alert.alert_level)}`">
               {{ alert.alert_level }}
@@ -260,7 +273,7 @@ function confidenceAccent(tag: ProfileTag): Accent {
             <span class="alerts__muted">{{ formatDateTime(alert.created_at) }}</span>
           </li>
         </ul>
-        <p class="inspector__total">共 {{ customerAlerts.length }} 条</p>
+        <p class="inspector__total">共 {{ customerAlertTotal }} 条</p>
       </InspectorBlock>
     </div>
   </PanelCard>

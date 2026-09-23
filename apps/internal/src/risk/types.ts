@@ -3,6 +3,14 @@ import type { WorkOrder, WorkOrderStatus } from "../work-orders/types";
 export const ALERT_LEVELS = ["轻度", "中度", "重度"] as const;
 export type AlertLevel = (typeof ALERT_LEVELS)[number];
 
+/**
+ * 预警列表的排序方式，取值就是列表接口的 `order_by` 参数（ADR-0024）。
+ *
+ * 排序**在服务端做**：分页之后前端手里只有当前页，本地排序会让「按等级」只在这一页
+ * 内成立，翻页即乱。`level_desc` 是重到轻，同级内按时间倒序。
+ */
+export type AlertOrder = "created_desc" | "confidence_desc" | "confidence_asc" | "level_desc";
+
 // 预警自身的处置状态只有这三个：未处理，以及由人做出的两个结论。没有「自动关闭」
 // 这一档——系统不会因为置信度低或超时把预警消化掉。
 export const ALERT_STATUSES = ["未处理", "已排除", "已升级"] as const;

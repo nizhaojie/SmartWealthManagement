@@ -271,7 +271,8 @@ def test_suitability_decision_records_the_assessment_it_used(auth_client: TestCl
         headers=employee,
     )
     assert history.status_code == 200
-    latest_assessment = history.json()["data"][-1]
+    # 历次测评最近的在前（ADR-0024）：最新的一次是第一页的第一条。
+    latest_assessment = history.json()["data"]["items"][0]
     assert latest_assessment["risk_level"] == "C1"
 
     pool = auth_client.get("/api/customer/candidate-pool", headers=customer)

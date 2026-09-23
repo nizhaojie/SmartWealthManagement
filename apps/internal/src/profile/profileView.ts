@@ -1,4 +1,4 @@
-import type { CustomerProfileView, ProfileTag, RiskAssessmentRecord } from "./types";
+import type { CustomerProfileView, ProfileTag } from "./types";
 
 /** 低于这个置信度就提示「沟通前请核实来源」。 */
 export const LOW_CONFIDENCE = 0.5;
@@ -24,11 +24,14 @@ function todayIsoDate(): string {
 
 /**
  * 画像的两条警示：置信度偏低与风险评测过期。
- * 评测过期看两处——熔断原因里已写明，或最近一次评测的有效期已过。
+ *
+ * 评测过期看两处——熔断原因里已写明，或**最近那次**评测的有效期已过。后者的有效期由
+ * 资产接口给（`risk_level_valid_until`）：历次评测分页之后，前端手里的「第一条」只是
+ * 某一页的第一条，拿它当最近的一次会在翻页时把这条警示说错。
  */
 export function profileWarnings(
   profile: CustomerProfileView,
-  latestAssessment: RiskAssessmentRecord | undefined,
+  riskValidUntil: string | null | undefined,
 ): string[] {
   const warnings: string[] = [];
 
@@ -39,9 +42,7 @@ export function profileWarnings(
   const expiredByReason = profile.judgement.reasons.some(
     (reason) => reason.code === "ASSESSMENT_EXPIRED",
   );
-  const expiredByDate = Boolean(
-    latestAssessment && latestAssessment.valid_until < todayIsoDate(),
-  );
+  const expiredByDate = Boolean(riskValidUntil && riskValidUntil < todayIsoDate());
   if (expiredByReason || expiredByDate) {
     warnings.push("风险评测已过期，请提示客户重新评估");
   }

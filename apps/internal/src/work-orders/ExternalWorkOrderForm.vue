@@ -2,7 +2,7 @@
 import { onMounted, reactive, ref } from "vue";
 import { PanelCard } from "@wealth/shared";
 import type { FormInstance, FormRules } from "element-plus";
-import { listCustomers } from "../customers/api";
+import { listAllCustomers } from "../customers/api";
 import type { CustomerListItem } from "../customers/types";
 import { errorMessage } from "../format";
 import { createExternalWorkOrder } from "./api";
@@ -55,8 +55,10 @@ async function submit(): Promise<void> {
 }
 
 onMounted(async () => {
+  // 关联客户的下拉要的是完整目录，不是某一页：目录本身按页给（ADR-0024），
+  // 这里的取数把页翻完再拼（`listAllCustomers`）。
   try {
-    customers.value = await listCustomers();
+    customers.value = await listAllCustomers();
   } catch {
     // 客户拉不到也能建单（客户字段是可选的），不拦住建单这条路。
     customers.value = [];

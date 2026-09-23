@@ -19,7 +19,9 @@ function emptyPage(pageSize = DEFAULT_PAGE_SIZE) {
 }
 
 const DEFAULTS: [string, unknown][] = [
-  ["/api/internal/customers", []],
+  // 更具体的路径排在前面：这一串是按顺序取第一个命中的前缀。
+  ["/risk-assessments", emptyPage()],
+  ["/api/internal/customers", emptyPage()],
   ["/api/internal/risk-alerts", emptyPage()],
   ["/api/internal/risk-focus", emptyPage()],
   ["/api/internal/risk-rules", emptyPage()],

@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from app.auth.dependencies import AuthContext, require_customer, require_internal
 from app.db.session import get_session
 from app.http import ok
+from app.pagination import PageParams, page_params
 from app.redis_client import get_redis
 from app.risk_assessment.schemas import DraftAnswers, SubmitAnswers
 from app.risk_assessment.service import (
@@ -66,5 +67,6 @@ def internal_list_assessments(
     customer_id: int,
     _auth: AuthContext = Depends(require_internal),
     db: Session = Depends(get_session),
+    page: PageParams = Depends(page_params),
 ):
-    return ok(list_assessments(db, customer_id=customer_id))
+    return ok(list_assessments(db, customer_id=customer_id, page=page))

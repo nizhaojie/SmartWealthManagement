@@ -2,7 +2,7 @@
 import { computed, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import { PageHeader, PanelCard } from "@wealth/shared";
-import { listCustomers } from "../customers/api";
+import { listAllCustomers } from "../customers/api";
 import type { CustomerListItem } from "../customers/types";
 import { errorMessage, formatDateTime } from "../format";
 import SummaryCard from "../inspector/SummaryCard.vue";
@@ -41,8 +41,10 @@ const customerLabel = computed(
 );
 
 async function loadCustomers(): Promise<void> {
+  // 客户筛选的下拉要的是完整目录，不是某一页：目录本身按页给（ADR-0024），
+  // 这里的取数把页翻完再拼（`listAllCustomers`）。
   try {
-    customers.value = await listCustomers();
+    customers.value = await listAllCustomers();
   } catch {
     customers.value = [];
   }

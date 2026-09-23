@@ -9,6 +9,7 @@ from app.customer_profile.confidence import SOURCE_QUESTIONNAIRE
 from app.customer_profile.service import write_tag
 from app.db.models import CustomerProfile, RiskAssessment
 from app.exceptions import AppError
+from app.pagination import PageParams, count_matching, paginated_response
 from app.risk_assessment.grading import grade_total_score, valid_until_from
 from app.risk_assessment.questionnaire import OPTION_SCORE, QUESTION_BY_ID, public_questions
 
@@ -141,19 +142,31 @@ def get_current_result(db: Session, *, customer_id: int) -> dict:
     return result
 
 
-def list_assessments(db: Session, *, customer_id: int) -> list[dict]:
+def _serialize_assessment(row: RiskAssessment) -> dict:
+    return {
+        "id": row.id,
+        "assessment_date": row.assessment_date.isoformat(),
+        "risk_level": row.risk_level,
+        "total_score": row.total_score,
+        "valid_until": row.valid_until.isoformat(),
+    }
+
+
+def list_assessments(db: Session, *, customer_id: int, page: PageParams) -> dict:
+    """某位客户的历次风险测评，最近的一次在最前（ADR-0024）。
+
+    `total` 与页面数据从同一条查询派生（`count_matching`）：按客户收窄的条件只写一遍。
+
+    排序键是 `assessment_date` 倒序 + `id` 兜底：日期只有日精度，同一天提交的两次测评
+    （答错了重做很常见）若不分先后，翻页时同一条会被读到两次、另一条谁也读不到。
+    """
+    base = select(RiskAssessment).where(RiskAssessment.customer_id == customer_id)
+    total = count_matching(db, base)
     rows = db.scalars(
-        select(RiskAssessment)
-        .where(RiskAssessment.customer_id == customer_id)
-        .order_by(RiskAssessment.id.asc())
+        base.order_by(RiskAssessment.assessment_date.desc(), RiskAssessment.id.desc())
+        .offset(page.offset)
+        .limit(page.page_size)
     ).all()
-    return [
-        {
-            "id": row.id,
-            "assessment_date": row.assessment_date.isoformat(),
-            "risk_level": row.risk_level,
-            "total_score": row.total_score,
-            "valid_until": row.valid_until.isoformat(),
-        }
-        for row in rows
-    ]
+    return paginated_response(
+        [_serialize_assessment(row) for row in rows], total=total, params=page
+    )

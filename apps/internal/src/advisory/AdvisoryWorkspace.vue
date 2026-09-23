@@ -2,7 +2,7 @@
 import { computed, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import { PageHeader, PanelCard } from "@wealth/shared";
-import { listCustomers } from "../customers/api";
+import { listAllCustomers } from "../customers/api";
 import type { CustomerListItem } from "../customers/types";
 import { errorMessage, formatDateTime } from "../format";
 import CustomerInspector from "../inspector/CustomerInspector.vue";
@@ -53,7 +53,8 @@ async function loadAll(): Promise<void> {
     const [, nextHistory, nextCustomers] = await Promise.all([
       queue.refresh(),
       getMyHistory(),
-      listCustomers(),
+      // 生成方案要选一位客户：这里要的是完整目录而不是某一页（ADR-0024）。
+      listAllCustomers(),
     ]);
     history.value = nextHistory;
     customers.value = nextCustomers;

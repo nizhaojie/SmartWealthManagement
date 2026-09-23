@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { onMounted, ref, watch } from "vue";
 import { ElMessage } from "element-plus";
-import { PageHeader } from "@wealth/shared";
+import { PageHeader, usePagination } from "@wealth/shared";
 import { errorMessage } from "../format";
 import CustomerInspector from "../inspector/CustomerInspector.vue";
 import { actionButton } from "../shell/actionButton";
@@ -9,10 +9,10 @@ import { useInspector, useTopbarActions } from "../shell/pageSlots";
 import { useCurrentCustomerStore } from "../stores/currentCustomer";
 import { listCustomers } from "../customers/api";
 import type { CustomerListItem } from "../customers/types";
-import { getCustomerAssets, getCustomerProfile, listRiskAssessments, writeProfileTag } from "./api";
+import { getCustomerAssets, getCustomerProfile, writeProfileTag } from "./api";
 import CustomerListPanel from "./CustomerListPanel.vue";
 import ProfileMain from "./ProfileMain.vue";
-import type { CustomerAssets, CustomerProfileView, RiskAssessmentRecord } from "./types";
+import type { CustomerAssets, CustomerProfileView } from "./types";
 
 /**
  * 客户画像：左侧客户列表 + 右侧画像主体。第三栏常驻客户检查器，
@@ -20,29 +20,35 @@ import type { CustomerAssets, CustomerProfileView, RiskAssessmentRecord } from "
  */
 const currentCustomer = useCurrentCustomerStore();
 
-const customers = ref<CustomerListItem[]>([]);
-const customersLoading = ref(true);
-const customersError = ref("");
+// 关键字与页码都由服务端说话（ADR-0024）：取数闭包每次现读关键字，改完关键字 `reset()`
+// 回到第一页重取——停在第 3 页会看到「筛完就这几条」，而那不是筛选的结果，是页码的。
+const keyword = ref("");
+
+const {
+  items: customers,
+  total: customerTotal,
+  page: customerPage,
+  pageSize: customerPageSize,
+  loading: customersLoading,
+  errorMessage: customersError,
+  goTo: goToCustomerPage,
+  refresh: refreshCustomers,
+  reset: resetCustomers,
+} = usePagination<CustomerListItem>(
+  (query) => listCustomers(query, { keyword: keyword.value || undefined }),
+  { failureMessage: "客户列表加载失败" },
+);
+
+watch(keyword, () => {
+  void resetCustomers();
+});
 
 const profile = ref<CustomerProfileView | null>(null);
-const assessments = ref<RiskAssessmentRecord[]>([]);
 const assets = ref<CustomerAssets | null>(null);
 const profileLoading = ref(false);
 const profileError = ref("");
 
 const selectedId = ref<number | null>(null);
-
-async function loadCustomers(): Promise<void> {
-  customersLoading.value = true;
-  customersError.value = "";
-  try {
-    customers.value = await listCustomers();
-  } catch (error) {
-    customersError.value = errorMessage(error, "客户列表加载失败");
-  } finally {
-    customersLoading.value = false;
-  }
-}
 
 async function selectCustomer(customerId: number): Promise<void> {
   selectedId.value = customerId;
@@ -50,17 +56,14 @@ async function selectCustomer(customerId: number): Promise<void> {
   profileLoading.value = true;
   profileError.value = "";
   try {
-    const [nextProfile, nextAssessments, nextAssets] = await Promise.all([
+    const [nextProfile, nextAssets] = await Promise.all([
       getCustomerProfile(customerId),
-      listRiskAssessments(customerId),
       getCustomerAssets(customerId),
     ]);
     profile.value = nextProfile;
-    assessments.value = nextAssessments;
     assets.value = nextAssets;
   } catch (error) {
     profile.value = null;
-    assessments.value = [];
     assets.value = null;
     profileError.value = errorMessage(error, "画像加载失败");
   } finally {
@@ -70,10 +73,12 @@ async function selectCustomer(customerId: number): Promise<void> {
 
 async function refresh(): Promise<void> {
   if (selectedId.value === null) {
-    await loadCustomers();
+    // 没选人时刷新的是客户列表本身，停在当前这一页（回到第一页不是「刷新」的意思）。
+    await refreshCustomers();
     return;
   }
   await selectCustomer(selectedId.value);
+  // 历次评测不跟着重读：它是只追加的留痕，且自己有翻页控件，重读只会把页码打回第一页。
 }
 
 async function correctTag(payload: {
@@ -103,7 +108,9 @@ useTopbarActions(() => ({
   component: actionButton({ label: "刷新", name: "refresh-profile", onClick: () => void refresh() }),
 }));
 
-onMounted(loadCustomers);
+onMounted(() => {
+  void resetCustomers();
+});
 </script>
 
 <template>
@@ -116,7 +123,13 @@ onMounted(loadCustomers);
         :selected-id="selectedId"
         :loading="customersLoading"
         :error="customersError"
+        :total="customerTotal"
+        :page="customerPage"
+        :page-size="customerPageSize"
+        :keyword="keyword"
         @select="selectCustomer"
+        @update:page="goToCustomerPage"
+        @update:keyword="keyword = $event"
       />
 
       <div class="profile__main">
@@ -129,7 +142,7 @@ onMounted(loadCustomers);
         <ProfileMain
           v-else
           :profile="profile"
-          :assessments="assessments"
+          :risk-valid-until="assets?.risk_level_valid_until ?? null"
           :holdings="assets?.holdings ?? []"
           :loading="profileLoading"
           @correct="correctTag"

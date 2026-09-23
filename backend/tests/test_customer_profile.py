@@ -312,6 +312,22 @@ def test_employee_token_is_rejected_on_customer_profile(auth_client: TestClient)
     assert response.status_code in (401, 403)
 
 
+def _directory_usernames(client: TestClient, headers: dict[str, str]) -> set[str]:
+    """翻完目录的所有页再取用户名集合：目录分页了，只看第一页会漏人。"""
+    usernames: set[str] = set()
+    page = 1
+    while True:
+        listed = client.get(
+            "/api/internal/customers", headers=headers, params={"page": page, "page_size": 100}
+        )
+        assert listed.status_code == 200
+        data = listed.json()["data"]
+        usernames |= {row["username"] for row in data["items"]}
+        if page * data["page_size"] >= data["total"]:
+            return usernames
+        page += 1
+
+
 def test_account_manager_only_sees_their_own_customers(auth_client: TestClient):
     # 客户经理的客户目录按归属收窄：只能看到自己名下的客户，看不到其他
     # 客户经理名下的客户。
@@ -321,19 +337,13 @@ def test_account_manager_only_sees_their_own_customers(auth_client: TestClient):
     )
     manager_headers = {"Authorization": f"Bearer {response.json()['data']['access_token']}"}
 
-    listed = auth_client.get("/api/internal/customers", headers=manager_headers)
-    assert listed.status_code == 200
-    usernames = {row["username"] for row in listed.json()["data"]}
     # manager1 名下只有 wangc1 / lisic2 / zhangc3；zhaoc4 / qianc5 归 manager2。
-    assert usernames == {"wangc1", "lisic2", "zhangc3"}
+    assert _directory_usernames(auth_client, manager_headers) == {"wangc1", "lisic2", "zhangc3"}
 
 
 def test_advisor_sees_the_full_customer_directory(auth_client: TestClient):
     # 理财顾问不受归属收窄，能看到全量客户目录。
-    listed = auth_client.get("/api/internal/customers", headers=_employee_headers(auth_client))
-    assert listed.status_code == 200
-    usernames = {row["username"] for row in listed.json()["data"]}
-    assert SEEDED_USERNAMES <= usernames
+    assert SEEDED_USERNAMES <= _directory_usernames(auth_client, _employee_headers(auth_client))
 
 
 def _id_number_for_age(age: int) -> str:

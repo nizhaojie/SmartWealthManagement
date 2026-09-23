@@ -9,7 +9,7 @@ import {
   gradeCaption,
   toPercent,
 } from "../format";
-import { listCustomers } from "../customers/api";
+import { listAllCustomers } from "../customers/api";
 import type { CustomerListItem } from "../customers/types";
 import { getCustomerAssets, getCustomerProfile } from "../profile/api";
 import type { CustomerAssets, CustomerProfileView, ProfileTag } from "../profile/types";
@@ -103,7 +103,8 @@ function load(id: number): void {
     alertsState,
     token,
   );
-  void loadBlock(() => listCustomers(), directory, directoryState, token);
+  // 客户分层要从目录里查：目录按页给（ADR-0024），这里把页翻完再找那一位。
+  void loadBlock(() => listAllCustomers(), directory, directoryState, token);
 }
 
 watch(

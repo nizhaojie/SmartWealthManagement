@@ -1,4 +1,6 @@
+import type { PageQuery, Paginated } from "@wealth/shared";
 import { http } from "../api/http";
+import { queryString } from "../api/query";
 import type { CustomerAssets, CustomerProfileView, RiskAssessmentRecord } from "./types";
 
 export function getCustomerProfile(customerId: number): Promise<CustomerProfileView> {
@@ -9,8 +11,20 @@ export function getCustomerAssets(customerId: number): Promise<CustomerAssets> {
   return http.get<CustomerAssets>(`/api/internal/customers/${customerId}/assets`);
 }
 
-export function listRiskAssessments(customerId: number): Promise<RiskAssessmentRecord[]> {
-  return http.get<RiskAssessmentRecord[]>(`/api/internal/customers/${customerId}/risk-assessments`);
+/**
+ * 某位客户的历次风险评测，最近的一次在最前（ADR-0024）。
+ *
+ * 与画像分开取：画像是「现在是什么样」，评测历史是一条独立列表——它随页数增长，
+ * 不该被塞进画像里一次性给完。
+ */
+export function listRiskAssessments(
+  customerId: number,
+  query: PageQuery,
+): Promise<Paginated<RiskAssessmentRecord>> {
+  const search = queryString({ page: query.page, page_size: query.page_size });
+  return http.get<Paginated<RiskAssessmentRecord>>(
+    `/api/internal/customers/${customerId}/risk-assessments${search}`,
+  );
 }
 
 /**

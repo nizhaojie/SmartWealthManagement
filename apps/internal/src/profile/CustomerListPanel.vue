@@ -1,48 +1,63 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
-import { PanelCard } from "@wealth/shared";
+import { ref } from "vue";
+import { PaginationBar, PanelCard } from "@wealth/shared";
 import type { CustomerListItem } from "../customers/types";
 
-// 客户列表：只负责选人，画像怎么画是主体那一半的事。
+/**
+ * 客户列表：只负责选人，画像怎么画是主体那一半的事。
+ *
+ * 关键字的筛选与翻页都在服务端（ADR-0024）：目录分页之后这里手里只有一页，本地过滤
+ * 只过滤得动这一页——筛掉的人仍然在同一个接口的下一页里。输入框因此留一份草稿，按下
+ * 查询（或回车）才交出去，交出去之后由页面回到第一页重取。
+ */
 const props = defineProps<{
   customers: CustomerListItem[];
   selectedId: number | null;
   loading: boolean;
   error: string;
+  /** 过滤后的客户总数，由服务端给。 */
+  total: number;
+  page: number;
+  pageSize: number;
+  /** 已经在生效的关键字。 */
+  keyword: string;
 }>();
 
-const emit = defineEmits<{ select: [customerId: number] }>();
+const emit = defineEmits<{
+  select: [customerId: number];
+  "update:page": [page: number];
+  "update:keyword": [keyword: string];
+}>();
 
-const keyword = ref("");
+const draft = ref(props.keyword);
 
-const filtered = computed(() => {
-  const text = keyword.value.trim();
-  if (!text) return props.customers;
-  return props.customers.filter(
-    (customer) => customer.real_name.includes(text) || customer.username.includes(text),
-  );
-});
+function applyKeyword(): void {
+  emit("update:keyword", draft.value.trim());
+}
 </script>
 
 <template>
   <PanelCard title="客户">
-    <el-input
-      v-model="keyword"
-      name="customer-keyword"
-      placeholder="按姓名或账号过滤"
-      class="list__search"
-    />
+    <form class="search" data-testid="customer-search" @submit.prevent="applyKeyword">
+      <el-input
+        v-model="draft"
+        name="customer-keyword"
+        placeholder="按姓名或账号过滤"
+        class="search__input"
+      />
+      <el-button native-type="submit" name="search-customers" :loading="loading">查询</el-button>
+    </form>
 
     <p v-if="error" class="list__error" role="alert" data-testid="customer-list-error">
       {{ error }}
     </p>
     <p v-else-if="loading" class="list__hint">加载中…</p>
-    <p v-else-if="!filtered.length" class="list__hint" data-testid="customer-list-empty">
+    <p v-else-if="!customers.length" class="list__hint" data-testid="customer-list-empty">
       没有匹配的客户。
     </p>
 
     <ul v-else class="list">
-      <li v-for="customer in filtered" :key="customer.id">
+      <li v-for="customer in customers" :key="customer.id">
         <button
           type="button"
           class="list__item"
@@ -58,12 +73,31 @@ const filtered = computed(() => {
         </button>
       </li>
     </ul>
+
+    <!-- 取不到时 `total` 归零，分页条与列表同进同退；越界页 `items` 为空但 `total`
+         不变，所以它仍然留着——撤掉它，人就困在那一页上。 -->
+    <PaginationBar
+      v-if="total > 0"
+      :total="total"
+      :page="page"
+      :page-size="pageSize"
+      :disabled="loading"
+      @update:page="emit('update:page', $event)"
+    />
   </PanelCard>
 </template>
 
 <style scoped>
-.list__search {
+.search {
+  display: flex;
+  align-items: center;
+  gap: var(--wm-space-2);
   margin-bottom: var(--wm-space-3);
+}
+
+.search__input {
+  flex: 1;
+  min-width: 0;
 }
 
 .list {

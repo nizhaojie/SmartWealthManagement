@@ -7,17 +7,19 @@ import AllocationComparisonChart from "./AllocationComparisonChart.vue";
 import ProfileHistoryPanel from "./ProfileHistoryPanel.vue";
 import ProfileTagsPanel from "./ProfileTagsPanel.vue";
 import { profileWarnings, targetAllocationOf } from "./profileView";
-import type {
-  CustomerProfileView,
-  Holding,
-  RiskAssessmentRecord,
-} from "./types";
+import type { CustomerProfileView, Holding } from "./types";
 
 // 画像主体：档案头、警示、熔断与评级、两张图，再把标签与历史交给下层两块。
 // 它不直接调接口——数据由工作区拉好传进来，修正动作也往上抛。
 const props = defineProps<{
   profile: CustomerProfileView;
-  assessments: RiskAssessmentRecord[];
+  /**
+   * 当前风险评测的有效期（资产接口给的结论，取的就是最近那次评测）。
+   *
+   * 警示的「是否过期」看它，而不是看历次评测里的第一条：评测历史分页之后，
+   * `items[0]` 只是**当前这一页**的第一条，翻到第二页就不再是最近的那次评测了。
+   */
+  riskValidUntil: string | null;
   holdings: Holding[];
   loading?: boolean;
 }>();
@@ -26,9 +28,7 @@ const emit = defineEmits<{
   correct: [payload: { tagKey: string; value: unknown; reason: string }];
 }>();
 
-const warnings = computed(() =>
-  profileWarnings(props.profile, props.assessments[0]),
-);
+const warnings = computed(() => profileWarnings(props.profile, props.riskValidUntil));
 
 const targetAllocation = computed(() => targetAllocationOf(props.profile.tags));
 </script>
@@ -80,7 +80,7 @@ const targetAllocation = computed(() => targetAllocationOf(props.profile.tags));
     />
 
     <ProfileHistoryPanel
-      :assessments="assessments"
+      :customer-id="profile.customer_id"
       :conflicts="profile.conflict_records"
     />
 

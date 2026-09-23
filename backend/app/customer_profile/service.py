@@ -4,7 +4,7 @@ from decimal import Decimal
 from typing import Any
 
 import redis
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app import degradation
@@ -31,6 +31,7 @@ from app.db.models import (
     Transaction,
 )
 from app.exceptions import AppError
+from app.pagination import PageParams, count_matching, paginated_response
 from app.tracing import get_trace_id
 
 CACHE_KEY_PREFIX = "customer_profile:"
@@ -457,24 +458,77 @@ def _bigrams(text: str) -> set[str]:
     return {f"{chars[index]}{chars[index + 1]}" for index in range(len(chars) - 1)}
 
 
-def list_customers(db: Session, *, manager_id: int | None = None) -> list[dict]:
-    query = select(Customer)
+def _like_pattern(keyword: str) -> str:
+    """关键字 → LIKE 模式。
+
+    `%` 与 `_` 是用户在搜索框里打出来的字，不是通配符：不转义的话，打一个 `%` 会
+    把整个目录都筛出来——那时的界面和「什么都没筛」长得一模一样。
+    """
+    escaped = keyword.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return f"%{escaped}%"
+
+
+def list_customers(
+    db: Session,
+    *,
+    manager_id: int | None = None,
+    keyword: str | None = None,
+    page: PageParams,
+) -> dict:
+    """客户目录的一页（ADR-0024）。
+
+    关键字筛选在服务端做：目录分页之后前端手里只有一页，在浏览器里过滤只过滤得动这一
+    页——「共 N 条」会变成「这一页里筛出了几条」。`total` 与筛选条件都从同一条查询派生
+    （`count_matching`），条件只写一遍。
+
+    画像映射只取**页内**客户的那几行。原先这里是 `select(CustomerProfile).all()`：目录
+    分页只切客户那一半的话，响应看起来完全正常（`items` 是这一页、`total` 是总数），
+    但每一次翻页仍然把整张画像表读了一遍。
+
+    排序键是 `opened_at` 倒序 + `id` 兜底：开户时间只有秒精度，同一秒开出来的客户若
+    不分先后，翻页时会在两页之间来回跳。
+    """
+    conditions = []
     if manager_id is not None:
         # 客户经理只看得到自己名下的客户（app.customer_scope）；其他角色
         # 传 None 拿到全量目录。收窄在这里做，而不是调用方各自过滤。
-        query = query.where(Customer.manager_id == manager_id)
-    rows = db.scalars(query.order_by(Customer.id.asc())).all()
-    profiles = {
-        row.customer_id: row
-        for row in db.scalars(select(CustomerProfile)).all()
-    }
-    return [
+        conditions.append(Customer.manager_id == manager_id)
+    if keyword is not None and keyword.strip():
+        pattern = _like_pattern(keyword.strip())
+        conditions.append(
+            or_(
+                Customer.real_name.like(pattern, escape="\\"),
+                Customer.username.like(pattern, escape="\\"),
+            )
+        )
+
+    base = select(Customer).where(*conditions)
+    total = count_matching(db, base)
+    rows = db.scalars(
+        base.order_by(Customer.opened_at.desc(), Customer.id.desc())
+        .offset(page.offset)
+        .limit(page.page_size)
+    ).all()
+
+    risk_levels: dict[int, str] = {}
+    if rows:
+        risk_levels = {
+            profile.customer_id: profile.risk_level
+            for profile in db.scalars(
+                select(CustomerProfile).where(
+                    CustomerProfile.customer_id.in_([customer.id for customer in rows])
+                )
+            )
+        }
+
+    items = [
         {
             "id": customer.id,
             "username": customer.username,
             "real_name": customer.real_name,
             "customer_level": customer.customer_level,
-            "risk_level": profiles[customer.id].risk_level if customer.id in profiles else None,
+            "risk_level": risk_levels.get(customer.id),
         }
         for customer in rows
     ]
+    return paginated_response(items, total=total, params=page)

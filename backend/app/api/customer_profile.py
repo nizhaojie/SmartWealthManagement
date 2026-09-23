@@ -21,6 +21,7 @@ from app.db.models import Employee
 from app.db.session import get_session
 from app.exceptions import AppError
 from app.http import ok
+from app.pagination import PageParams, page_params
 from app.redis_client import get_redis
 from app.risk_assessment.service import get_current_result
 from app.settings import Settings, get_settings
@@ -34,11 +35,13 @@ calibration_router = APIRouter(prefix="/api/internal/profiles")
 def internal_list_customers(
     employee: Employee = Depends(current_employee),
     db: Session = Depends(get_session),
+    page: PageParams = Depends(page_params),
+    keyword: str | None = None,
 ):
     # 客户经理只看得到自己名下客户（app.customer_scope）；理财顾问与风控
     # 专员不受限，拿到全量目录。
     manager_id = employee.id if restrict_to_own_customers(employee) else None
-    return ok(list_customers(db, manager_id=manager_id))
+    return ok(list_customers(db, manager_id=manager_id, keyword=keyword, page=page))
 
 
 def _now() -> datetime:

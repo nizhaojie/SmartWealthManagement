@@ -187,10 +187,11 @@ def test_resubmitting_keeps_previous_assessments(auth_client: TestClient):
         headers=employee_headers,
     )
     assert history.status_code == 200
-    levels = [item["risk_level"] for item in history.json()["data"]]
+    items = history.json()["data"]["items"]
+    levels = [item["risk_level"] for item in items]
     assert levels.count("C1") >= 1
     assert levels.count("C5") >= 1
-    assert len(history.json()["data"]) >= 3
+    assert len(items) >= 3
 
 
 def test_balanced_answers_return_c3(auth_client: TestClient):

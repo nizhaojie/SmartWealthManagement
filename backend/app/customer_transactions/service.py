@@ -12,6 +12,7 @@ from sqlalchemy.sql import Select
 
 from app.customer_assets.service import _format_amount
 from app.db.models import Deposit, Product, Transaction, Transfer
+from app.pagination import PageParams, paginate
 
 TRANSFER = "转账"
 DEPOSIT = "充值"
@@ -223,16 +224,21 @@ def list_transactions(
     db: Session,
     *,
     customer_id: int,
+    params: PageParams,
     start_date: date | None = None,
     end_date: date | None = None,
     transaction_type: str | None = None,
 ) -> dict:
-    """客户名下的全部资金操作，按成交时间倒序。
+    """客户名下的资金操作，按成交时间倒序，只返回 `params` 指定的那一页。
 
     申赎在 `fin_transaction`、转账在 `fin_transfer`、充值在 `fin_deposit`，一张列表
     因此要把三边都读上：ADR-0019 说明了分表的理由，ADR-0023 把它延续到充值，代价
     正是这里——漏掉哪一边，客户核对账目时就会少看一笔，而且不会报错。三边的序列化
     共用一个形状（见 `_serialize_flow`）。
+
+    切片在**排序之后**：`total` 是过滤后的总条数（与页码无关），本页是那一次排序的
+    一段。反过来先切后排，等于让顺序取决于三张表各自的返回顺序——翻页时同一秒的
+    记录会跳到另一页去（见下面那段排序兜底）。
     """
     records: list[tuple[datetime, int, int, dict]] = []
     # 类型筛选决定要读哪几张表：筛「转账」时申赎那张表根本不用查，筛「充值」时
@@ -263,8 +269,9 @@ def list_transactions(
 
     # 成交时间是秒精度，同一秒里的两笔本来就没有客观先后（真实系统会给成交序号，
     # 这里没有）。用「表 + 行标识」兜底把它定成确定的一种顺序，免得同一个列表两次
-    # 读出来不一样——几张表的 id 各自从 1 开始，只比 id 会串。
+    # 读出来不一样——几张表的 id 各自从 1 开始，只比 id 会串。分页之后这条兜底
+    # 不只是「两次读出来一样」：同一秒的记录会跨页，键不稳就等于翻页时凭空少一笔。
     records.sort(key=lambda row: (row[0], row[1], row[2]), reverse=True)
-    return {
-        "transactions": [record for _occurred_at, _kind, _id, record in records]
-    }
+    return paginate(
+        [record for _occurred_at, _kind, _id, record in records], params=params
+    )

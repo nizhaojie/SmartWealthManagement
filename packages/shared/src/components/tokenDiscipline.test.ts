@@ -8,6 +8,7 @@ import chartFrameSource from "../chart/ChartFrame.vue?raw";
 import tokensCssSource from "../theme/tokens.css?raw";
 import meterBarSource from "./MeterBar.vue?raw";
 import pageHeaderSource from "./PageHeader.vue?raw";
+import paginationBarSource from "./PaginationBar.vue?raw";
 import panelCardSource from "./PanelCard.vue?raw";
 import statCardSource from "./StatCard.vue?raw";
 
@@ -17,6 +18,7 @@ const COMPONENT_SOURCES: Array<[string, string]> = [
   ["StatCard.vue", statCardSource],
   ["MeterBar.vue", meterBarSource],
   ["PageHeader.vue", pageHeaderSource],
+  ["PaginationBar.vue", paginationBarSource],
   ["ChartFrame.vue", chartFrameSource],
 ];
 

@@ -118,7 +118,7 @@ describe("TradingPage", () => {
     listProducts.mockReset();
 
     getFundingAccount.mockResolvedValue({ available_balance: "100000.00" });
-    listTransactions.mockResolvedValue({ transactions: [] });
+    listTransactions.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 20 });
     getAssets.mockResolvedValue({
       risk_level: "C1",
       risk_level_valid_until: "2027-03-15",
@@ -234,7 +234,12 @@ describe("TradingPage", () => {
   });
 
   it("renders 交易流水 in a second tab and keeps the order forms intact", async () => {
-    listTransactions.mockResolvedValue({ transactions: [makeTransaction()] });
+    listTransactions.mockResolvedValue({
+      items: [makeTransaction()],
+      total: 1,
+      page: 1,
+      page_size: 20,
+    });
     const wrapper = await mountPage();
 
     expect(wrapper.text()).toContain("下单");

@@ -19,10 +19,6 @@ export type TransactionRecord = {
   payee_account: string | null;
 };
 
-export type TransactionList = {
-  transactions: TransactionRecord[];
-};
-
 export type TransactionFilters = {
   start_date?: string | null;
   end_date?: string | null;

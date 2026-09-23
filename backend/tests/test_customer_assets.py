@@ -115,7 +115,7 @@ def _transactions(client: TestClient, username: str, **params) -> list[dict]:
         "/api/customer/transactions", headers=_headers(client, username), params=params
     )
     assert response.status_code == 200
-    return response.json()["data"]["transactions"]
+    return response.json()["data"]["items"]
 
 
 def test_assets_are_aggregated_server_side_so_the_customer_need_not_add_them_up(

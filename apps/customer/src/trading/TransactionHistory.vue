@@ -1,8 +1,12 @@
 <script setup lang="ts">
 // 交易流水：按时间与类型筛选自己的每一笔资金操作（申购、赎回、转账、充值），用来核对账目。
 // 四类记录合并在一张表里读，形状由服务端统一（转账行没有产品名而有收款人，充值行两者皆无）。
-import { onMounted, reactive, ref } from "vue";
-import { ApiError, formatDateTime, PanelCard } from "@wealth/shared";
+//
+// 列表分页由 `usePagination` 接管（ADR-0024）：翻页只换页码，筛选条件留在表单里不动；
+// 反过来，改筛选是「换了一批数据」而不是「看第 3 页」，所以筛选一提交就回到第一页——
+// 停在第 3 页会看到空表，而那不是筛选的结果。
+import { onMounted, reactive } from "vue";
+import { formatDateTime, PaginationBar, PanelCard, usePagination } from "@wealth/shared";
 import { listTransactions } from "./api";
 import type { TransactionFilters, TransactionRecord } from "./types";
 
@@ -22,36 +26,27 @@ function payeeLabel(row: TransactionRecord): string {
   return row.payee_name ? `${row.payee_name}（${row.payee_account ?? "—"}）` : "—";
 }
 
-const transactions = ref<TransactionRecord[]>([]);
-const loading = ref(true);
-const errorMessage = ref("");
-
 const filters = reactive<TransactionFilters>({
   start_date: null,
   end_date: null,
   transaction_type: "",
 });
 
-async function load(): Promise<void> {
-  loading.value = true;
-  errorMessage.value = "";
-  try {
-    // 空条件由 api 层统一去掉，这里照原样传。
-    transactions.value = (await listTransactions(filters)).transactions;
-  } catch (error) {
-    transactions.value = [];
-    errorMessage.value = error instanceof ApiError ? error.message : "交易流水加载失败";
-  } finally {
-    loading.value = false;
-  }
-}
+// 空条件由 api 层统一去掉，这里照原样传；`filters` 是 reactive，取数时读到的永远是最新的一份。
+const { items, total, page, pageSize, loading, errorMessage, goTo, reset } =
+  usePagination<TransactionRecord>(
+    (query) => listTransactions(filters, query),
+    { failureMessage: "交易流水加载失败" },
+  );
 
-onMounted(load);
+onMounted(() => {
+  void reset();
+});
 </script>
 
 <template>
   <PanelCard title="交易流水">
-    <form class="filters" @submit.prevent="load">
+    <form class="filters" @submit.prevent="reset">
       <label class="filters__field">
         <span class="filters__label">起始日期</span>
         <el-date-picker
@@ -93,7 +88,7 @@ onMounted(load);
     >
       {{ errorMessage }}
     </p>
-    <p v-else-if="transactions.length === 0" class="history__status" data-testid="transactions-empty">
+    <p v-else-if="items.length === 0" class="history__status" data-testid="transactions-empty">
       {{ EMPTY_HINT }}
     </p>
 
@@ -115,7 +110,7 @@ onMounted(load);
         </thead>
         <tbody>
           <tr
-            v-for="row in transactions"
+            v-for="row in items"
             :key="row.transaction_no"
             :data-transaction-type="row.transaction_type"
           >
@@ -133,6 +128,16 @@ onMounted(load);
         </tbody>
       </table>
     </div>
+
+    <!-- 取不到时 `total` 归零，分页条因此与表格同进同退：加载失败或没有流水时都不出现。 -->
+    <PaginationBar
+      v-if="total > 0"
+      :total="total"
+      :page="page"
+      :page-size="pageSize"
+      :disabled="loading"
+      @update:page="goTo"
+    />
   </PanelCard>
 </template>
 

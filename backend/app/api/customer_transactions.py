@@ -22,6 +22,7 @@ from app.db.session import get_session
 from app.event_bus import EventPublisher, get_event_publisher
 from app.http import ok
 from app.order_acceptance import service
+from app.pagination import PageParams, page_params
 
 router = APIRouter(prefix="/api/customer/transactions")
 
@@ -132,14 +133,17 @@ def deposit(
 def customer_transactions(
     auth: AuthContext = Depends(require_customer),
     db: Session = Depends(get_session),
+    page: PageParams = Depends(page_params),
     start_date: date | None = Query(default=None),
     end_date: date | None = Query(default=None),
     transaction_type: str | None = Query(default=None),
 ):
+    """客户名下的交易流水，分页返回（ADR-0024）。"""
     return ok(
         list_transactions(
             db,
             customer_id=auth.subject_id,
+            params=page,
             start_date=start_date,
             end_date=end_date,
             transaction_type=transaction_type,

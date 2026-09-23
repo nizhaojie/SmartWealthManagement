@@ -133,7 +133,7 @@ def _transactions(client: TestClient, username: str, **params) -> list[dict]:
         TRANSACTIONS_PATH, headers=_headers(client, username), params=params
     )
     assert response.status_code == 200
-    return response.json()["data"]["transactions"]
+    return response.json()["data"]["items"]
 
 
 def _assets(client: TestClient, username: str) -> dict:

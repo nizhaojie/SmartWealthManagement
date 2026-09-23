@@ -99,7 +99,12 @@ describe("客户应用·门控与路由", () => {
       holding_count: 1,
       holdings: [],
     });
-    vi.mocked(listTransactions).mockResolvedValue({ transactions: [] });
+    vi.mocked(listTransactions).mockResolvedValue({
+      items: [],
+      total: 0,
+      page: 1,
+      page_size: 20,
+    });
     vi.mocked(listProducts).mockResolvedValue({ products: [] });
     vi.mocked(getCandidatePool).mockResolvedValue({
       assessment_id: 1,

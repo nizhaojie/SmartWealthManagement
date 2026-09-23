@@ -704,7 +704,7 @@ def test_the_trade_shows_up_in_the_customer_transaction_history(auth_client: Tes
         TRANSACTIONS_PATH, headers=_headers(auth_client, CUSTOMER_MODERATE)
     )
     assert listed.status_code == 200
-    rows = listed.json()["data"]["transactions"]
+    rows = listed.json()["data"]["items"]
     assert rows
     assert rows[0]["transaction_no"] == transaction_no
     assert rows[0]["transaction_type"] == "申购"

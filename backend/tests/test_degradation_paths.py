@@ -670,6 +670,44 @@ def test_chat_completion_without_a_usable_endpoint_fails_fast(monkeypatch):
         )
 
 
+def test_chat_completion_with_an_explicit_endpoint_bypasses_primary_and_backup(
+    monkeypatch,
+):
+    """重排专用模型（rerank_endpoint）显式给定配置时，主/备整条链路被绕开。"""
+    calls: list[tuple[str, str]] = []
+
+    def _request(endpoint, messages, *, timeout):
+        calls.append((endpoint.label, endpoint.model_name))
+        return "专用模型的回答"
+
+    monkeypatch.setattr(provider, "_request_chat", _request)
+
+    settings = _llm_settings(
+        rerank_llm_model_name="rerank-model",
+        rerank_llm_api_base="http://rerank.invalid/v1",
+        rerank_llm_api_key="rerank-key",
+    )
+    answer = provider.chat_completion(
+        [{"role": "user", "content": "排序"}],
+        settings,
+        endpoint=provider.rerank_endpoint(settings),
+    )
+
+    assert answer == "专用模型的回答"
+    assert calls == [("rerank", "rerank-model")], "只调专用配置这一份，不重试不切备用"
+
+
+def test_rerank_endpoint_falls_back_to_none_when_not_fully_configured():
+    """三个 rerank_llm_* 没配全时返回 None（回落主配置），存量 .env 行为不变。"""
+    settings = _llm_settings(
+        rerank_llm_model_name="rerank-model",
+        rerank_llm_api_base="",
+        rerank_llm_api_key="rerank-key",
+    )
+
+    assert provider.rerank_endpoint(settings) is None
+
+
 def test_risk_monitoring_agent_type_literal_matches_the_agent_config():
     """风控链路为了不引入模型层而写死的 Agent 名，必须与配置里的取值一致。"""
     from app.agent.config import RISK_MONITORING_CONFIG

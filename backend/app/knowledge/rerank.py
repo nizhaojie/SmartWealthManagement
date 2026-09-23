@@ -24,7 +24,7 @@ from sqlalchemy.orm import Session
 from app import degradation
 from app.knowledge.hybrid import carried_evidence
 from app.knowledge.service import ChunkResult, RetrievedChunks
-from app.llm.provider import chat_completion
+from app.llm.provider import chat_completion, rerank_endpoint
 from app.settings import Settings
 from app.tracing import get_trace_id
 
@@ -205,6 +205,10 @@ def _model_ranking(
     重试) 再切备用配置」，那是为「回答必须尽量产出」设计的；搬到检索链上会把 2s 的
     检索变成 30s+。重排单次调用、`rerank_timeout_seconds` 超时、不切备用配置——备用
     配置的语义是「主模型不可用时给兜底回答」，不是「重排要更稳」。
+
+    重排与回答生成可以用**不同的模型**：配全 `rerank_llm_*` 三个变量就发独立配置
+    （`rerank_endpoint`），没配全回落主配置。换了模型不换失败语义——专用模型失败
+    同样走下面的降级退回，不会改用主模型再试一次。
     """
     try:
         content = chat_completion(
@@ -213,6 +217,7 @@ def _model_ranking(
             timeout=settings.rerank_timeout_seconds,
             max_retries=0,
             allow_backup=False,
+            endpoint=rerank_endpoint(settings),
         )
         ranking = parse_ranking(content, candidate_count=len(candidates))
     except Exception as exc:  # noqa: BLE001 - 重排边界：任何失败都退回 RRF 序

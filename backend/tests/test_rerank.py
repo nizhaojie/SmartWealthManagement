@@ -386,6 +386,87 @@ def test_candidates_the_model_did_not_rank_land_last_with_a_zero_relevance(monke
     assert [chunk.score for chunk in result] == [0.5, 0.0, 0.0]
 
 
+# --- 重排与回答生成用不同的模型（rerank_llm_* 专用配置）---
+
+
+def _endpoint_settings(**overrides) -> Settings:
+    return get_settings().model_copy(
+        update={
+            "llm_api_base": "http://answer.invalid/v1",
+            "llm_api_key": "answer-key",
+            "llm_model_name": "answer-model",
+            "rerank_llm_model_name": "",
+            "rerank_llm_api_base": "",
+            "rerank_llm_api_key": "",
+            **overrides,
+        }
+    )
+
+
+def _capture_endpoint(monkeypatch, response: str) -> list[object]:
+    captured: list[object] = []
+
+    def _capture(endpoint, messages, *, timeout):
+        captured.append(endpoint)
+        return response
+
+    monkeypatch.setattr(provider, "_request_chat", _capture)
+    return captured
+
+
+def test_rerank_calls_the_dedicated_model_when_fully_configured(monkeypatch):
+    """配全 rerank_llm_* 三个变量：重排发独立配置，回答模型配置不受影响。"""
+    captured = _capture_endpoint(
+        monkeypatch, '{"ranking": [{"index": 1, "score": 0.8}]}'
+    )
+    settings = _endpoint_settings(
+        rerank_llm_model_name="rerank-model",
+        rerank_llm_api_base="http://rerank.invalid/v1",
+        rerank_llm_api_key="rerank-key",
+    )
+    candidates = [_chunk(1, evidence_score=0.42, score=1.0)]
+
+    with _session() as db:
+        result = rerank_chunks(LITERAL_QUESTION, candidates, settings, db=db, top_k=1)
+
+    assert [chunk.knowledge_id for chunk in result] == [1]
+    endpoint = captured[0]
+    assert (endpoint.label, endpoint.model_name) == ("rerank", "rerank-model")
+    assert endpoint.api_base == "http://rerank.invalid/v1"
+
+
+def test_rerank_falls_back_to_the_primary_model_without_dedicated_config(monkeypatch):
+    """rerank_llm_* 全空：回落主配置（label=primary、主模型名），与分离前一致。"""
+    captured = _capture_endpoint(
+        monkeypatch, '{"ranking": [{"index": 1, "score": 0.8}]}'
+    )
+    settings = _endpoint_settings()  # rerank_llm_* 三个全空
+    candidates = [_chunk(1, evidence_score=0.42, score=1.0)]
+
+    with _session() as db:
+        result = rerank_chunks(LITERAL_QUESTION, candidates, settings, db=db, top_k=1)
+
+    assert [chunk.knowledge_id for chunk in result] == [1]
+    endpoint = captured[0]
+    assert (endpoint.label, endpoint.model_name) == ("primary", "answer-model")
+
+
+def test_rerank_ignores_a_partially_configured_dedicated_model(monkeypatch):
+    """只配了模型名、没配全 base/key：整份专用配置无效，仍走主配置。"""
+    captured = _capture_endpoint(
+        monkeypatch, '{"ranking": [{"index": 1, "score": 0.8}]}'
+    )
+    settings = _endpoint_settings(rerank_llm_model_name="rerank-model")
+    candidates = [_chunk(1, evidence_score=0.42, score=1.0)]
+
+    with _session() as db:
+        result = rerank_chunks(LITERAL_QUESTION, candidates, settings, db=db, top_k=1)
+
+    assert [chunk.knowledge_id for chunk in result] == [1]
+    endpoint = captured[0]
+    assert (endpoint.label, endpoint.model_name) == ("primary", "answer-model")
+
+
 # --- HTTP 层：保底占位与超时降级 ---
 
 

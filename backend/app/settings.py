@@ -84,6 +84,13 @@ class Settings(BaseSettings):
     llm_backup_api_base: str = ""
     llm_backup_api_key: str = ""
 
+    # 重排专用模型配置：重排与回答生成可以用不同的模型（ADR-0022 补充）。三个变量
+    # 没配全时回落主配置（llm_*），行为与模型分离之前完全一致；配全了才走独立模型——
+    # 重排通常用更小更快的模型，5 秒的 rerank_timeout_seconds 就是按它定的预算。
+    rerank_llm_model_name: str = ""
+    rerank_llm_api_base: str = ""
+    rerank_llm_api_key: str = ""
+
     embedding_provider: str = "fake"
     embedding_model_name: str = "text-embedding-v3"
     embedding_api_base: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"

@@ -136,7 +136,9 @@ def _endpoints(settings: Settings, *, allow_backup: bool = True) -> list[LlmEndp
     白白多等一个超时。主配置的可用性由 ``resolved_llm_provider`` 在外面保证：
     fake provider 根本不会走到这里。
 
-    ``allow_backup=False`` 时只剩主配置：检索链上的重排用它（见 ``chat_completion``）。
+    ``allow_backup=False`` 时只剩主配置：检索链上的重排在没配专用模型时用它（见
+    ``chat_completion`` 与 ``rerank_endpoint``）。重排也可以配 ``rerank_llm_*`` 三个
+    变量走一份完全独立的配置——那份配置同样没有备用链路。
     """
     endpoints = [
         LlmEndpoint(
@@ -155,6 +157,26 @@ def _endpoints(settings: Settings, *, allow_backup: bool = True) -> list[LlmEndp
     if allow_backup and backup.usable:
         endpoints.append(backup)
     return [endpoint for endpoint in endpoints if endpoint.usable]
+
+
+def rerank_endpoint(settings: Settings) -> LlmEndpoint | None:
+    """重排专用的模型配置；三个 ``rerank_llm_*`` 变量没配全时返回 `None`。
+
+    返回 `None` 的语义是「回落主配置」：`chat_completion` 收到 `None` 就照老规矩取
+    `_endpoints`，于是「不配置 = 行为与模型分离之前完全一致」，存量 `.env` 零影响。
+    """
+    if not (
+        settings.rerank_llm_model_name
+        and settings.rerank_llm_api_base
+        and settings.rerank_llm_api_key
+    ):
+        return None
+    return LlmEndpoint(
+        label="rerank",
+        api_base=settings.rerank_llm_api_base,
+        api_key=settings.rerank_llm_api_key,
+        model_name=settings.rerank_llm_model_name,
+    )
 
 
 def _request_chat(endpoint: LlmEndpoint, messages: list[dict], *, timeout: float) -> str:
@@ -190,6 +212,7 @@ def chat_completion(
     timeout: float | None = None,
     max_retries: int | None = None,
     allow_backup: bool = True,
+    endpoint: LlmEndpoint | None = None,
 ) -> str:
     """调用 OpenAI 兼容的 chat 接口，带退避重试与备用配置。
 
@@ -197,12 +220,17 @@ def chat_completion(
     （间隔 1s / 2s / 4s …，可配），仍失败则换备用配置再走一遍同样的重试，全部失败
     才折算成业务错误码。退避等待可配，测试里置 0 即可不必真的等待。
 
-    三个可选参数是给**检索链上的重排**（`app.knowledge.rerank`）用的，默认值保持主
-    链路的既有行为不变：重排走单次调用、`rerank_timeout_seconds` 超时、不用备用配置。
-    主链路那套「30s × (1+3 次重试) 再切备用」是为「回答必须尽量产出」设计的，搬到
-    检索链上会把 2s 的检索变成 30s+。
+    可选参数是给**检索链上的重排**（`app.knowledge.rerank`）用的，默认值保持主链路的
+    既有行为不变：重排走单次调用、`rerank_timeout_seconds` 超时、不用备用配置。
+    `endpoint` 显式给定一份配置（重排专用模型，见 `rerank_endpoint`）时，主/备整条
+    链路被绕开——那份配置只试一次。主链路那套「30s × (1+3 次重试) 再切备用」是为
+    「回答必须尽量产出」设计的，搬到检索链上会把 2s 的检索变成 30s+。
     """
-    endpoints = _endpoints(settings, allow_backup=allow_backup)
+    endpoints = (
+        _endpoints(settings, allow_backup=allow_backup)
+        if endpoint is None
+        else [endpoint]
+    )
     retries = max(
         settings.llm_max_retries if max_retries is None else max_retries, 0
     )

@@ -162,7 +162,7 @@ def list_alerts(
         )
         for alert, name in rows
     ]
-    return paginated_response(items, total=total or 0, params=page)
+    return paginated_response(items, total=total, params=page)
 
 
 def _transactions(db: Session, transaction_ids: list[int]) -> list[dict]:

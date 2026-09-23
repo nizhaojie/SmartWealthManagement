@@ -144,4 +144,4 @@ def list_recent(
         {**focus_facts(focus), "occurred_at": focus.occurred_at.isoformat(), "customer_name": name}
         for focus, name in rows
     ]
-    return paginated_response(items, total=total or 0, params=page)
+    return paginated_response(items, total=total, params=page)

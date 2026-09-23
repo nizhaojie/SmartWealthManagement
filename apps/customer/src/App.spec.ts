@@ -13,7 +13,7 @@ import { listTransactions } from "./trading/api";
 import { clearTokens, getAccessToken } from "./auth/tokenStore";
 import { forgetUsername } from "./auth/username";
 import { getFundingAccount } from "./funding/api";
-import { listMyAdvice } from "./operation-advice/api";
+import { countAwaitingAdvice, listMyAdvice } from "./operation-advice/api";
 import type { OperationAdvice } from "./operation-advice/types";
 import { getCandidatePool, listProducts } from "./products/api";
 import { getCurrentAssessment } from "./risk-assessment/api";
@@ -28,7 +28,11 @@ vi.mock("./assets/api", () => ({
 }));
 vi.mock("./trading/api", () => ({ listTransactions: vi.fn() }));
 vi.mock("./funding/api", () => ({ getFundingAccount: vi.fn() }));
-vi.mock("./operation-advice/api", () => ({ listMyAdvice: vi.fn(), decideAdvice: vi.fn() }));
+vi.mock("./operation-advice/api", () => ({
+  listMyAdvice: vi.fn(),
+  countAwaitingAdvice: vi.fn(),
+  decideAdvice: vi.fn(),
+}));
 vi.mock("./risk-assessment/api", () => ({
   getCurrentAssessment: vi.fn(),
   getQuestionnaire: vi.fn(),
@@ -94,6 +98,7 @@ describe("客户应用·门控与路由", () => {
     vi.mocked(listAdvisoryRequests).mockReset();
     vi.mocked(listReleasedPlans).mockReset();
     vi.mocked(listMyAdvice).mockReset();
+    vi.mocked(countAwaitingAdvice).mockReset();
     vi.mocked(getFundingAccount).mockReset();
 
     vi.mocked(getCurrentAssessment).mockResolvedValue({ risk_level: "C1", valid_until: "2027-03-15" });
@@ -119,7 +124,8 @@ describe("客户应用·门控与路由", () => {
     });
     vi.mocked(listAdvisoryRequests).mockResolvedValue(emptyPage());
     vi.mocked(listReleasedPlans).mockResolvedValue(emptyPage());
-    vi.mocked(listMyAdvice).mockResolvedValue({ advice: [] });
+    vi.mocked(listMyAdvice).mockResolvedValue(emptyPage());
+    vi.mocked(countAwaitingAdvice).mockResolvedValue(0);
     vi.mocked(getFundingAccount).mockResolvedValue({ available_balance: "100000.00" });
 
     await router.push("/login");
@@ -275,33 +281,43 @@ describe("客户应用·门控与路由", () => {
   });
 
   // 待客户决定的建议不能等客户点进「我的建议」才被发现：侧栏角标要在首屏就出现。
+  //
+  // 角标读的是服务端的**过滤后总数**（`status=待客户决定` 的 `total`），不是本页条数：
+  // 列表是混合状态的一页，翻到第 3 页时本页可能一条待决定的都没有，而它仍然在等客户。
+  // 因此这里刻意让本页只有一条**已接受**的建议，角标仍要说 4。
   it("shows the pending badge on 我的建议 and drops it when nothing is pending", async () => {
     mockSuccessfulLogin();
-    const pending: OperationAdvice = {
+    const decided: OperationAdvice = {
       id: 1,
       product_code: "F000002",
       product_name: "天玑债券基金",
       direction: "申购",
       amount: "50000.00",
       reason: "你的债券配置偏低",
-      status: "待客户决定",
+      status: "已接受",
       released_at: "2026-09-21T09:00:00",
       expires_at: "2026-09-28T09:00:00",
-      decision: null,
-      decided_at: null,
+      decision: "接受",
+      decided_at: "2026-09-21T10:00:00",
       disclaimer: null,
     };
-    vi.mocked(listMyAdvice).mockResolvedValue({ advice: [pending] });
+    vi.mocked(listMyAdvice).mockResolvedValue({
+      items: [decided],
+      total: 25,
+      page: 1,
+      page_size: 20,
+    });
+    vi.mocked(countAwaitingAdvice).mockResolvedValue(4);
     const wrapper = mountApp();
     await submitLogin(wrapper, "wangc1", "Test@1234");
     await flushPromises();
 
     expect(wrapper.get('button[name="nav-operation-advice"]').get(".app-shell__nav-badge").text()).toBe(
-      "1",
+      "4",
     );
 
     // 没有待决定项时不渲染角标：0 与「还没加载」都不该显示一个数字。
-    vi.mocked(listMyAdvice).mockResolvedValue({ advice: [] });
+    vi.mocked(countAwaitingAdvice).mockResolvedValue(0);
     await router.push("/operation-advice");
     await flushPromises();
 

@@ -437,7 +437,7 @@ def test_progress_reports_the_pipeline_state_before_release(
         headers=_employee_headers(auth_client, MANAGER),
     )
     assert response.status_code == 200, response.text
-    rows = response.json()["data"]["advice"]
+    rows = response.json()["data"]["items"]
 
     row = next(item for item in rows if item["id"] == advice["id"])
     assert row["review_status"] == STATUS_PENDING
@@ -461,7 +461,7 @@ def test_progress_adds_the_customer_decision_after_release(
         START_PATH.format(customer_id=customer_of_manager["id"]),
         headers=_employee_headers(auth_client, MANAGER),
     )
-    rows = response.json()["data"]["advice"]
+    rows = response.json()["data"]["items"]
     row = next(item for item in rows if item["id"] == released["id"])
     assert row["review_status"] == STATUS_RELEASED
     assert row["customer_status"] == STATUS_AWAITING
@@ -479,7 +479,7 @@ def test_progress_adds_the_customer_decision_after_release(
         headers=_employee_headers(auth_client, MANAGER),
     )
     updated = next(
-        item for item in after.json()["data"]["advice"] if item["id"] == released["id"]
+        item for item in after.json()["data"]["items"] if item["id"] == released["id"]
     )
     assert updated["review_status"] == STATUS_RELEASED
     assert updated["customer_status"] == DECISION_REJECTED
@@ -501,7 +501,7 @@ def test_a_rejected_advice_stays_rejected_and_never_reaches_the_customer(
         headers=_employee_headers(auth_client, MANAGER),
     )
     row = next(
-        item for item in response.json()["data"]["advice"] if item["id"] == advice["id"]
+        item for item in response.json()["data"]["items"] if item["id"] == advice["id"]
     )
     assert row["review_status"] == REVIEW_REJECTED
     assert row["customer_status"] is None
@@ -509,7 +509,7 @@ def test_a_rejected_advice_stays_rejected_and_never_reaches_the_customer(
     # 被驳回的建议在客户侧读不到——护栏 5 的第二个出口在驳回这一侧同样成立。
     mine = auth_client.get("/api/customer/operation-advice", headers=customer_of_manager["headers"])
     assert mine.status_code == 200
-    assert [item["id"] for item in mine.json()["data"]["advice"]] == []
+    assert [item["id"] for item in mine.json()["data"]["items"]] == []
 
 
 def test_the_progress_list_covers_every_advice_of_the_customer(
@@ -522,7 +522,7 @@ def test_the_progress_list_covers_every_advice_of_the_customer(
         START_PATH.format(customer_id=customer_of_manager["id"]),
         headers=_employee_headers(auth_client, MANAGER),
     )
-    rows = response.json()["data"]["advice"]
+    rows = response.json()["data"]["items"]
     assert {item["id"] for item in rows} == {first["id"], second["id"]}
     # 后发起的在前：客户经理先看的是最新的那条。
     assert rows[0]["id"] == second["id"]

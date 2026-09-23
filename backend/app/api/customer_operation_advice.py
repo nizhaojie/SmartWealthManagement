@@ -8,7 +8,7 @@
 
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.auth.dependencies import AuthContext, require_customer
@@ -17,6 +17,7 @@ from app.event_bus import EventPublisher, get_event_publisher
 from app.http import ok
 from app.operation_advice.decision import decide, get_my_advice, list_my_advice
 from app.operation_advice.schemas import CustomerDecisionRequest
+from app.pagination import PageParams, page_params
 
 router = APIRouter(prefix="/api/customer/operation-advice")
 
@@ -29,9 +30,21 @@ def _now() -> datetime:
 def list_my_operation_advice(
     auth: AuthContext = Depends(require_customer),
     db: Session = Depends(get_session),
+    page: PageParams = Depends(page_params),
+    # 可选的状态过滤：侧栏角标读「待决定共几条」时用它取过滤后的 `total`，
+    # 列表页不传（它要的是全部状态，分组在前端现分）。
+    status: str | None = Query(default=None, description="只看某一状态，缺省即全部"),
 ):
     # 还没有建议时是空列表，不是 404——「还没有」不是一种错误。
-    return ok(list_my_advice(db, customer_id=auth.subject_id, now=_now()))
+    return ok(
+        list_my_advice(
+            db,
+            customer_id=auth.subject_id,
+            now=_now(),
+            page=page,
+            status=status,
+        )
+    )
 
 
 @router.get("/{advice_id}")

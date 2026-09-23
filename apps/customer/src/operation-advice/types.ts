@@ -53,7 +53,3 @@ export type OperationAdvice = {
   decided_at: string | null;
   disclaimer: string | null;
 };
-
-export type OperationAdviceList = {
-  advice: OperationAdvice[];
-};

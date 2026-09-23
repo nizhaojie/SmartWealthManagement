@@ -1,4 +1,6 @@
+import type { PageQuery, Paginated } from "@wealth/shared";
 import { http } from "../api/http";
+import { queryString } from "../api/query";
 import type { AdvisoryComment } from "../advisory/types";
 import type {
   AdviceOptions,
@@ -14,12 +16,15 @@ import type {
  * 放行与驳回只对理财顾问开放（后端按角色再挡一次，前端只是不给入口）。
  */
 
-export function listCustomerAdvice(customerId: number): Promise<OperationAdviceProgress[]> {
-  return http
-    .get<{ advice: OperationAdviceProgress[] }>(
-      `/api/internal/customers/${customerId}/operation-advice`,
-    )
-    .then((data) => data.advice);
+/** 这位客户的建议进度一页（最近发起的在前）。 */
+export function listCustomerAdvice(
+  customerId: number,
+  query: PageQuery,
+): Promise<Paginated<OperationAdviceProgress>> {
+  const search = queryString({ page: query.page, page_size: query.page_size });
+  return http.get<Paginated<OperationAdviceProgress>>(
+    `/api/internal/customers/${customerId}/operation-advice${search}`,
+  );
 }
 
 /**

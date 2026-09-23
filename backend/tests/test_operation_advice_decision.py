@@ -488,9 +488,10 @@ def _decide(
 
 
 def _list_my_advice(client: TestClient, headers: dict[str, str]) -> list[dict]:
+    """「我的建议」的第一页（ADR-0024 的分页信封）。"""
     response = client.get(MY_ADVICE_PATH, headers=headers)
     assert response.status_code == 200, response.text
-    return response.json()["data"]["advice"]
+    return response.json()["data"]["items"]
 
 
 def _view(client: TestClient, advice_id: int, headers: dict[str, str]) -> dict:

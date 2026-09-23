@@ -37,6 +37,7 @@ from app.operation_advice.schemas import (
     OperationAdviceRequest,
 )
 from app.operation_advice.service import generate_operation_advice
+from app.pagination import PageParams, page_params
 from app.redis_client import get_redis
 
 router = APIRouter(prefix="/api/internal/customers")
@@ -120,11 +121,12 @@ def list_customer_operation_advice(
     customer_id: int,
     employee: Employee = Depends(require_employee_role(*_VIEWERS)),
     db: Session = Depends(get_session),
+    page: PageParams = Depends(page_params),
 ):
     # 客户经理看的是「这位客户的建议走到哪一步了」——按客户归属判定，与审核队列、
     # 预警列表的可见范围同一个口径（不是按发起人：客户转手后新经理要看得见全部）。
     ensure_can_view(db, employee, customer_id)
-    return ok(list_for_customer(db, customer_id=customer_id, now=_now()))
+    return ok(list_for_customer(db, customer_id=customer_id, now=_now(), page=page))
 
 
 @review_router.get("/{advice_id}")

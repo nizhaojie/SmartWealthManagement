@@ -1,20 +1,23 @@
-// 「我的建议」页：四种状态各自成区、接受失败时渲染原因且建议仍留在待决定区。
+// 「我的建议」页：四种状态各自成区、翻页只换窗口而分组跟着这一页走、接受失败时渲染原因
+// 且建议仍留在待决定区。
 // 失败语义来自 #07：接受是一次原子操作，受理校验不过就整条失败，建议不落进任何终态。
+// 分页来自 #list-pagination-07：一页里装着混合状态的建议，四个分组按这一页的内容现分。
 import ElementPlus from "element-plus";
 import { createPinia, setActivePinia, type Pinia } from "pinia";
 import { flushPromises, mount, type VueWrapper } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { h } from "vue";
 import { createMemoryHistory, createRouter, type Router } from "vue-router";
-import { ApiError } from "@wealth/shared";
+import { ApiError, PaginationBar, type Paginated } from "@wealth/shared";
 import type { OperationAdvice } from "./types";
 
-const { listMyAdvice, decideAdvice } = vi.hoisted(() => ({
+const { listMyAdvice, countAwaitingAdvice, decideAdvice } = vi.hoisted(() => ({
   listMyAdvice: vi.fn(),
+  countAwaitingAdvice: vi.fn(),
   decideAdvice: vi.fn(),
 }));
 
-vi.mock("./api", () => ({ listMyAdvice, decideAdvice }));
+vi.mock("./api", () => ({ listMyAdvice, countAwaitingAdvice, decideAdvice }));
 
 import AdvicePage from "./AdvicePage.vue";
 
@@ -40,6 +43,14 @@ function makeAdvice(overrides: Partial<OperationAdvice> = {}): OperationAdvice {
     disclaimer: "本建议由理财顾问出具，仅供参考",
     ...overrides,
   };
+}
+
+/** 列表接口的一页（ADR-0024）：形状恒为 `{items, total, page, page_size}`。 */
+function makePage(
+  items: OperationAdvice[],
+  overrides: Partial<Paginated<OperationAdvice>> = {},
+): Paginated<OperationAdvice> {
+  return { items, total: items.length, page: 1, page_size: 20, ...overrides };
 }
 
 let pinia: Pinia;
@@ -72,7 +83,9 @@ describe("AdvicePage", () => {
     pinia = createPinia();
     setActivePinia(pinia);
     listMyAdvice.mockReset();
+    countAwaitingAdvice.mockReset();
     decideAdvice.mockReset();
+    countAwaitingAdvice.mockResolvedValue(0);
   });
 
   afterEach(() => {
@@ -81,14 +94,14 @@ describe("AdvicePage", () => {
   });
 
   it("groups the advice into the four states", async () => {
-    listMyAdvice.mockResolvedValue({
-      advice: [
+    listMyAdvice.mockResolvedValue(
+      makePage([
         makeAdvice({ id: 1, status: "待客户决定" }),
         makeAdvice({ id: 2, status: "已接受", decision: "接受", decided_at: "2026-09-22T10:00:00" }),
         makeAdvice({ id: 3, status: "已拒绝", decision: "拒绝", decided_at: "2026-09-22T11:00:00" }),
         makeAdvice({ id: 4, status: "已过期" }),
-      ],
-    });
+      ]),
+    );
     const wrapper = await mountPage();
 
     expect(wrapper.get('[data-testid="advice-pending"]').text()).toContain("50000.00");
@@ -102,15 +115,104 @@ describe("AdvicePage", () => {
   });
 
   it("leaves no blank when nothing has been delivered yet", async () => {
-    listMyAdvice.mockResolvedValue({ advice: [] });
+    listMyAdvice.mockResolvedValue(makePage([]));
     const wrapper = await mountPage();
 
     expect(wrapper.get('[data-testid="advice-empty"]').text()).toContain("还没有收到操作建议");
     expect(wrapper.find('[data-testid="advice-pending"]').exists()).toBe(false);
+    // 一条都没有时不渲染分页条：没有东西可翻。
+    expect(wrapper.find('[data-testid="pagination-bar"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="advice-page-empty"]').exists()).toBe(false);
+  });
+
+  it("renders the total and turns the page, regrouping what that page carries", async () => {
+    listMyAdvice
+      .mockResolvedValueOnce(makePage([makeAdvice({ id: 1 })], { total: 25 }))
+      .mockResolvedValueOnce(
+        makePage([makeAdvice({ id: 7, status: "已拒绝", decision: "拒绝", decided_at: "2026-09-22T11:00:00" })], {
+          total: 25,
+          page: 2,
+        }),
+      );
+    const wrapper = await mountPage();
+
+    // 「共 N 条」是过滤后的总数，不是本页条数。
+    expect(wrapper.get('[data-testid="pagination-total"]').text()).toContain("25");
+    expect(wrapper.find('[data-testid="advice-pending"]').exists()).toBe(true);
+
+    wrapper.findComponent(PaginationBar).vm.$emit("update:page", 2);
+    await flushPromises();
+
+    expect(listMyAdvice).toHaveBeenLastCalledWith({ page: 2, page_size: 20 });
+    // 分组按**这一页**的内容现分：第 2 页上只有一条已拒绝的，就没有「待决定」那一组。
+    expect(wrapper.find('[data-testid="advice-pending"]').exists()).toBe(false);
+    expect(wrapper.get('[data-testid="advice-rejected"]').text()).toContain("已拒绝");
+    expect(wrapper.findAll('[data-testid="advice-item"]')).toHaveLength(1);
+  });
+
+  it("fills a group from the page it is on, not by carrying it across pages", async () => {
+    // 同一个状态组会被页边界切成两段：第 1 页两条「待决定」，第 2 页一条「待决定」加一条
+    // 「已过期」。组内容只来自当前页——先把第 2 页的两条拼进「待决定」组、再筛出非空组，
+    // 就会把两条不该在这一页出现的建议画出来（而且第一条会被画两次）。
+    listMyAdvice
+      .mockResolvedValueOnce(
+        makePage([makeAdvice({ id: 1 }), makeAdvice({ id: 2 })], { total: 4 }),
+      )
+      .mockResolvedValueOnce(
+        makePage([makeAdvice({ id: 3 }), makeAdvice({ id: 4, status: "已过期" })], {
+          total: 4,
+          page: 2,
+        }),
+      );
+    const wrapper = await mountPage();
+
+    expect(
+      wrapper.get('[data-testid="advice-pending"]').findAll('[data-testid="advice-item"]'),
+    ).toHaveLength(2);
+    expect(wrapper.find('[data-testid="advice-expired"]').exists()).toBe(false);
+
+    wrapper.findComponent(PaginationBar).vm.$emit("update:page", 2);
+    await flushPromises();
+
+    expect(
+      wrapper.get('[data-testid="advice-pending"]').findAll('[data-testid="advice-item"]'),
+    ).toHaveLength(1);
+    const expired = wrapper.get('[data-testid="advice-expired"]');
+    expect(expired.findAll('[data-testid="advice-item"]')).toHaveLength(1);
+    expect(expired.find('[data-advice-id="4"]').exists()).toBe(true);
+    // 全页合计仍是这一页的两条：没有跨页累加。
+    expect(wrapper.findAll('[data-testid="advice-item"]')).toHaveLength(2);
+  });
+
+  it("tells an empty page apart from having no advice at all", async () => {
+    // 越界页：一条也拿不到，但总数说这次有 25 条——那是页码的事，不是「你还没收到建议」。
+    listMyAdvice.mockResolvedValue(makePage([], { total: 25, page: 99 }));
+    const wrapper = await mountPage();
+
+    expect(wrapper.get('[data-testid="advice-page-empty"]').text()).toContain("页码");
+    expect(wrapper.find('[data-testid="advice-empty"]').exists()).toBe(false);
+    // 分页条仍在：客户得靠它翻回去。
+    expect(wrapper.get('[data-testid="pagination-total"]').text()).toContain("25");
+  });
+
+  it("takes the sidebar count from its own filtered read, not from this page", async () => {
+    // 本页只有一条已接受的建议，待决定的角标却要说 4：它读的是同一个列表接口
+    // `status=待客户决定` 的过滤后 `total`，不是本页条数（本页一条待决定的都没有）。
+    listMyAdvice.mockResolvedValue(
+      makePage([makeAdvice({ id: 2, status: "已接受", decision: "接受" })], { total: 25 }),
+    );
+    countAwaitingAdvice.mockResolvedValue(4);
+    const wrapper = await mountPage();
+
+    expect(countAwaitingAdvice).toHaveBeenCalledTimes(1);
+    // 列表这一路只取混合状态的一页：两个读法各自只管自己那一件事（是否待决定 vs 这一页）。
+    expect(listMyAdvice).toHaveBeenCalledWith({ page: 1, page_size: 20 });
+    expect(wrapper.find('[data-testid="advice-pending"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="advice-accepted"]').exists()).toBe(true);
   });
 
   it("keeps the advice in the pending group when the balance is short", async () => {
-    listMyAdvice.mockResolvedValue({ advice: [makeAdvice()] });
+    listMyAdvice.mockResolvedValue(makePage([makeAdvice()]));
     decideAdvice.mockRejectedValue(apiError(400, "可用余额不足，还差 1200.00 元"));
     const wrapper = await mountPage();
 
@@ -128,7 +230,7 @@ describe("AdvicePage", () => {
   });
 
   it("links to 风险测评 when the acceptance fails for a missing assessment", async () => {
-    listMyAdvice.mockResolvedValue({ advice: [makeAdvice()] });
+    listMyAdvice.mockResolvedValue(makePage([makeAdvice()]));
     decideAdvice.mockRejectedValue(apiError(403, "请先完成风险测评"));
     const wrapper = await mountPage();
 
@@ -143,7 +245,7 @@ describe("AdvicePage", () => {
   });
 
   it("renders the reason when the acceptance fails for a product above the grade", async () => {
-    listMyAdvice.mockResolvedValue({ advice: [makeAdvice()] });
+    listMyAdvice.mockResolvedValue(makePage([makeAdvice()]));
     decideAdvice.mockRejectedValue(apiError(403, "产品风险等级高于你的风险承受等级"));
     const wrapper = await mountPage();
 
@@ -156,7 +258,7 @@ describe("AdvicePage", () => {
   });
 
   it("renders the expiry reason when the acceptance arrives too late", async () => {
-    listMyAdvice.mockResolvedValue({ advice: [makeAdvice()] });
+    listMyAdvice.mockResolvedValue(makePage([makeAdvice()]));
     decideAdvice.mockRejectedValue(
       apiError(409, "该建议已过期，不能再接受，请客户经理重新发起"),
     );
@@ -169,10 +271,10 @@ describe("AdvicePage", () => {
 
   it("moves an accepted advice out of the pending group", async () => {
     listMyAdvice
-      .mockResolvedValueOnce({ advice: [makeAdvice()] })
-      .mockResolvedValueOnce({
-        advice: [makeAdvice({ status: "已接受", decision: "接受", decided_at: "2026-09-22T10:00:00" })],
-      });
+      .mockResolvedValueOnce(makePage([makeAdvice()]))
+      .mockResolvedValueOnce(
+        makePage([makeAdvice({ status: "已接受", decision: "接受", decided_at: "2026-09-22T10:00:00" })]),
+      );
     decideAdvice.mockResolvedValue(makeAdvice({ status: "已接受" }));
     const wrapper = await mountPage();
 
@@ -184,7 +286,7 @@ describe("AdvicePage", () => {
   });
 
   it("records a rejection without touching the balance", async () => {
-    listMyAdvice.mockResolvedValue({ advice: [makeAdvice()] });
+    listMyAdvice.mockResolvedValue(makePage([makeAdvice()]));
     decideAdvice.mockResolvedValue(makeAdvice({ status: "已拒绝", decision: "拒绝" }));
     const wrapper = await mountPage();
 

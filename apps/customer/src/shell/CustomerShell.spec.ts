@@ -9,12 +9,13 @@ import { AppShell } from "@wealth/shared";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { h } from "vue";
 import { createMemoryHistory, createRouter, type Router } from "vue-router";
-import { listMyAdvice } from "../operation-advice/api";
+import { countAwaitingAdvice, listMyAdvice } from "../operation-advice/api";
 import { useLayoutStore } from "../stores/layout";
 import CustomerShell from "./CustomerShell.vue";
 
 vi.mock("../operation-advice/api", () => ({
   listMyAdvice: vi.fn(),
+  countAwaitingAdvice: vi.fn(),
   decideAdvice: vi.fn(),
 }));
 
@@ -27,11 +28,17 @@ let pinia: Pinia;
 let router: Router;
 let wrapper: VueWrapper | null = null;
 
+/** 列表接口的一页（ADR-0024）：形状恒为 `{items, total, page, page_size}`。 */
+function emptyPage() {
+  return { items: [], total: 0, page: 1, page_size: 20 };
+}
+
 beforeEach(async () => {
   localStorage.clear();
   pinia = createPinia();
   setActivePinia(pinia);
-  vi.mocked(listMyAdvice).mockResolvedValue({ advice: [] });
+  vi.mocked(listMyAdvice).mockResolvedValue(emptyPage());
+  vi.mocked(countAwaitingAdvice).mockResolvedValue(0);
   router = createRouter({
     history: createMemoryHistory(),
     routes: [

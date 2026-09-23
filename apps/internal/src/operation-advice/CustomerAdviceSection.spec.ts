@@ -5,7 +5,8 @@ import { createPinia, setActivePinia, type Pinia } from "pinia";
 import { flushPromises, mount, type VueWrapper } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createMemoryHistory, createRouter, type Router } from "vue-router";
-import { apiError, stubApiFetch } from "../testing";
+import { PaginationBar } from "@wealth/shared";
+import { apiError, requestedUrls, stubApiFetch } from "../testing";
 import CustomerAdviceSection from "./CustomerAdviceSection.vue";
 import type { AdviceOption, OperationAdviceProgress } from "./types";
 
@@ -96,11 +97,18 @@ let pinia: Pinia;
 let router: Router;
 let wrapper: VueWrapper | null = null;
 let progress: OperationAdviceProgress[] = PROGRESS;
+/** 过滤后的总数（ADR-0024）：可以和本页条数不同——越界页与多页就是从这里来的。 */
+let progressTotal = PROGRESS.length;
 // 读进度失败时替换成整个响应（非 200 由 http 客户端拆成 ApiError）。
 let progressFailure: unknown = null;
 let startResponse: unknown = { id: 23 };
 // 可选项按方向分开放：切换方向要重取，mock 按 URL 里的 direction 返回对应一份。
 let optionsByDirection: Record<string, { direction: string; products: AdviceOption[] }>;
+
+/** 进度接口返回的那一页：形状恒为 `{items, total, page, page_size}`。 */
+function progressPage() {
+  return { items: progress, total: progressTotal, page: 1, page_size: 20 };
+}
 
 async function mountSection(): Promise<VueWrapper> {
   stubApiFetch((url, init) => {
@@ -111,7 +119,7 @@ async function mountSection(): Promise<VueWrapper> {
       return optionsByDirection[direction] ?? { direction, products: [] };
     }
     if (url.includes("/operation-advice") && init?.method === "POST") return startResponse;
-    if (url.includes("/operation-advice")) return progressFailure ?? { advice: progress };
+    if (url.includes("/operation-advice")) return progressFailure ?? progressPage();
     return undefined;
   });
 
@@ -166,6 +174,7 @@ function productOptionsOf(page: VueWrapper): Array<{ value: string; label: strin
 beforeEach(() => {
   localStorage.clear();
   progress = PROGRESS;
+  progressTotal = PROGRESS.length;
   progressFailure = null;
   startResponse = { id: 23 };
   optionsByDirection = {
@@ -389,9 +398,64 @@ describe("客户经理的操作建议入口", () => {
 
   it("成功读到空时给空状态", async () => {
     progress = [];
+    progressTotal = 0;
     const page = await mountSection();
     await selectCustomer(page, 9);
 
     expect(page.get('[data-testid="advice-progress-empty"]').text()).toContain("还没有为他发起");
+    // 一条都没有时不渲染分页条与表格：没有东西可翻。
+    expect(page.find('[data-testid="pagination-bar"]').exists()).toBe(false);
+    expect(page.find('[data-testid="advice-progress-table"]').exists()).toBe(false);
+  });
+
+  it("共几条读服务端的 total，翻页把页码发给服务端", async () => {
+    progressTotal = 25;
+    const page = await mountSection();
+    await selectCustomer(page, 9);
+
+    const fetchMock = vi.mocked(globalThis.fetch);
+    expect(requestedUrls(fetchMock, "page=1&page_size=20")).toHaveLength(1);
+    // 「共 N 条」是过滤后的总数，不是本页条数。
+    expect(page.get('[data-testid="pagination-total"]').text()).toContain("25");
+
+    // 第 2 页的窗口换了一批条目：表格跟着这一页走。
+    progress = [PROGRESS[1]];
+    page.findComponent(PaginationBar).vm.$emit("update:page", 2);
+    await flushPromises();
+
+    expect(requestedUrls(fetchMock, "page=2&page_size=20")).toHaveLength(1);
+    const rows = page.get('[data-testid="advice-progress-table"]').findAll("tbody tr");
+    expect(rows).toHaveLength(1);
+    expect(rows[0].text()).toContain("均衡配置二号");
+  });
+
+  it("越界页说的是页码跑出去了，不是「还没有为他发起过」", async () => {
+    // 总数说这次有 25 条，只是这一页没有——那是页码的事，不是「一条都没发起过」。
+    progressTotal = 25;
+    progress = [];
+    const page = await mountSection();
+    await selectCustomer(page, 9);
+
+    expect(page.find('[data-testid="advice-progress-empty"]').exists()).toBe(false);
+    expect(page.find('[data-testid="advice-progress-table"]').exists()).toBe(true);
+    // 分页条仍在：客户得靠它翻回去。
+    expect(page.get('[data-testid="pagination-total"]').text()).toContain("25");
+  });
+
+  it("换客户时回到第一页重取，并把上一位客户的进度清掉", async () => {
+    progressTotal = 25;
+    const page = await mountSection();
+    await selectCustomer(page, 9);
+    page.findComponent(PaginationBar).vm.$emit("update:page", 2);
+    await flushPromises();
+
+    progress = PROGRESS;
+    await selectCustomer(page, 10);
+
+    const fetchMock = vi.mocked(globalThis.fetch);
+    // 换了客户就是换了批数据：停在第 2 页会看到「这位客户没有建议」，那不是事实。
+    const urls = requestedUrls(fetchMock, "/operation-advice?");
+    expect(urls[urls.length - 1]).toContain("page=1");
+    expect(page.get('[data-testid="advice-progress-table"]').findAll("tbody tr")).toHaveLength(2);
   });
 });

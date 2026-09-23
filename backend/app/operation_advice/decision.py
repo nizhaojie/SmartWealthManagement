@@ -29,6 +29,11 @@
 重新跑一遍，客户自己动过持仓导致份额不足就是接受失败，不会静默地按当下的全部持仓成交。
 份额列为空表示「全部赎回」——那是改动之前落库的行（当时只存金额），它按接受那一刻的
 全部持仓成交（`_redemption_shares` 的回退分支），旧语义因此原样延续。
+
+**「我的建议」是分页列表（ADR-0024）**，排序是「送达时间倒序 + 建议标识兜底」的全序键：
+同一秒送达的两条若没有确定的先后，翻页会把一条读两次、另一条谁也读不到。切片与 `total`
+都从同一个列表派生（`pagination.paginate`），因此越界页返回空 `items` 而 `total` 不变。
+列表的 `status` 过滤与页面分组读的是同一个算出来的状态（`status_of`），不另立一套口径。
 """
 
 from __future__ import annotations
@@ -54,6 +59,7 @@ from app.db.models import (
 from app.event_bus import EventPublisher
 from app.exceptions import AppError
 from app.order_acceptance import service as order_acceptance
+from app.pagination import PageParams, paginate
 
 DECISION_ACCEPT = "接受"
 DECISION_REJECT = "拒绝"
@@ -64,6 +70,10 @@ STATUS_ACCEPTED = "已接受"
 STATUS_REJECTED = "已拒绝"
 STATUS_EXPIRED = "已过期"
 
+# 客户侧的全部状态：`status` 过滤只认这四个，别的一律拒绝，而不是「查不到就是空」——
+# 一个拼错的状态会回一份空列表，而空列表在分页之前是「你还没有建议」的同一句话。
+ADVICE_STATUSES = (STATUS_AWAITING, STATUS_ACCEPTED, STATUS_REJECTED, STATUS_EXPIRED)
+
 # 有效期 7 个自然日：从送达那一刻起的自然日，不按工作日算（spec Q17）。
 VALIDITY_DAYS = 7
 
@@ -71,6 +81,7 @@ ZERO = Decimal("0.00")
 
 ADVICE_NOT_FOUND_MESSAGE = "操作建议不存在"
 UNKNOWN_DECISION_MESSAGE = "未知的客户决定"
+UNKNOWN_STATUS_MESSAGE = "未知的建议状态"
 ALREADY_DECIDED_MESSAGE = "该建议已有客户决定"
 EXPIRED_MESSAGE = "该建议已过期，不能再接受，请客户经理重新发起"
 MISSING_RELEASED_AT_MESSAGE = "操作建议缺少放行留痕，无法判定有效期"
@@ -132,13 +143,36 @@ def released_at_by_review(db: Session, review_ids: list[int]) -> dict[int, datet
     return {review_id: decided_at for review_id, decided_at in rows}
 
 
-def _released_at(db: Session, review: AdvisoryReview) -> datetime:
-    moment = released_at_by_review(db, [review.id]).get(review.id)
+def release_moment(review: AdvisoryReview, released: dict[int, datetime]) -> datetime:
+    """这条**已放行**建议的送达时刻，取自放行留痕（`released_at_by_review` 的批量结果）。
+
+    已放行却没有留痕时当场报错：`record_decision` 一次提交里同时写两者，这个状态产生
+    不了。宁可报错，也不要静默地把一条读不出有效期的建议说成「还有效」——它看起来
+    完全正常，只是永远不会过期。
+
+    这条规则只有这一处：客户侧的单条读、客户侧的列表与内部侧的进度表三处都要它，各写
+    一遍的话，某一次改动只要漏掉其中一处，漏掉的那一处就会开始撒谎。
+    """
+    moment = released.get(review.id)
     if moment is None:
-        # 已放行却没有放行留痕：`record_decision` 一次提交里同时写两者，这个状态产生不了。
-        # 宁可当场报错，也不要静默地把一条读不出有效期的建议当成「还有效」。
         raise AppError(500, MISSING_RELEASED_AT_MESSAGE)
     return moment
+
+
+def optional_release_moment(
+    review: AdvisoryReview, released: dict[int, datetime]
+) -> datetime | None:
+    """同一条规则，给「列表里混着未放行的建议」那一侧用：未放行就是 `None`（还没送达）。
+
+    它与 `release_moment` 共用那条报错规则，因此「已放行必有留痕」不会在两处各写一遍。
+    """
+    if review.status != STATUS_RELEASED:
+        return None
+    return release_moment(review, released)
+
+
+def _released_at(db: Session, review: AdvisoryReview) -> datetime:
+    return release_moment(review, released_at_by_review(db, [review.id]))
 
 
 def _delivered_statement(*, customer_id: int):
@@ -252,10 +286,16 @@ def _serialize_one(
     )
 
 
-def list_my_advice(db: Session, *, customer_id: int, now: datetime) -> dict:
-    """本人的已送达建议：待决定的与已决定的都在同一个列表里，按送达时间倒序。
+def _delivered_items(db: Session, *, customer_id: int, now: datetime) -> list[dict]:
+    """这位客户名下的**全部**已送达建议，按送达时间倒序排好。
 
-    「还没有建议」是空列表，不是 404——它不是一种错误。
+    排完序才交给分页切片：只排当前页的话，「送达时间倒序」只在这一页内成立，翻页即乱
+    （ADR-0024）。数据集因此是全集，`total` 与切片都由 `pagination.paginate` 从它派生。
+
+    切片留在内存里做，是因为全序键（放行留痕上的送达时刻）与状态口径（现算）都在这一
+    层：把排序下推到 SQL 就要把放行留痕连进来，把状态过滤下推就要把 `status_of` 再写
+    一遍 SQL——而「同一个状态有两处口径」正是这批列表要挡住的形态。单客户的数据量是
+    这一取舍成立的前提。
     """
     rows = _delivered_reviews(db, customer_id=customer_id)
     advice_ids = [draft.id for _review, draft in rows]
@@ -265,21 +305,48 @@ def list_my_advice(db: Session, *, customer_id: int, now: datetime) -> dict:
 
     items = []
     for review, draft in rows:
-        moment = released.get(review.id)
-        if moment is None:
-            raise AppError(500, MISSING_RELEASED_AT_MESSAGE)
         items.append(
             _serialize(
                 draft=draft,
                 product_name=names.get(draft.product_code),
-                released_at=moment,
+                released_at=release_moment(review, released),
                 decision=decisions.get(draft.id),
                 now=now,
             )
         )
-    # 送达时刻相同时用建议标识兜底，同一个列表两次读出来才是确定的先后。
+    # 送达时刻相同时用建议标识兜底，同一个列表两次读出来才是确定的先后。这不是修辞：
+    # 同一秒送达的两条若没有全序键，翻页会把一条读两次、另一条谁也读不到。
     items.sort(key=lambda item: (item["released_at"], item["id"]), reverse=True)
-    return {"advice": items}
+    return items
+
+
+def list_my_advice(
+    db: Session,
+    *,
+    customer_id: int,
+    now: datetime,
+    page: PageParams,
+    status: str | None = None,
+) -> dict:
+    """本人的已送达建议的一页（送达时间倒序），以及过滤后的总数。
+
+    待决定的与已决定的在同一个列表里：客户打开这一页要看的是「有哪些事在等我决定」，
+    而回看已决定的不是另一个页面——分组由前端按状态现分，而不是分四份数据。
+
+    `status` 是给侧栏角标用的：角标要的是「待决定共几条」，而列表本身是混合状态的，
+    分页之后本页条数不再等于全局条数。它读的是同一个列表接口的过滤后 `total`，不另加
+    一个 count 接口——两个口径迟早漂移，而「角标说 3、点进去是 2」正是提醒失效的形态。
+    取值只认 `ADVICE_STATUSES`：拼错的状态静默回空列表，与「你还没有建议」是同一句话。
+
+    「还没有建议」是空列表，不是 404——它不是一种错误。分页之后这一句只对 `total === 0`
+    成立：越界的那一页也可以是空的。
+    """
+    items = _delivered_items(db, customer_id=customer_id, now=now)
+    if status is not None:
+        if status not in ADVICE_STATUSES:
+            raise AppError(400, UNKNOWN_STATUS_MESSAGE)
+        items = [item for item in items if item["status"] == status]
+    return paginate(items, params=page)
 
 
 def get_my_advice(db: Session, *, advice_id: int, customer_id: int, now: datetime) -> dict:

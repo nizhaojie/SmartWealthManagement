@@ -9,10 +9,14 @@
  * 接受是一次原子操作（服务端）：受理校验通过就当场成交，不通过则整条失败、建议**仍留在
  * 待你决定**，原因就地渲染。这里因此在失败时不刷新列表——刷新会把一条还没失败的建议
  * 说成别的状态，而它其实什么都没发生。
+ *
+ * 列表分页（ADR-0024）：一页里装着混合状态的建议，**四个分组按这一页的内容现分**
+ * （空组不渲染）。分组与分页是同一份数据的两种切法，不是四份数据——各状态各拉一页
+ * 的话，翻页会变成四次请求，而「这一页里有没有待决定的」这种问题也就没人答得上。
  */
 import { computed, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
-import { PageHeader, PanelCard } from "@wealth/shared";
+import { PageHeader, PaginationBar, PanelCard } from "@wealth/shared";
 import { formatDateTime } from "../advisory/timeliness";
 import { useAdviceStore } from "../stores/advice";
 import FailureNotice from "../trading/FailureNotice.vue";
@@ -60,7 +64,18 @@ const groups = computed<AdviceGroup[]>(() => {
   return all.filter((group) => group.items.length > 0);
 });
 
-const isEmpty = computed(() => store.loaded && !store.error && groups.value.length === 0);
+/** 「一条都没有」读的是**过滤后的总数**，不是本页条数（ADR-0024）。 */
+const isEmpty = computed(() => store.loaded && !store.error && store.total === 0);
+
+/**
+ * 有内容但这一页恰好是空的（越界页）。
+ *
+ * 它不能说成「还没有收到建议」：那是一句关于整个人生的断言，而这里只是页码跑到了
+ * 末页之后。两者分开，客户才知道该翻回去还是该去交易。
+ */
+const isBlankPage = computed(
+  () => !store.loading && !store.error && store.total > 0 && groups.value.length === 0,
+);
 
 async function onDecide(item: OperationAdvice, decision: AdviceDecision): Promise<void> {
   failure.value = null;
@@ -158,6 +173,21 @@ onMounted(() => {
           </li>
         </ul>
       </PanelCard>
+
+      <PanelCard v-if="isBlankPage" title="这一页没有建议">
+        <p class="advice__empty" data-testid="advice-page-empty">
+          页码超出了范围，翻回前面几页看看。
+        </p>
+      </PanelCard>
+
+      <PaginationBar
+        v-if="store.total > 0"
+        :total="store.total"
+        :page="store.page"
+        :page-size="store.pageSize"
+        :disabled="store.loading"
+        @update:page="store.goTo"
+      />
 
       <PanelCard v-if="isEmpty" title="还没有收到建议">
         <p class="advice__empty" data-testid="advice-empty">{{ EMPTY_HINT }}</p>

@@ -2,7 +2,7 @@
 import { computed, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import { ElMessage } from "element-plus";
-import { PanelCard } from "@wealth/shared";
+import { PaginationBar, PanelCard, usePagination } from "@wealth/shared";
 import type { CustomerListItem } from "../customers/types";
 import { errorMessage, formatDateTime, formatMoney } from "../format";
 import { listAdviceOptions, listCustomerAdvice, startAdvice } from "./api";
@@ -20,6 +20,9 @@ import { customerStatusTagType, reviewStatusTagType } from "./view";
  * 或份额（赎回）。可选项由后端算好（`operation-advice-options`），这里只读只渲染——
  * 不按方向过滤、不算买不买得起，否则选品规则被表达两次，漂移的表现是「下拉里有这只
  * 产品，一提交被拒」，而不会有任何断言失败。
+ *
+ * 进度表是分页列表（ADR-0024）：一位客户身上攒到二十条以上是常事，「共几条」读服务端
+ * 的 `total` 而不是本页条数——后者会随翻页变，看起来也像个总数。
  */
 defineProps<{ customers: CustomerListItem[] }>();
 
@@ -30,9 +33,27 @@ const direction = ref<string>(DIRECTIONS[0]);
 const submitting = ref(false);
 const startError = ref("");
 
-const progress = ref<OperationAdviceProgress[]>([]);
-const progressLoading = ref(false);
-const progressError = ref("");
+const {
+  items: progress,
+  total: progressTotal,
+  page: progressPage,
+  pageSize: progressPageSize,
+  loading: progressLoading,
+  errorMessage: progressError,
+  reset: resetProgress,
+  goTo: goToProgress,
+  clear: clearProgress,
+} = usePagination<OperationAdviceProgress>(
+  async (query) => {
+    const id = customerId.value;
+    // 还没选客户就是空页——那是「还没选人」，不是「这个人的进度为空」。
+    if (id === null) {
+      return { items: [], total: 0, page: query.page, page_size: query.page_size };
+    }
+    return listCustomerAdvice(id, query);
+  },
+  { failureMessage: "建议进度加载失败" },
+);
 
 // 可选项：跟着「客户 + 方向」走，两个字段任一变化都要重取。
 const options = ref<AdviceOption[]>([]);
@@ -40,20 +61,6 @@ const optionsLoading = ref(false);
 const optionsError = ref("");
 const productCode = ref<string | null>(null);
 const quantity = ref("");
-
-// 进度表跟着选中的客户走；加载失败时不留上一位置客户的进度（那是别人的数据）。
-async function loadProgress(nextCustomerId: number): Promise<void> {
-  progressLoading.value = true;
-  progressError.value = "";
-  progress.value = [];
-  try {
-    progress.value = await listCustomerAdvice(nextCustomerId);
-  } catch (error) {
-    progressError.value = errorMessage(error, "建议进度加载失败");
-  } finally {
-    progressLoading.value = false;
-  }
-}
 
 // 可选项跟着「客户 + 方向」走：换了任何一头，先清掉上一份结果（那是另一位客户或
 // 另一个方向的产品），再按后端算好的列表重取。
@@ -72,12 +79,12 @@ async function loadOptions(nextCustomerId: number, nextDirection: string): Promi
 }
 
 // 进度跟着选中的客户走，由状态变化驱动而不是由下拉的 change 事件驱动：
-// 「换了一位客户」才是要重新读进度的那件事。
+// 「换了一位客户」才是要重新读进度的那件事。先清空再取：取数在途时留着上一位客户的
+// 进度，就是拿别人的数据冒充这一位的。
 watch(customerId, (value) => {
-  progress.value = [];
-  progressError.value = "";
+  clearProgress();
   if (value !== null) {
-    void loadProgress(value);
+    void resetProgress();
   }
 });
 
@@ -154,7 +161,9 @@ async function submit(): Promise<void> {
       quantity.value.trim(),
     );
     ElMessage.success("已发起，等待理财顾问审核");
-    await loadProgress(customerId.value as number);
+    // 新建议按发起时间倒序排在最前，回第一页才看得到它：停在原来的第 3 页上，
+    // 发起完看起来「什么都没发生」。
+    await resetProgress();
   } catch (error) {
     startError.value = errorMessage(error, "发起建议失败");
   } finally {
@@ -268,15 +277,16 @@ function openAdvice(adviceId: number): void {
       >
         {{ progressError }}
       </p>
+      <!-- 「还没有为他发起过」读的是过滤后的总数，不是本页条数：越界页也是空的。 -->
       <p
-        v-else-if="!progressLoading && !progress.length"
+        v-else-if="!progressLoading && progressTotal === 0"
         class="advice-start__hint"
         data-testid="advice-progress-empty"
       >
         还没有为他发起过建议。
       </p>
       <el-table
-        v-if="progress.length"
+        v-if="progressTotal > 0"
         :data="progress"
         class="advice-start__table"
         data-testid="advice-progress-table"
@@ -323,6 +333,15 @@ function openAdvice(adviceId: number): void {
           </template>
         </el-table-column>
       </el-table>
+      <!-- 取不到进度时 `total` 归零，分页条与表格同进同退：一条都没有时它不该出现。 -->
+      <PaginationBar
+        v-if="progressTotal > 0"
+        :total="progressTotal"
+        :page="progressPage"
+        :page-size="progressPageSize"
+        :disabled="progressLoading"
+        @update:page="goToProgress"
+      />
     </template>
   </PanelCard>
 </template>

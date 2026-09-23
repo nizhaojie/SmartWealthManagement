@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
+from app.advisory.access import ensure_can_view
 from app.auth.dependencies import (
     ROLE_FORBIDDEN_MESSAGE,
     AuthContext,
@@ -61,11 +62,15 @@ def internal_get_profile(
     customer_id: int,
     scenario: str | None = None,
     query: str | None = None,
-    _auth: AuthContext = Depends(require_internal),
+    employee: Employee = Depends(current_employee),
     db: Session = Depends(get_session),
     cache=Depends(get_redis),
     settings: Settings = Depends(get_settings),
 ):
+    # 客户标识来自路径，只做 require_internal 的话，客户经理按 id 拼一个 URL 就能
+    # 读到非名下客户的画像——前端没给入口不构成约束。可见范围与审核内容、工单、
+    # 预警、资金账户、会话归档同一口径（app.customer_scope）。
+    ensure_can_view(db, employee, customer_id)
     if scenario is not None and scenario not in DEFAULT_SCENARIO_WEIGHTS:
         raise AppError(400, UNKNOWN_SCENARIO_MESSAGE)
     return ok(
@@ -107,6 +112,9 @@ def internal_write_tag(
     db: Session = Depends(get_session),
     cache=Depends(get_redis),
 ):
+    # 写入这条路径的响应里带着整份画像，读的闸门因此也要在这里再判一次：只放开写
+    # 不放开读，等于把上一条的可见范围从后门绕过去。
+    ensure_can_view(db, employee, customer_id)
     if body.source == SOURCE_ADVISOR and employee.employee_role != ADVISOR:
         raise AppError(403, ROLE_FORBIDDEN_MESSAGE)
     now = _now()

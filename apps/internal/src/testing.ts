@@ -27,7 +27,7 @@ const DEFAULTS: [string, unknown][] = [
   ["/api/internal/risk-rules", emptyPage()],
   ["/api/internal/work-orders", emptyPage()],
   ["/api/internal/knowledge/documents", emptyPage()],
-  ["/api/internal/analytics/history", []],
+  ["/api/internal/analytics/history", emptyPage()],
   ["/api/internal/analytics/examples", []],
   ["/api/internal/advisory/queue", emptyPage()],
   ["/api/internal/advisory/history", emptyPage()],

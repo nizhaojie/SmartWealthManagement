@@ -12,6 +12,7 @@ from app.auth.dependencies import current_employee
 from app.db.models import Employee
 from app.db.session import get_session
 from app.http import ok
+from app.pagination import PageParams, page_params
 from app.redis_client import get_redis
 from app.settings import Settings, get_settings
 
@@ -43,9 +44,10 @@ def run_analytics_query(
 def get_history(
     employee: Employee = Depends(current_employee),
     db: Session = Depends(get_session),
+    page: PageParams = Depends(page_params),
 ):
-    items = list_query_history(db, employee=employee)
-    return ok([item.model_dump(mode="json") for item in items])
+    """本员工的历史查询，分页返回（ADR-0024）。"""
+    return ok(list_query_history(db, employee=employee, params=page))
 
 
 @router.get("/examples")

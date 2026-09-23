@@ -1,4 +1,6 @@
+import type { PageQuery, Paginated } from "@wealth/shared";
 import { http } from "../api/http";
+import { queryString } from "../api/query";
 import type {
   AnalyticsExampleItem,
   AnalyticsHistoryItem,
@@ -15,8 +17,12 @@ export function runAnalyticsQuery(
   });
 }
 
-export function listAnalyticsHistory(): Promise<AnalyticsHistoryItem[]> {
-  return http.get<AnalyticsHistoryItem[]>("/api/internal/analytics/history");
+/** 本人的历史查询一页（留痕时间倒序）。`items`/`total` 由服务端给，前端不数本页条数。 */
+export function listAnalyticsHistory(
+  query: PageQuery,
+): Promise<Paginated<AnalyticsHistoryItem>> {
+  const search = queryString({ page: query.page, page_size: query.page_size });
+  return http.get<Paginated<AnalyticsHistoryItem>>(`/api/internal/analytics/history${search}`);
 }
 
 export function listAnalyticsExamples(): Promise<AnalyticsExampleItem[]> {

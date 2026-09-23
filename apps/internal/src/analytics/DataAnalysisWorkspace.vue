@@ -1,17 +1,13 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
-import { PageHeader, PanelCard } from "@wealth/shared";
+import { PageHeader, PanelCard, usePagination } from "@wealth/shared";
 import { errorMessage } from "../format";
 import { useInspector } from "../shell/pageSlots";
 import AnalyticsHistoryDetail from "./AnalyticsHistoryDetail.vue";
 import AnalyticsHistoryPanel from "./AnalyticsHistoryPanel.vue";
 import AnalyticsResultView from "./AnalyticsResultView.vue";
 import { listAnalyticsExamples, listAnalyticsHistory, runAnalyticsQuery } from "./api";
-import type {
-  AnalyticsExampleItem,
-  AnalyticsHistoryItem,
-  AnalyticsQueryResponse,
-} from "./types";
+import type { AnalyticsExampleItem, AnalyticsHistoryItem, AnalyticsQueryResponse } from "./types";
 
 // 页面级会话标识：同一页内的多轮追问共享它，刷新页面即新会话。
 const sessionId = crypto.randomUUID();
@@ -21,25 +17,29 @@ const asking = ref(false);
 const result = ref<AnalyticsQueryResponse | null>(null);
 const failureReason = ref("");
 
-const history = ref<AnalyticsHistoryItem[]>([]);
-const historyFailed = ref(false);
 const examples = ref<AnalyticsExampleItem[]>([]);
 const selectedHistoryId = ref<number | null>(null);
 
-// 选中的那条记录：被新一轮历史刷掉时详情自然收起，不留一份孤立副本。
+// 历史查询是留痕表里的一页（ADR-0024）：只增的列表，靠 page/page_size 逐页取。
+// 取数仍由这个页面做——栏只接收 props、上抛选中项与翻页，见下面的 useInspector。
+const {
+  items: history,
+  total: historyTotal,
+  page: historyPage,
+  pageSize: historyPageSize,
+  loading: historyLoading,
+  errorMessage: historyError,
+  goTo: goToHistoryPage,
+  reset: resetHistory,
+} = usePagination<AnalyticsHistoryItem>((query) => listAnalyticsHistory(query));
+
+// 栏里只说一句「加载失败」：它是窄栏，放不下服务端的原文，也没必要重复。
+const historyFailed = computed(() => historyError.value !== "");
+
+// 选中的那条记录：翻页或新一轮历史把它带出这一页时，详情自然收起，不留一份孤立副本。
 const selectedRecord = computed(
   () => history.value.find((entry) => entry.id === selectedHistoryId.value) ?? null,
 );
-
-async function loadHistory(): Promise<void> {
-  try {
-    history.value = await listAnalyticsHistory();
-    historyFailed.value = false;
-  } catch {
-    // 历史拉不到不影响提问：留着已有的一份，只在栏里说明这一次没拉到。
-    historyFailed.value = true;
-  }
-}
 
 async function loadExamples(): Promise<void> {
   try {
@@ -58,9 +58,10 @@ async function ask(): Promise<void> {
   asking.value = true;
   try {
     result.value = await runAnalyticsQuery({ question: question.value, sessionId });
-    // 主区已经有新的结果了，先前点开的那条历史记录就该收起。
+    // 主区已经有新的结果了，先前点开的那条历史记录就该收起；这一轮的留痕是最新的一条，
+    // 因此回到第一页取——停在原来的页上，刚问完的这一条不会出现。
     selectedHistoryId.value = null;
-    await loadHistory();
+    await resetHistory();
   } catch (error) {
     result.value = null;
     failureReason.value = errorMessage(error, "查询失败，请稍后重试");
@@ -74,21 +75,28 @@ function reuseQuestion(value: string): void {
   question.value = value;
 }
 
-// 历史查询常驻壳层右侧栏：数据仍由这个页面拉取，栏只接收 props、上抛选中项。
+// 历史查询常驻壳层右侧栏：数据仍由这个页面拉取，栏只接收 props、上抛选中项与翻页。
 useInspector(() => ({
   component: AnalyticsHistoryPanel,
   props: {
     history: history.value,
     selectedId: selectedHistoryId.value,
     failed: historyFailed.value,
+    total: historyTotal.value,
+    page: historyPage.value,
+    pageSize: historyPageSize.value,
+    loading: historyLoading.value,
     onSelect: (id: number) => {
       selectedHistoryId.value = id;
+    },
+    "onUpdate:page": (page: number) => {
+      void goToHistoryPage(page);
     },
   },
 }));
 
 onMounted(async () => {
-  await Promise.all([loadHistory(), loadExamples()]);
+  await Promise.all([resetHistory(), loadExamples()]);
 });
 </script>
 

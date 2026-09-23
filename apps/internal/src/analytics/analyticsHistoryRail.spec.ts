@@ -1,5 +1,6 @@
-// 历史查询搬进壳层右侧栏后的四条行为：栏里列记录、点开看的是那条记录、
-// 点开不再改写提问框、提问后收起已点开的记录。
+// 历史查询搬进壳层右侧栏后的几条行为：栏里列记录、点开看的是那条记录、
+// 点开不再改写提问框、提问后收起已点开的记录，以及分页（ADR-0024）——
+// 栏底给出过滤后的总数，翻页取的是服务端的下一页。
 // 写在这里而不是页面单测里：只有挂上壳，才能证明这张卡真的在第三栏、而不在内容区。
 import ElementPlus from "element-plus";
 import { createPinia, setActivePinia, type Pinia } from "pinia";
@@ -11,7 +12,7 @@ import { clearTokens, setTokens } from "../auth/tokenStore";
 import { router } from "../router";
 import { apiError, stubApiFetch } from "../testing";
 
-const HISTORY = [
+const HISTORY_ITEMS = [
   {
     id: 7,
     question: "上个月各风险等级的客户分布",
@@ -34,6 +35,16 @@ const HISTORY = [
   },
 ];
 
+/** 历史查询接口的一页（ADR-0024）：形状恒为 `{items, total, page, page_size}`。 */
+function historyPage(
+  items: unknown[] = HISTORY_ITEMS,
+  overrides: Record<string, unknown> = {},
+) {
+  return { items, total: items.length, page: 1, page_size: 20, ...overrides };
+}
+
+const HISTORY = historyPage();
+
 const EXAMPLE = "上个月各风险等级的客户分布";
 
 const ANSWER = {
@@ -52,12 +63,17 @@ const ANSWER = {
 let pinia: Pinia;
 let wrapper: VueWrapper | null = null;
 
-async function mountAnalysis(options: { history?: unknown } = {}): Promise<VueWrapper> {
+async function mountAnalysis(
+  options: { history?: unknown; historyResponder?: (url: string) => unknown } = {},
+): Promise<VueWrapper> {
   stubApiFetch((url) => {
     if (url.includes("/api/internal/auth/me")) {
       return { real_name: "测试员工", employee_role: ADVISOR };
     }
     if (url.includes("/api/internal/analytics/history")) {
+      if (options.historyResponder) {
+        return options.historyResponder(url);
+      }
       return options.history ?? HISTORY;
     }
     if (url.includes("/api/internal/analytics/examples")) {
@@ -95,6 +111,12 @@ function questionInput(app: VueWrapper) {
 
 function questionText(app: VueWrapper): string {
   return (questionInput(app).element as HTMLInputElement).value;
+}
+
+/** 这次请求带的页码：栏底的翻页控件交给服务端的就是这个数。 */
+function requestedPage(url: string): number {
+  const query = new URLSearchParams(url.split("?")[1] ?? "");
+  return Number(query.get("page") ?? 1);
 }
 
 beforeEach(() => {
@@ -174,5 +196,49 @@ describe("数据分析的历史查询右侧栏", () => {
     await app.get("[data-testid='example-question']").trigger("click");
 
     expect(questionText(app)).toBe(EXAMPLE);
+  });
+});
+
+describe("数据分析的历史查询分页", () => {
+  it("展示过滤后的总数，翻页取的是服务端的下一页", async () => {
+    const app = await mountAnalysis({
+      historyResponder: (url) =>
+        requestedPage(url) === 1
+          ? historyPage([HISTORY_ITEMS[0]], { total: 21 })
+          : historyPage([HISTORY_ITEMS[1]], { total: 21, page: 2 }),
+    });
+
+    const rail = app.get(".app-shell__inspector");
+    expect(rail.get('[data-testid="pagination-total"]').text()).toBe("共 21 条");
+    expect(rail.find('[data-testid="history-item-7"]').exists()).toBe(true);
+
+    await rail.get(".pagination-bar .btn-next").trigger("click");
+    await flushPromises();
+
+    // 第 2 页的内容来自服务端，而不是把已有的两条切一半。
+    expect(rail.find('[data-testid="history-item-6"]').exists()).toBe(true);
+    expect(rail.find('[data-testid="history-item-7"]').exists()).toBe(false);
+    // 总数不随翻页变：它是过滤后的总数，不是本页条数。
+    expect(rail.get('[data-testid="pagination-total"]').text()).toBe("共 21 条");
+  });
+
+  it("从没问过时说「还没有历史查询」，也不给分页条", async () => {
+    const app = await mountAnalysis({ history: historyPage([], { total: 0 }) });
+
+    const rail = app.get(".app-shell__inspector");
+    expect(rail.get('[data-testid="history-empty"]').text()).toContain("还没有历史查询");
+    // 一条都没有时没有东西可翻。
+    expect(rail.find('[data-testid="pagination-bar"]').exists()).toBe(false);
+  });
+
+  it("把空页与「从没问过」分开", async () => {
+    // 越界页：一条也拿不到，但总数说这个人问过 21 次——那是页码的事。
+    const app = await mountAnalysis({ history: historyPage([], { total: 21, page: 99 }) });
+
+    const rail = app.get(".app-shell__inspector");
+    expect(rail.get('[data-testid="history-page-empty"]').text()).toContain("前面几页");
+    expect(rail.find('[data-testid="history-empty"]').exists()).toBe(false);
+    // 分页条仍在：人得靠它翻回去。
+    expect(rail.get('[data-testid="pagination-total"]').text()).toBe("共 21 条");
   });
 });

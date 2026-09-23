@@ -158,7 +158,7 @@ def test_history_lists_the_employees_own_past_queries(analytics_client: TestClie
     response = analytics_client.get("/api/internal/analytics/history", headers=headers)
 
     assert response.status_code == 200
-    entries = response.json()["data"]
+    entries = response.json()["data"]["items"]
     mine = [entry for entry in entries if entry["question"] == question]
     assert len(mine) == 1
     entry = mine[0]
@@ -182,7 +182,7 @@ def test_history_does_not_leak_other_employees_queries(analytics_client: TestCli
     )
 
     assert response.status_code == 200
-    questions = [entry["question"] for entry in response.json()["data"]]
+    questions = [entry["question"] for entry in response.json()["data"]["items"]]
     assert question not in questions
 
 

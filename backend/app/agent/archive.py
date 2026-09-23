@@ -6,6 +6,9 @@
 
 归档只用于回溯与举证，不参与上下文组装：短期记忆过期后，这句话不会再回到上下文里，
 但它仍然可以在归档中按会话标识或客户标识查到。
+
+历史会话列表按会话分组后分页（ADR-0024），`total` 因此是「多少场会话」。会话详情
+里的 `messages` 不分页：那是会话回看本身，一次会话的消息量与页长无关。
 """
 
 import re
@@ -18,12 +21,10 @@ from app.agent.citations import Citation
 from app.customer_scope import is_under_management, restrict_to_own_customers
 from app.db.models import ConversationArchive, Customer, Employee
 from app.exceptions import AppError
+from app.pagination import PageParams, count_matching, paginated_response
 
 SESSION_NOT_FOUND_MESSAGE = "会话不存在"
 NOT_YOUR_CUSTOMER_SESSION_MESSAGE = "该会话不在你名下客户的范围内，无权查看"
-
-# 一次查询最多返回的会话条数：归档是只增表，浏览历史需要上限，避免一次拉全表。
-LIST_LIMIT = 100
 
 # 归档里的身份域：本 slice 落库的是客户侧对话，客户经理的可见范围按客户归属收紧。
 IDENTITY_CUSTOMER = "customer"
@@ -148,13 +149,21 @@ def list_sessions(
     db: Session,
     *,
     viewer: Employee,
+    params: PageParams,
     session_id: str | None = None,
     user_id: int | None = None,
-) -> list[dict]:
-    """按会话标识或客户标识（归档列 `user_id`）列出历史会话，按最后一次发言倒序。
+) -> dict:
+    """按会话标识或客户标识（归档列 `user_id`）列出历史会话的一页，按最后一次发言倒序。
 
-    两个筛选项都可为空——那时返回最近的一批会话，供界面浏览。客户经理只看得到
-    自己名下客户的会话，其他内部角色不受限（与工单、预警同一口径）。
+    两个筛选项都可为空——那时给的是最近的会话，供界面逐页浏览（ADR-0024）。客户经理
+    只看得到自己名下客户的会话，其他内部角色不受限（与工单、预警同一口径）。
+
+    `total` 是**过滤后的会话数**而不是归档行数：这条查询按会话分组，`count_matching`
+    数的是分组后的行数，也就是「有多少场会话」。口径写成「归档行数」时，页面上会说
+    「共 400 条」而每一页只有 20 场会话，两个数字都像是真的。
+
+    排序键是最后一次发言时间倒序 + 会话标识兜底：发言时间是秒精度，同一秒里结束的
+    两场会话若不分先后，翻页时会在两页之间来回跳。
     """
     last_at = func.max(ConversationArchive.create_time)
     query = select(
@@ -179,8 +188,14 @@ def list_sessions(
             Customer.manager_id == viewer.id
         )
 
-    rows = db.execute(query.order_by(last_at.desc()).limit(LIST_LIMIT)).all()
-    return [_serialize_session(row) for row in rows]
+    total = count_matching(db, query)
+    rows = db.execute(
+        query.order_by(last_at.desc(), ConversationArchive.session_id.asc())
+        .offset(params.offset)
+        .limit(params.page_size)
+    ).all()
+    items = [_serialize_session(row) for row in rows]
+    return paginated_response(items, total=total, params=params)
 
 
 def get_session(db: Session, session_id: str, *, viewer: Employee) -> dict:
@@ -220,7 +235,7 @@ def _ensure_can_view(db: Session, row: ConversationArchive, viewer: Employee) ->
 def _first_user_message_titles(db: Session, session_ids: list[str]) -> dict[str, str]:
     """每个会话的第一条客户提问（role 为 user 且 id 最小的行），用作历史列表的标题。
 
-    批量取而非逐会话查，避免浏览 100 条历史时退化成 100 次查询。
+    批量取而非逐会话查，避免浏览一页历史时退化成每场会话一次查询。
     """
     if not session_ids:
         return {}
@@ -249,13 +264,16 @@ def list_customer_sessions(
     db: Session,
     *,
     user_id: int,
+    params: PageParams,
     exclude_session_id: str | None = None,
-) -> list[dict]:
-    """客户本人的历史会话列表：按最后发言倒序，标题取该会话第一条客户提问。
+) -> dict:
+    """客户本人的历史会话一页：按最后发言倒序，标题取该会话第一条客户提问。
 
     与内部端 `list_sessions` 不同：这里不做客户经理可见范围收紧——调用方就是客户
     本人，可见范围天然是「自己」，直接把 user_id 定死、并排除当前会话（当前会话在
     智能对话页可见，历史只收「已结束的登录会话」）。
+
+    排序键与内部端同口径：最后一次发言时间倒序 + 会话标识兜底。
     """
     last_at = func.max(ConversationArchive.create_time)
     conditions = [
@@ -274,15 +292,16 @@ def list_customer_sessions(
         )
         .where(*conditions)
         .group_by(ConversationArchive.session_id)
-        .order_by(last_at.desc())
-        .limit(LIST_LIMIT)
     )
-    rows = db.execute(query).all()
-    if not rows:
-        return []
-
+    total = count_matching(db, query)
+    rows = db.execute(
+        query.order_by(last_at.desc(), ConversationArchive.session_id.asc())
+        .offset(params.offset)
+        .limit(params.page_size)
+    ).all()
+    # 越界页没有行，但 `total` 仍然是真的「一共几场会话」——空 `items` 不等于没有历史。
     titles = _first_user_message_titles(db, [row.session_id for row in rows])
-    return [
+    items = [
         {
             "session_id": row.session_id,
             "title": titles.get(row.session_id, ""),
@@ -292,6 +311,7 @@ def list_customer_sessions(
         }
         for row in rows
     ]
+    return paginated_response(items, total=total, params=params)
 
 
 def get_customer_session(db: Session, *, session_id: str, user_id: int) -> dict:

@@ -81,7 +81,7 @@ def test_customer_lists_own_history_excluding_current_session(chat_client):
 
     listing = _list_history(chat_client, token2)
     assert listing.status_code == 200
-    sessions = listing.json()["data"]
+    sessions = listing.json()["data"]["items"]
     session_ids = {item["session_id"] for item in sessions}
 
     # 当前会话不在历史里，过去的会话在。
@@ -100,11 +100,13 @@ def test_customer_history_hides_other_customers_sessions(chat_client):
     token_b, sid_b, _ = _customer_login(chat_client, OTHER_CUSTOMER_USERNAME)
     _chat(chat_client, token_b, "B 的提问")
 
-    session_ids_a = {item["session_id"] for item in _list_history(chat_client, token_a).json()["data"]}
+    items_a = _list_history(chat_client, token_a).json()["data"]["items"]
+    session_ids_a = {item["session_id"] for item in items_a}
     assert sid_a not in session_ids_a  # 当前会话排除
     assert sid_b not in session_ids_a  # 别人的会话不可见
 
-    session_ids_b = {item["session_id"] for item in _list_history(chat_client, token_b).json()["data"]}
+    items_b = _list_history(chat_client, token_b).json()["data"]["items"]
+    session_ids_b = {item["session_id"] for item in items_b}
     assert sid_b not in session_ids_b
     assert sid_a not in session_ids_b
 

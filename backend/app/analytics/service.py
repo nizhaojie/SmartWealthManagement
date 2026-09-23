@@ -29,6 +29,7 @@ from app.analytics.schemas import (
 )
 from app.db.models import AnalyticsQueryAudit, Employee
 from app.exceptions import AppError
+from app.pagination import PageParams, count_matching, paginated_response
 from app.settings import Settings
 
 # 记忆命名空间：同一员工在数据分析与风控问答里的多轮上下文互不串味。
@@ -130,20 +131,29 @@ def run_query(
     )
 
 
-_HISTORY_LIMIT = 50
-
-
 def list_query_history(
-    db: Session, *, employee: Employee
-) -> list[AnalyticsHistoryItem]:
-    """员工自己的历史查询：留痕表同时服务合规追溯与历史重用两个目的。"""
+    db: Session, *, employee: Employee, params: PageParams
+) -> dict:
+    """员工自己的历史查询一页：留痕表同时服务合规追溯与历史重用两个目的。
+
+    `total` 是本人的留痕条数（`employee_id` 过滤之后），不是本页条数——历史是只增表，
+    「一共问过多少次」不会随翻页变。排序键是留痕时间倒序 + 标识兜底（ADR-0024）：
+    留痕时间是秒精度，同一秒提交的两次查询若不分先后，翻页时会在两页之间来回跳。
+    """
+    query = select(AnalyticsQueryAudit).where(
+        AnalyticsQueryAudit.employee_id == employee.id
+    )
+    total = count_matching(db, query)
     rows = db.scalars(
-        select(AnalyticsQueryAudit)
-        .where(AnalyticsQueryAudit.employee_id == employee.id)
-        .order_by(AnalyticsQueryAudit.id.desc())
-        .limit(_HISTORY_LIMIT)
+        query.order_by(
+            AnalyticsQueryAudit.create_time.desc(), AnalyticsQueryAudit.id.desc()
+        )
+        .offset(params.offset)
+        .limit(params.page_size)
     ).all()
-    return [
+    # 条目形状仍由 `AnalyticsHistoryItem` 定义，只是落成 JSON 形态再交给分页响应：
+    # `paginated_response` 拼的是可直接序列化的 dict，而 `create_time` 是 datetime。
+    items = [
         AnalyticsHistoryItem(
             id=row.id,
             question=row.question,
@@ -153,9 +163,10 @@ def list_query_history(
             truncated=row.truncated,
             error_code=row.error_code,
             create_time=row.create_time,
-        )
+        ).model_dump(mode="json")
         for row in rows
     ]
+    return paginated_response(items, total=total, params=params)
 
 
 def list_example_questions(

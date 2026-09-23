@@ -1,26 +1,34 @@
 <script setup lang="ts">
-import { PanelCard } from "@wealth/shared";
+import { PaginationBar, PanelCard } from "@wealth/shared";
 import { formatDateTime } from "../format";
 import type { AnalyticsHistoryItem } from "./types";
 
 /**
- * 右侧栏里的历史查询：只列条目、只上抛选中项。
+ * 右侧栏里的历史查询：只列条目、只上抛选中项与翻页。
  *
  * 数据由工作区拉好传进来——检查器组件不自己取数，否则「问完一轮刷新历史」
  * 就要在这里再挂一条跨组件通道。留痕行里没有结果集，所以栏里也不放结果。
+ *
+ * 分页（ADR-0024）同理：页码与总数也由工作区持有，这里只把「翻到第几页」发出去。
+ * 栏里留一份页码就会有两个来源，而两个来源不一致时，显示的页码与列表内容各说各话。
  */
 defineProps<{
   history: AnalyticsHistoryItem[];
   selectedId: number | null;
   failed: boolean;
+  total: number;
+  /** 当前页，从 1 起（与后端契约同口径）。 */
+  page: number;
+  pageSize: number;
+  loading: boolean;
 }>();
 
-const emit = defineEmits<{ select: [id: number] }>();
+const emit = defineEmits<{ select: [id: number]; "update:page": [page: number] }>();
 </script>
 
 <template>
   <PanelCard title="历史查询">
-    <p v-if="!history.length && failed" class="rail__hint" role="alert" data-testid="history-error">
+    <p v-if="failed" class="rail__hint" role="alert" data-testid="history-error">
       历史查询加载失败，刷新页面重试。
     </p>
     <ul v-else-if="history.length" class="history">
@@ -40,7 +48,21 @@ const emit = defineEmits<{ select: [id: number] }>();
         </button>
       </li>
     </ul>
-    <p v-else class="rail__hint" data-testid="history-empty">还没有历史查询</p>
+    <p v-else-if="total === 0" class="rail__hint" data-testid="history-empty">还没有历史查询</p>
+    <!-- 有留痕但这一页恰好是空的（页码跑到了末页之后）：那不是「你还没问过」 -->
+    <p v-else class="rail__hint" data-testid="history-page-empty">
+      这一页没有历史查询，翻回前面几页看看。
+    </p>
+
+    <!-- 取不到时 `total` 归零，分页条与列表同进同退；越界页 `total` 不变，所以它仍然留着 -->
+    <PaginationBar
+      v-if="total > 0"
+      :total="total"
+      :page="page"
+      :page-size="pageSize"
+      :disabled="loading"
+      @update:page="emit('update:page', $event)"
+    />
   </PanelCard>
 </template>
 

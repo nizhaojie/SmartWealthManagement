@@ -2,10 +2,13 @@
 // 历史记录抽屉：列表 + 详情回看。交互形态借鉴内部工作台数据分析的「历史查询」
 // （右侧栏列表 → 只读详情），但载体是抽屉——客服对话页是单列布局，没有常驻侧栏。
 //
-// 抽屉自己取数：打开时拉列表，点条目拉详情。只读回看，不把历史加载回当前对话
+// 抽屉自己取数：打开时拉第一页列表，点条目拉详情。只读回看，不把历史加载回当前对话
 // （「会话不跨登录延续」，历史不进入上下文）。
+//
+// 列表分页由 `usePagination` 接管（ADR-0024）：会话条数没有上限，翻页只换页码，
+// 上一次打开时停在哪一页不带过来。详情是这一场会话本身，与列表的页长无关。
 import { ref, watch } from "vue";
-import { formatDateTime } from "@wealth/shared";
+import { formatDateTime, PaginationBar, usePagination } from "@wealth/shared";
 import CitationPanel from "./CitationPanel.vue";
 import CiteChip from "./CiteChip.vue";
 import { splitCitations } from "./citations";
@@ -20,28 +23,30 @@ import {
 const props = defineProps<{ open: boolean }>();
 const emit = defineEmits<{ close: [] }>();
 
-const loading = ref(false);
-const failed = ref(false);
-const sessions = ref<CustomerSessionSummary[]>([]);
+const {
+  items: sessions,
+  total,
+  page,
+  pageSize,
+  loading,
+  errorMessage: failedReason,
+  goTo,
+  reset,
+} = usePagination<CustomerSessionSummary>((query) => listCustomerConversations(query), {
+  failureMessage: "历史记录加载失败，刷新页面重试。",
+});
+
 const selectedId = ref<string | null>(null);
 const detail = ref<CustomerSessionDetail | null>(null);
 const detailLoading = ref(false);
 const detailFailed = ref(false);
 const openCitationKey = ref<string | null>(null);
 
+/** 每次打开都从第一页重取：上次停在第 3 页不该带到这一次来（会话不跨登录延续）。 */
 async function load(): Promise<void> {
-  loading.value = true;
-  failed.value = false;
-  sessions.value = [];
   selectedId.value = null;
   detail.value = null;
-  try {
-    sessions.value = await listCustomerConversations();
-  } catch {
-    failed.value = true;
-  } finally {
-    loading.value = false;
-  }
+  await reset();
 }
 
 async function select(sessionId: string): Promise<void> {
@@ -107,11 +112,20 @@ watch(
     <!-- 列表视图 -->
     <div v-if="selectedId === null" class="history">
       <p v-if="loading" class="history__status">正在加载历史记录…</p>
-      <p v-else-if="failed" class="history__error" role="alert" data-testid="history-error">
-        历史记录加载失败，刷新页面重试。
+      <p
+        v-else-if="failedReason"
+        class="history__error"
+        role="alert"
+        data-testid="history-error"
+      >
+        {{ failedReason }}
       </p>
-      <p v-else-if="sessions.length === 0" class="history__status" data-testid="history-empty">
+      <p v-else-if="sessions.length === 0 && total === 0" class="history__status" data-testid="history-empty">
         暂无历史记录
+      </p>
+      <!-- 有会话但这一页恰好是空的（数据变少、页码跑到了末页之后）：那不是「你还没有历史」 -->
+      <p v-else-if="sessions.length === 0" class="history__status" data-testid="history-page-empty">
+        这一页没有会话，翻回前面几页看看。
       </p>
       <ul v-else class="history__list">
         <li v-for="entry in sessions" :key="entry.session_id">
@@ -128,6 +142,16 @@ watch(
           </button>
         </li>
       </ul>
+
+      <!-- 取不到时 `total` 归零，分页条与列表同进同退；越界页 `total` 不变，所以它仍然留着 -->
+      <PaginationBar
+        v-if="total > 0"
+        :total="total"
+        :page="page"
+        :page-size="pageSize"
+        :disabled="loading"
+        @update:page="goTo"
+      />
     </div>
 
     <!-- 详情视图 -->

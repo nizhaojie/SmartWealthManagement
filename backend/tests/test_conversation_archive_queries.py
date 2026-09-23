@@ -86,7 +86,7 @@ def test_transcript_is_fetchable_by_session_id(chat_client):
 
     listing = _list_sessions(chat_client, internal, session_id=session_id)
     assert listing.status_code == 200
-    sessions = listing.json()["data"]
+    sessions = listing.json()["data"]["items"]
     assert [item["session_id"] for item in sessions] == [session_id]
     assert sessions[0]["user_id"] == user_id
     assert sessions[0]["identity_domain"] == "customer"
@@ -112,7 +112,7 @@ def test_sessions_are_listable_by_user_id(chat_client):
     listing = _list_sessions(chat_client, internal, user_id=user_id)
 
     assert listing.status_code == 200
-    sessions = listing.json()["data"]
+    sessions = listing.json()["data"]["items"]
     assert session_id in {item["session_id"] for item in sessions}
     assert all(item["user_id"] == user_id for item in sessions)
 
@@ -140,14 +140,15 @@ def test_account_manager_only_reaches_own_customers_sessions(chat_client):
 
     manager1 = _internal_token(chat_client, MANAGER1_USERNAME)
 
-    assert _list_sessions(chat_client, manager1, user_id=other_user).json()["data"] == []
+    assert _list_sessions(chat_client, manager1, user_id=other_user).json()["data"]["items"] == []
     assert _get_session(chat_client, manager1, other_session).status_code == 403
     assert _get_session(chat_client, manager1, own_session).status_code == 200
 
     # 不受限的角色看得到全部，限制只落在客户经理身上。
     advisor = _internal_token(chat_client, ADVISOR_USERNAME)
     visible = {
-        item["session_id"] for item in _list_sessions(chat_client, advisor).json()["data"]
+        item["session_id"]
+        for item in _list_sessions(chat_client, advisor).json()["data"]["items"]
     }
     assert {own_session, other_session} <= visible
     assert _get_session(chat_client, advisor, other_session).status_code == 200

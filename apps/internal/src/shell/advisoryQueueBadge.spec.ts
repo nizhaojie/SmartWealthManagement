@@ -7,6 +7,7 @@ import ElementPlus from "element-plus";
 import { createPinia, setActivePinia, type Pinia } from "pinia";
 import { flushPromises, mount, type VueWrapper } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { DEFAULT_PAGE_SIZE } from "@wealth/shared";
 import App from "../App.vue";
 import { useAdvisoryQueueStore } from "../advisory/queueStore";
 import type { PendingReview } from "../advisory/types";
@@ -33,8 +34,9 @@ function pendingReview(id: number, overrides: Partial<PendingReview> = {}): Pend
   };
 }
 
+// 队列接口的一页（ADR-0024）：角标读的是 `total`，不是本页条数。
 function queueOf(reviews: PendingReview[]) {
-  return { pending_requests: [], pending_reviews: reviews };
+  return { items: reviews, total: reviews.length, page: 1, page_size: DEFAULT_PAGE_SIZE };
 }
 
 /** 只认队列接口的 responder，其余 URL 走 testing 的默认响应。 */

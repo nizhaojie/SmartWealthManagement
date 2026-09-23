@@ -7,6 +7,10 @@
 定稿同时供两端读取，但两端要的东西不一样：内部端要完整的举证材料
 （`serialize_final`），客户侧只要**客户送达视图**（`serialize_final_for_customer`）。
 裁剪发生在服务端，不共用内部端的序列化（见 ADR-0016）。
+
+客户侧的定稿列表是分页的（ADR-0024）：切片与 `total` 都从同一条查询派生，排序键
+见 `LATEST_FIRST`——「最新一份」与「列表首行」读的是同一个键，分页也不该让两个出口
+的先后分叉。
 """
 
 from datetime import datetime
@@ -18,8 +22,15 @@ from sqlalchemy.orm import Session
 from app.agent.classification import disclaimer_for
 from app.db.models import AdvisoryFinal, Employee
 from app.exceptions import AppError
+from app.pagination import PageParams, count_matching
 
 FINAL_NOT_FOUND_MESSAGE = "尚无已放行的方案"
+
+# 定稿的先后口径，只有这一处：最新的在前，`released_at` 相同时用 `id` 兜底。
+# 「最新一份」与「列表首行」是两个出口，口径分叉会让客户在两处看到不同的方案；
+# 而分页之后兜底键还多一层作用——同一秒放行的两份若没有确定的先后，翻页会把
+# 一份读两次、另一份谁也读不到。
+LATEST_FIRST = (AdvisoryFinal.released_at.desc(), AdvisoryFinal.id.desc())
 
 
 class FinalContent(TypedDict):
@@ -49,27 +60,32 @@ def get_final_by_draft_id(db: Session, draft_id: int) -> AdvisoryFinal:
 
 
 def get_latest_final_for_customer(db: Session, *, customer_id: int) -> AdvisoryFinal:
-    # 排序口径与 list_finals_for_customer 一致：都是「最新一份」的另一个
-    # 出口，两处口径分叉会让客户在列表首行与「最新一份」之间看到不同的
-    # 方案。released_at 相同时用 id 兜底，结果才是确定的。
     final = db.scalar(
         select(AdvisoryFinal)
         .where(AdvisoryFinal.customer_id == customer_id)
-        .order_by(AdvisoryFinal.released_at.desc(), AdvisoryFinal.id.desc())
+        .order_by(*LATEST_FIRST)
     )
     if final is None:
         raise AppError(404, FINAL_NOT_FOUND_MESSAGE)
     return final
 
 
-def list_finals_for_customer(db: Session, *, customer_id: int) -> list[AdvisoryFinal]:
-    return list(
-        db.scalars(
-            select(AdvisoryFinal)
-            .where(AdvisoryFinal.customer_id == customer_id)
-            .order_by(AdvisoryFinal.released_at.desc(), AdvisoryFinal.id.desc())
-        ).all()
+def list_finals_for_customer(
+    db: Session, *, customer_id: int, page: PageParams
+) -> tuple[list[AdvisoryFinal], int]:
+    """该客户定稿的一页，以及**过滤后**的总数（ADR-0024）。
+
+    `total` 由同一条查询派生（`count_matching`），不是另数一遍本页：客户看到
+    「共 N 份」却只能翻到少数几份，两个数字看起来都是真的，谁也不报错。
+    """
+    stmt = (
+        select(AdvisoryFinal)
+        .where(AdvisoryFinal.customer_id == customer_id)
+        .order_by(*LATEST_FIRST)
     )
+    total = count_matching(db, stmt)
+    rows = db.scalars(stmt.offset(page.offset).limit(page.page_size)).all()
+    return list(rows), total
 
 
 def get_final_for_customer_by_id(db: Session, *, final_id: int, customer_id: int) -> AdvisoryFinal:

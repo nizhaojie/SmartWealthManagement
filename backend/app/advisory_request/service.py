@@ -7,8 +7,9 @@ from uuid import uuid4
 from sqlalchemy import CursorResult, select, update
 from sqlalchemy.orm import Session
 
-from app.db.models import AdvisoryRequest
+from app.db.models import AdvisoryRequest, Customer
 from app.exceptions import AppError
+from app.pagination import PageParams, count_matching
 
 STATUS_PENDING = "待处理"
 STATUS_IN_PROGRESS = "处理中"
@@ -48,6 +49,16 @@ def _condition_fingerprint(filters: dict) -> str:
 
 def _request_no(now: datetime) -> str:
     return f"AR{now.strftime('%Y%m%d')}{uuid4().hex[:6].upper()}"
+
+
+def waiting_seconds(now: datetime, since: datetime) -> float:
+    """一条内容在队列里等了多久。
+
+    队列视图（待生成的方案请求、待审的投顾内容）共用一个口径：各算一遍的话，
+    两个数字的含义会悄悄分叉，而它们并排显示在同一张工作台上。负数夹到 0——
+    客户端时钟与服务端不一致时，等待时长不该出现负值。
+    """
+    return max(0.0, (now - since).total_seconds())
 
 
 def _serialize(row: AdvisoryRequest) -> dict:
@@ -96,23 +107,61 @@ def submit_request(db: Session, *, customer_id: int, filters: dict, now: datetim
     return _serialize(row)
 
 
-def list_requests(db: Session, *, customer_id: int) -> list[dict]:
-    rows = db.scalars(
+def list_requests(
+    db: Session, *, customer_id: int, page: PageParams
+) -> tuple[list[dict], int]:
+    """客户自己的方案请求一页，最近提交的在前（ADR-0024）。
+
+    排序键 `submitted_at` 只到秒：`id` 兜底定死同一秒提交的两条请求的先后，
+    否则翻页会在两页之间来回跳。
+    """
+    stmt = (
         select(AdvisoryRequest)
         .where(AdvisoryRequest.customer_id == customer_id)
         .order_by(AdvisoryRequest.submitted_at.desc(), AdvisoryRequest.id.desc())
-    ).all()
-    return [_serialize(row) for row in rows]
+    )
+    total = count_matching(db, stmt)
+    rows = db.scalars(stmt.offset(page.offset).limit(page.page_size)).all()
+    return [_serialize(row) for row in rows], total
 
 
-def list_requests_for_queue(db: Session, *, status: str | None = None) -> list[dict]:
-    stmt = select(AdvisoryRequest)
+def list_requests_for_queue(
+    db: Session, *, status: str | None, page: PageParams, now: datetime
+) -> tuple[list[dict], int]:
+    """内部端的方案请求一页：顾问要看「谁在等、等了多久、什么条件」。
+
+    与客户侧的两点不同：排序是等得最久的在前——队列型列表按等待时长倒序，也就是
+    事件时间**升序**（ADR-0024 关于记录型与队列型列表的分野）；并且带上客户与
+    等待时长，顾问端要凭它决定先处理哪一条。客户侧不回显客户标识，那段口径在
+    `_serialize` 里，不在这里。
+    """
+    stmt = select(AdvisoryRequest, Customer.real_name).join(
+        Customer, Customer.id == AdvisoryRequest.customer_id
+    )
     if status:
         stmt = stmt.where(AdvisoryRequest.status == status)
-    rows = db.scalars(
-        stmt.order_by(AdvisoryRequest.submitted_at.asc(), AdvisoryRequest.id.asc())
-    ).all()
-    return [_serialize(row) for row in rows]
+    stmt = stmt.order_by(AdvisoryRequest.submitted_at.asc(), AdvisoryRequest.id.asc())
+
+    total = count_matching(db, stmt)
+    rows = db.execute(stmt.offset(page.offset).limit(page.page_size)).all()
+    return [
+        _serialize_for_queue(row, customer_name=customer_name, now=now)
+        for row, customer_name in rows
+    ], total
+
+
+def _serialize_for_queue(row: AdvisoryRequest, *, customer_name: str, now: datetime) -> dict:
+    """顾问端的一行：在客户侧那份之上补「是谁在等、等了多久」。
+
+    客户侧不回显 `customer_id`，顾问端必须有它才能点「生成方案」——两端口径的
+    差异只在这一处，`_serialize` 那份因此保持原样。
+    """
+    return {
+        **_serialize(row),
+        "customer_id": row.customer_id,
+        "customer_name": customer_name,
+        "waiting_seconds": waiting_seconds(now, row.submitted_at),
+    }
 
 
 def get_request(db: Session, request_id: int) -> AdvisoryRequest:

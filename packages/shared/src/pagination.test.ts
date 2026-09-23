@@ -131,4 +131,27 @@ describe("usePagination", () => {
 
     expect(pagination.errorMessage.value).toBe("这一页加载失败");
   });
+
+  it("clears back to the first page without fetching", async () => {
+    // 登出那一刻令牌已经交回，再发请求只会撞 401；而留着上一位的数据，
+    // 新会话会看到别人的列表与总数。
+    const load = vi
+      .fn()
+      .mockImplementation((query: { page: number; page_size: number }) =>
+        Promise.resolve(page([{ id: "R1" }], 45, query)),
+      );
+    const pagination = usePagination<Row>(load);
+
+    await pagination.refresh();
+    await pagination.goTo(2);
+    expect(pagination.page.value).toBe(2);
+
+    pagination.clear();
+
+    expect(load).toHaveBeenCalledTimes(2);
+    expect(pagination.items.value).toEqual([]);
+    expect(pagination.total.value).toBe(0);
+    expect(pagination.page.value).toBe(1);
+    expect(pagination.errorMessage.value).toBe("");
+  });
 });

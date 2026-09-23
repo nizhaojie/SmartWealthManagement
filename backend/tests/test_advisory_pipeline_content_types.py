@@ -280,10 +280,15 @@ def _generate_plan(client: TestClient, customer_id: int) -> dict:
     return response.json()["data"]
 
 
-def _queue(client: TestClient) -> dict:
-    response = client.get("/api/internal/advisory/queue", headers=_employee_headers(client))
+def _queue(client: TestClient) -> list[dict]:
+    response = client.get(
+        "/api/internal/advisory/queue",
+        headers=_employee_headers(client),
+        # 页长拉满：队列里还有别的用例留下的待审内容，要找的那两条不必在第一页。
+        params={"page_size": 100},
+    )
     assert response.status_code == 200
-    return response.json()["data"]
+    return response.json()["data"]["items"]
 
 
 def test_queue_returns_both_content_types_each_labelled(auth_client: TestClient, customer):
@@ -291,7 +296,7 @@ def test_queue_returns_both_content_types_each_labelled(auth_client: TestClient,
     draft = _generate_plan(auth_client, customer_id)
     advice_id, _review_id = _insert_advice_draft(customer_id, thread_id=uuid4().hex)
 
-    pending = _queue(auth_client)["pending_reviews"]
+    pending = _queue(auth_client)
 
     plan_row = next(row for row in pending if row["content_ref"] == draft["id"])
     assert plan_row["content_type"] == CONTENT_TYPE_PLAN

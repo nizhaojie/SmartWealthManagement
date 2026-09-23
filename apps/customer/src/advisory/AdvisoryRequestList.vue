@@ -1,12 +1,24 @@
 <script setup lang="ts">
 // 方案请求的进度列表，是「我的方案」页的下半区。客户在这里能看到「请求走到哪一步了」，
 // 但看不到顾问定稿本身——定稿在上半区的「已放行方案」里，两者是两份不同的东西。
-import { formatDateTime, PanelCard } from "@wealth/shared";
+//
+// 分页条在这里渲染，页码状态留在页面（`usePagination`，ADR-0024）：空状态要判
+// 「一份请求都没有」还是「这一页没有」，那个总数只有页面手里有。取数与翻页同理，
+// 这一段因此是受控的——它只把「翻到第几页」发出去。
+import { PaginationBar, PanelCard } from "@wealth/shared";
+import { formatDateTime } from "./timeliness";
 import type { AdvisoryRequest } from "./types";
 
 defineProps<{
   requests: AdvisoryRequest[];
+  /** 过滤后的请求总数，由服务端给。 */
+  total: number;
+  page: number;
+  pageSize: number;
+  loading: boolean;
 }>();
+
+const emit = defineEmits<{ "update:page": [page: number] }>();
 
 const STATUS_HINTS: Record<string, string> = {
   待处理: "顾问尚未开始处理",
@@ -35,8 +47,9 @@ function statusHint(status: string): string {
 </script>
 
 <template>
-  <PanelCard v-if="requests.length" title="方案请求进度">
-    <ul class="requests" data-testid="advisory-requests">
+  <!-- `total > 0` 时即使本页是空的也留着这一块：撤掉它，翻过头的人就困在那一页上。 -->
+  <PanelCard v-if="requests.length || total > 0" title="方案请求进度">
+    <ul v-if="requests.length" class="requests" data-testid="advisory-requests">
       <li
         v-for="request in requests"
         :key="request.request_no"
@@ -54,6 +67,15 @@ function statusHint(status: string): string {
         </p>
       </li>
     </ul>
+
+    <PaginationBar
+      v-if="total > 0"
+      :total="total"
+      :page="page"
+      :page-size="pageSize"
+      :disabled="loading"
+      @update:page="emit('update:page', $event)"
+    />
   </PanelCard>
 </template>
 

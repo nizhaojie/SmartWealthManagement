@@ -12,10 +12,6 @@ export type AdvisoryRequest = {
   submitted_at: string;
 };
 
-export type AdvisoryRequestList = {
-  requests: AdvisoryRequest[];
-};
-
 /**
  * 客户送达视图里的产品要素：客观已披露的那几项。
  *
@@ -44,8 +40,4 @@ export type ReleasedPlan = {
   allocation_suggestion: Record<string, number>;
   released_at: string;
   disclaimer: string | null;
-};
-
-export type ReleasedPlanList = {
-  plans: ReleasedPlan[];
 };

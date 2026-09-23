@@ -81,7 +81,7 @@ def _submit(client: TestClient, username: str, filters: dict) -> dict:
 def _my_requests(client: TestClient, username: str) -> list[dict]:
     response = client.get("/api/customer/advisory-requests", headers=_headers(client, username))
     assert response.status_code == 200
-    return response.json()["data"]["requests"]
+    return response.json()["data"]["items"]
 
 
 def _internal_requests(client: TestClient, **params) -> list[dict]:
@@ -89,7 +89,7 @@ def _internal_requests(client: TestClient, **params) -> list[dict]:
         "/api/internal/advisory-requests", headers=_employee_headers(client), params=params
     )
     assert response.status_code == 200
-    return response.json()["data"]["requests"]
+    return response.json()["data"]["items"]
 
 
 def test_submitted_request_is_listed_back_to_its_submitter_with_a_status(auth_client: TestClient):

@@ -77,6 +77,18 @@ export type AdvisoryFinal = {
   disclaimer: string;
 };
 
+/**
+ * 方案请求里「在等顾问」的那一个状态（对齐后端 `app.advisory_request.service`
+ * 的 `STATUS_PENDING`）。待生成的方案请求就是按它筛出来的。
+ */
+export const REQUEST_STATUS_PENDING = "待处理";
+
+/**
+ * 待生成的方案请求（内部端的一行）。
+ *
+ * `customer_id` 与 `customer_name` 只在内部端出现：顾问要凭它们找客户、发起生成；
+ * 客户侧那份响应不回显内部标识。
+ */
 export type PendingRequest = {
   id: number;
   request_no: string;
@@ -108,11 +120,6 @@ export type PendingReview = {
   product_name?: string | null;
   direction?: string;
   amount?: string;
-};
-
-export type AdvisoryQueue = {
-  pending_requests: PendingRequest[];
-  pending_reviews: PendingReview[];
 };
 
 export type AdvisoryHistoryEntry = {

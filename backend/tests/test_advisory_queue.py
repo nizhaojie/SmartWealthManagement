@@ -219,9 +219,19 @@ def _reject(client: TestClient, draft_id: int, *, reason: str = "需要重新核
     )
 
 
-def _queue(client: TestClient) -> dict:
+def _queue(client: TestClient, **params) -> dict:
     response = client.get(
-        "/api/internal/advisory/queue", headers=_employee_headers(client)
+        "/api/internal/advisory/queue", headers=_employee_headers(client), params=params
+    )
+    assert response.status_code == 200
+    return response.json()["data"]
+
+
+def _pending_requests(client: TestClient) -> dict:
+    response = client.get(
+        "/api/internal/advisory-requests",
+        headers=_employee_headers(client),
+        params={"status": "待处理"},
     )
     assert response.status_code == 200
     return response.json()["data"]
@@ -297,35 +307,36 @@ def test_rejecting_the_draft_reopens_its_source_request(auth_client: TestClient,
     assert _request_status(request["id"]) == "待处理"
 
 
-def test_queue_lists_pending_requests_and_pending_reviews_with_waiting_time(
-    auth_client: TestClient, customer
-):
-    customer_id, username = customer
-    request = _submit_request(auth_client, username, BOND_FILTERS)
+def test_queue_lists_pending_reviews_with_waiting_time(auth_client: TestClient, customer):
     other_id = _insert_customer(username=f"queuereview_{id(object())}")
     try:
         draft = _generate_plan(auth_client, other_id).json()["data"]
 
-        queue = _queue(auth_client)
-
-        request_row = next(
-            row for row in queue["pending_requests"] if row["id"] == request["id"]
-        )
-        assert request_row["customer_name"] == username
-        assert request_row["waiting_seconds"] >= 0
-
+        # 页长拉满：队列里还有种子与别的用例留下的待审内容，要找的那条不必在第一页。
+        queue = _queue(auth_client, page_size=100)
         review_row = next(
-            row for row in queue["pending_reviews"] if row["draft_id"] == draft["id"]
+            row for row in queue["items"] if row["draft_id"] == draft["id"]
         )
         assert review_row["status"] == "待审"
         assert review_row["waiting_seconds"] >= 0
-
-        # 已经生成过原稿的请求不再挂在「待生成」里——它已经进了待审队列。
-        _generate_plan(auth_client, customer_id, advisory_request_id=request["id"])
-        queue_after = _queue(auth_client)
-        assert all(row["id"] != request["id"] for row in queue_after["pending_requests"])
     finally:
         _delete_customer(other_id)
+
+
+def test_pending_requests_are_listed_for_the_queue_and_leave_it_once_generated(
+    auth_client: TestClient, customer
+):
+    """待生成的方案请求走方案请求接口（队列接口只管待审内容），生成后不再挂在那里。"""
+    customer_id, username = customer
+    request = _submit_request(auth_client, username, BOND_FILTERS)
+
+    pending = _pending_requests(auth_client)
+    request_row = next(row for row in pending["items"] if row["id"] == request["id"])
+    assert request_row["customer_name"] == username
+    assert request_row["waiting_seconds"] >= 0
+
+    _generate_plan(auth_client, customer_id, advisory_request_id=request["id"])
+    assert all(row["id"] != request["id"] for row in _pending_requests(auth_client)["items"])
 
 
 def test_advisor_can_see_their_own_review_history(auth_client: TestClient, customer):
@@ -334,10 +345,11 @@ def test_advisor_can_see_their_own_review_history(auth_client: TestClient, custo
     _release(auth_client, draft["id"])
 
     response = auth_client.get(
-        "/api/internal/advisory/history", headers=_employee_headers(auth_client)
+        "/api/internal/advisory/history",
+        headers=_employee_headers(auth_client),
+        params={"page_size": 100},
     )
     assert response.status_code == 200
-    history = response.json()["data"]["history"]
-    entry = next(row for row in history if row["draft_id"] == draft["id"])
+    entry = next(row for row in response.json()["data"]["items"] if row["draft_id"] == draft["id"])
     assert entry["action"] == "放行"
     assert entry["decided_at"]

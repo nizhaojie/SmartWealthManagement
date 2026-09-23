@@ -51,6 +51,11 @@ vi.mock("./advisory/api", () => ({
 let pinia: Pinia;
 let activeWrapper: VueWrapper | null = null;
 
+/** 列表接口的一页（ADR-0024）：形状恒为 `{items, total, page, page_size}`。 */
+function emptyPage() {
+  return { items: [], total: 0, page: 1, page_size: 20 };
+}
+
 function mountApp(): VueWrapper {
   activeWrapper = mount(App, {
     global: { plugins: [pinia, ElementPlus, router] },
@@ -112,8 +117,8 @@ describe("客户应用·门控与路由", () => {
       allowed_product_risk_levels: ["R1", "R2", "R3", "R4"],
       products: [],
     });
-    vi.mocked(listAdvisoryRequests).mockResolvedValue({ requests: [] });
-    vi.mocked(listReleasedPlans).mockResolvedValue({ plans: [] });
+    vi.mocked(listAdvisoryRequests).mockResolvedValue(emptyPage());
+    vi.mocked(listReleasedPlans).mockResolvedValue(emptyPage());
     vi.mocked(listMyAdvice).mockResolvedValue({ advice: [] });
     vi.mocked(getFundingAccount).mockResolvedValue({ available_balance: "100000.00" });
 

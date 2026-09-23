@@ -1,17 +1,26 @@
-"""审核队列：待生成的客户方案请求 + 待审核的投顾内容，外加顾问自己的审核历史。
+"""待审内容队列（两类内容合并）与顾问自己的审核历史。
 
-两段队列分别对应两个不同的「等待」：待处理的方案请求在等顾问点「生成」，
-待审核的内容在等顾问放行或驳回。等待时长按各自的起点（提交时间 / 原稿落库
-时间）现算，不落库——它随时间流逝而变化，落库反而要操心失效。
+队列是「等待最久的内容排在最前」的工作单：按内容类型无关地合并两类内容
+（ADR-0020），审核是同一类工作，分两个队列只会让顾问漏看一半。每条都带
+`content_type` 标注，队列因此不必知道载荷长什么样就知道面前是方案还是操作
+建议。方案的载荷与操作建议的载荷分表，所以合并发生在这一层——按类型各查
+一次再按等待时长排序，而不是硬 JOIN 到某张表上（那会让另一类内容整批消失，
+且不会报错）。
 
-待审队列按内容类型无关地合并两类内容（ADR-0020）：审核是同一类工作，分两个
-队列只会让顾问漏看一半。每条都带 `content_type` 标注，队列因此不必知道载荷
-长什么样就知道面前是方案还是操作建议。方案的载荷与操作建议的载荷分表，所以
-合并发生在这一层——按类型各查一次再按等待时长排序，而不是硬 JOIN 到某张表上
-（那会让另一类内容整批消失，且不会报错）。
+待处理的方案请求不在这里：它与本模块的两段列表不是同一批记录，且它本身就是
+一张表上的列表资源，走 `app.advisory_request.service` 与
+`GET /api/internal/advisory-requests`（ADR-0024）。两个「等待」各自的起点
+（提交时间 / 原稿落库时间）仍按同样的口径现算，不落库——等待时长随时间流逝
+而变化，落库反而要操心失效。
 
-排序留给前端：数据量小，且「可排序」指的是顾问按不同列重新排列，不是
-服务端要支持多种排序参数。
+两段列表都在内存里排序后交给 `pagination.paginate`（ADR-0024）：合并发生在
+Python 这一层，`total` 是合并后的条数，排序键因此必须是**全序**的——只有时刻
+的话，同一秒落库的两条内容在两次请求里可以换位，翻页就会把一条读两次、另一条
+谁也读不到。标识（内容类型 + 内容引用）是那个兜底键。
+
+极性是「队列型」的那一边：等得最久的排在前面，也就是事件时间**升序**（见
+ADR-0024 关于记录型与队列型列表的分野）。审核是接着做的工作，让最新的那条
+插到最前面，会让最该处理的内容一直沉在最后一页。
 """
 
 from datetime import datetime
@@ -21,10 +30,9 @@ from sqlalchemy.orm import Session
 
 from app.advisory.pipeline import CONTENT_TYPE_OPERATION_ADVICE, CONTENT_TYPE_PLAN
 from app.advisory.review_status import STATUS_IN_PROGRESS, STATUS_PENDING
-from app.advisory_request.service import STATUS_PENDING as REQUEST_STATUS_PENDING
+from app.advisory_request.service import waiting_seconds
 from app.db.models import (
     AdvisoryDraft,
-    AdvisoryRequest,
     AdvisoryReview,
     AdvisoryReviewAudit,
     Customer,
@@ -35,42 +43,21 @@ from app.db.models import (
 _PENDING_STATUSES = (STATUS_PENDING, STATUS_IN_PROGRESS)
 
 
-def _waiting_seconds(now: datetime, since: datetime) -> float:
-    return max(0.0, (now - since).total_seconds())
-
-
 def _ordered_entries(rows: list[tuple[datetime, dict]], *, newest_first: bool) -> list[dict]:
-    """按时刻排好序再丢掉排序键——它是收集时的临时坐标，不属于返回的行。"""
-    rows.sort(key=lambda row: row[0], reverse=newest_first)
+    """按「时刻 + 内容标识」排好序再丢掉排序键——它是收集时的临时坐标，不属于返回的行。
+
+    兜底键不能省：`create_time` 与 `decided_at` 都只到秒，同一秒里的两条内容若没有
+    确定的先后，翻页时会重读或漏读（两页看起来都正常）。
+    """
+    rows.sort(
+        key=lambda row: (row[0], row[1]["content_type"], row[1]["content_ref"]),
+        reverse=newest_first,
+    )
     return [entry for _moment, entry in rows]
 
 
-def list_queue(db: Session, now: datetime) -> dict:
-    pending_requests = []
-    request_rows = db.execute(
-        select(AdvisoryRequest, Customer.real_name)
-        .join(Customer, Customer.id == AdvisoryRequest.customer_id)
-        .where(AdvisoryRequest.status == REQUEST_STATUS_PENDING)
-        .order_by(AdvisoryRequest.submitted_at.asc())
-    ).all()
-    for request, customer_name in request_rows:
-        pending_requests.append(
-            {
-                "id": request.id,
-                "request_no": request.request_no,
-                "customer_id": request.customer_id,
-                "customer_name": customer_name,
-                "filters": request.filters,
-                "submitted_at": request.submitted_at.isoformat(),
-                "waiting_seconds": _waiting_seconds(now, request.submitted_at),
-            }
-        )
-
-    return {"pending_requests": pending_requests, "pending_reviews": _list_pending_reviews(db, now)}
-
-
-def _list_pending_reviews(db: Session, now: datetime) -> list[dict]:
-    """待审的两类内容合成一条按等待时长排序的队列。"""
+def list_queue(db: Session, now: datetime) -> list[dict]:
+    """待审的两类内容合成一条按等待时长排序的队列（等待最久在前）；切片交给调用方。"""
     rows: list[tuple[datetime, dict]] = []
 
     plan_rows = db.execute(
@@ -95,7 +82,7 @@ def _list_pending_reviews(db: Session, now: datetime) -> list[dict]:
                     "status": review.status,
                     "tilt": draft.tilt,
                     "generated_at": draft.generated_at.isoformat(),
-                    "waiting_seconds": _waiting_seconds(now, review.create_time),
+                    "waiting_seconds": waiting_seconds(now, review.create_time),
                 },
             )
         )
@@ -122,7 +109,7 @@ def _list_pending_reviews(db: Session, now: datetime) -> list[dict]:
                     "customer_name": customer_name,
                     "status": review.status,
                     "generated_at": advice.generated_at.isoformat(),
-                    "waiting_seconds": _waiting_seconds(now, review.create_time),
+                    "waiting_seconds": waiting_seconds(now, review.create_time),
                     # 操作建议的载荷摘要：顾问看队列时要知道它是哪个产品、什么方向、
                     # 多少钱——它不是方案的候选池，没有第二层可展开的东西。
                     "product_code": advice.product_code,

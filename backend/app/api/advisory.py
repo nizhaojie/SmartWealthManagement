@@ -34,6 +34,7 @@ from app.auth.roles import ACCOUNT_MANAGER, ADVISOR
 from app.db.models import Employee
 from app.db.session import get_session
 from app.http import ok
+from app.pagination import PageParams, page_params, paginate, paginated_response
 from app.redis_client import get_redis
 
 router = APIRouter(prefix="/api/internal/advisory")
@@ -69,16 +70,20 @@ def generate_plan(
 def get_advisory_queue(
     _employee: Employee = Depends(require_employee_role(ADVISOR)),
     db: Session = Depends(get_session),
+    page: PageParams = Depends(page_params),
 ):
-    return ok(list_queue(db, _now()))
+    # 队列是两类内容合并出来的内存列表：先合并、排序，再切片（`paginate` 的 `total`
+    # 因此是「待审内容共有多少条」，与页码无关）。
+    return ok(paginate(list_queue(db, _now()), params=page))
 
 
 @router.get("/history")
 def get_advisory_history(
     employee: Employee = Depends(require_employee_role(ADVISOR)),
     db: Session = Depends(get_session),
+    page: PageParams = Depends(page_params),
 ):
-    return ok({"history": list_my_history(db, employee.id)})
+    return ok(paginate(list_my_history(db, employee.id), params=page))
 
 
 @router.get("/drafts/{draft_id}")
@@ -188,15 +193,16 @@ def customer_list_advisory_plans(
     # 客户侧只读定稿：未经审核的原稿无论走哪个接口都读不到。
     auth: AuthContext = Depends(require_customer),
     db: Session = Depends(get_session),
+    page: PageParams = Depends(page_params),
 ):
     # 尚无已放行方案时是空列表，不是 404——「还没有方案」不是一种错误。
+    finals, total = list_finals_for_customer(db, customer_id=auth.subject_id, page=page)
     return ok(
-        {
-            "plans": [
-                serialize_final_for_customer(db, final)
-                for final in list_finals_for_customer(db, customer_id=auth.subject_id)
-            ]
-        }
+        paginated_response(
+            [serialize_final_for_customer(db, final) for final in finals],
+            total=total,
+            params=page,
+        )
     )
 
 

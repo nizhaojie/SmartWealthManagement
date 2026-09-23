@@ -12,6 +12,7 @@ from app.advisory_request.service import (
 from app.auth.dependencies import AuthContext, require_customer, require_internal
 from app.db.session import get_session
 from app.http import ok
+from app.pagination import PageParams, page_params, paginated_response
 
 router = APIRouter(prefix="/api/customer/advisory-requests")
 internal_router = APIRouter(prefix="/api/internal/advisory-requests")
@@ -41,14 +42,21 @@ def customer_submit_advisory_request(
 def customer_list_advisory_requests(
     auth: AuthContext = Depends(require_customer),
     db: Session = Depends(get_session),
+    page: PageParams = Depends(page_params),
 ):
-    return ok({"requests": list_requests(db, customer_id=auth.subject_id)})
+    requests, total = list_requests(db, customer_id=auth.subject_id, page=page)
+    return ok(paginated_response(requests, total=total, params=page))
 
 
 @internal_router.get("")
 def internal_list_advisory_requests(
     _auth: AuthContext = Depends(require_internal),
     db: Session = Depends(get_session),
+    page: PageParams = Depends(page_params),
     status: str | None = None,
 ):
-    return ok({"requests": list_requests_for_queue(db, status=status)})
+    # 待生成队列由这一条读：队列接口只管待审内容（见 app.advisory.queue）。
+    requests, total = list_requests_for_queue(
+        db, status=status, page=page, now=_now()
+    )
+    return ok(paginated_response(requests, total=total, params=page))

@@ -29,8 +29,9 @@ const DEFAULTS: [string, unknown][] = [
   ["/api/internal/knowledge/documents", []],
   ["/api/internal/analytics/history", []],
   ["/api/internal/analytics/examples", []],
-  ["/api/internal/advisory/queue", { pending_requests: [], pending_reviews: [] }],
-  ["/api/internal/advisory/history", { history: [] }],
+  ["/api/internal/advisory/queue", emptyPage()],
+  ["/api/internal/advisory/history", emptyPage()],
+  ["/api/internal/advisory-requests", emptyPage()],
 ];
 
 function urlOf(input: RequestInfo | URL): string {

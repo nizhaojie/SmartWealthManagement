@@ -5,10 +5,14 @@
  * 两个分区不合成一条时间线：直接生成的方案没有对应请求（内部端的「为客户发起
  * 生成」传 `advisory_request_id=null`），以请求为主键会出现孤儿；而「等待中」
  * 与「已出具」是两种不同的状态，混排会让客户分不清哪条在等他、哪条已经好了。
+ *
+ * 两个分区各自一页（ADR-0024）：翻方案不会重取请求，翻请求也不会重取方案。
+ * `total` 都取服务端给的过滤后总数，空状态因此判的是「一份都没有」而不是
+ * 「这一页没有」。
  */
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted } from "vue";
 import { useRouter } from "vue-router";
-import { ApiError, PageHeader, PanelCard } from "@wealth/shared";
+import { PageHeader, PaginationBar, PanelCard, usePagination } from "@wealth/shared";
 import AdvisoryRequestList from "./AdvisoryRequestList.vue";
 import { listAdvisoryRequests, listReleasedPlans } from "./api";
 import { formatDateTime } from "./timeliness";
@@ -16,50 +20,51 @@ import type { AdvisoryRequest, ReleasedPlan } from "./types";
 
 const router = useRouter();
 
-const plans = ref<ReleasedPlan[]>([]);
-const plansLoading = ref(true);
-const plansError = ref("");
+const {
+  items: plans,
+  total: plansTotal,
+  page: plansPage,
+  pageSize: plansPageSize,
+  loading: plansLoading,
+  errorMessage: plansError,
+  goTo: goToPlans,
+  reset: resetPlans,
+} = usePagination<ReleasedPlan>((query) => listReleasedPlans(query), {
+  failureMessage: "方案加载失败",
+});
 
-const requests = ref<AdvisoryRequest[]>([]);
-// 「请求拉取成功」与「请求为空」要分得开：接口故障不该被说成「你还没提过请求」。
-const requestsLoaded = ref(false);
-const requestsError = ref("");
+// 取不到时给一句「这一段怎么了」：只留下服务端那句话，客户经理分不清是方案还是
+// 请求进度拉不到（两段共用同一个失败横幅的位置）。
+const REQUESTS_FAILURE_HINT = "暂时取不到";
+
+const {
+  items: requests,
+  total: requestsTotal,
+  page: requestsPage,
+  pageSize: requestsPageSize,
+  loading: requestsLoading,
+  errorMessage: requestsError,
+  goTo: goToRequests,
+  reset: resetRequests,
+} = usePagination<AdvisoryRequest>((query) => listAdvisoryRequests(query), {
+  failureMessage: REQUESTS_FAILURE_HINT,
+});
+
+/** 「拉取失败」与「什么都没有」要分得开：失败不该被说成「你还没提过请求」。 */
+const requestsFailure = computed(() =>
+  requestsError.value ? `方案请求进度加载失败：${requestsError.value}` : "",
+);
 
 // 两级空状态：无定稿但有请求 → 空状态位置直接渲染请求进度；两者都无 → 引导去产品筛选。
 const showOnboarding = computed(
   () =>
     !plansLoading.value &&
     !plansError.value &&
-    plans.value.length === 0 &&
-    requestsLoaded.value &&
-    requests.value.length === 0,
+    plansTotal.value === 0 &&
+    !requestsLoading.value &&
+    !requestsError.value &&
+    requestsTotal.value === 0,
 );
-
-async function loadPlans(): Promise<void> {
-  plansLoading.value = true;
-  plansError.value = "";
-  try {
-    plans.value = (await listReleasedPlans()).plans;
-  } catch (error) {
-    plans.value = [];
-    plansError.value = error instanceof ApiError ? error.message : "方案加载失败";
-  } finally {
-    plansLoading.value = false;
-  }
-}
-
-async function loadRequests(): Promise<void> {
-  requestsError.value = "";
-  try {
-    requests.value = (await listAdvisoryRequests()).requests;
-    requestsLoaded.value = true;
-  } catch (error) {
-    // 请求进度拉不到不影响已放行的方案，但也不能一声不响：尚无定稿时它就是
-    // 页面上唯一该有内容的位置，留白会让客户以为系统坏了（Q6 不留一块空白）。
-    requestsError.value =
-      error instanceof ApiError ? `方案请求进度加载失败：${error.message}` : "方案请求进度加载失败";
-  }
-}
 
 function openPlan(finalId: number): void {
   void router.push({ name: "advisory-plan", params: { finalId } });
@@ -70,7 +75,7 @@ function goProducts(): void {
 }
 
 onMounted(() => {
-  void Promise.all([loadPlans(), loadRequests()]);
+  void Promise.all([resetPlans(), resetRequests()]);
 });
 </script>
 
@@ -78,10 +83,10 @@ onMounted(() => {
   <div class="plans">
     <PageHeader title="我的方案" :breadcrumb="['客户视图', '我的方案']" />
 
-    <p v-if="plansLoading" class="plans__status">正在加载方案…</p>
-
-    <PanelCard v-else-if="plans.length" title="已放行方案">
-      <ul class="plans__list" data-testid="released-plans">
+    <PanelCard v-if="plansLoading || plansTotal > 0" title="已放行方案">
+      <p v-if="plansLoading" class="plans__status">正在加载方案…</p>
+      <!-- 本页为空而总数不为零（越界页）时不写「暂无」：那是两句不同的话。 -->
+      <ul v-else-if="plans.length" class="plans__list" data-testid="released-plans">
         <li v-for="plan in plans" :key="plan.id">
           <button
             type="button"
@@ -103,16 +108,33 @@ onMounted(() => {
           </button>
         </li>
       </ul>
+
+      <!-- 取不到时 `total` 归零，分页条与列表同进同退：一份方案都没有时它不该出现。 -->
+      <PaginationBar
+        v-if="plansTotal > 0"
+        :total="plansTotal"
+        :page="plansPage"
+        :page-size="plansPageSize"
+        :disabled="plansLoading"
+        @update:page="goToPlans"
+      />
     </PanelCard>
 
     <p v-else-if="plansError" class="plans__error" role="alert" data-testid="plans-error">
       {{ plansError }}
     </p>
 
-    <AdvisoryRequestList :requests="requests" />
+    <AdvisoryRequestList
+      :requests="requests"
+      :total="requestsTotal"
+      :page="requestsPage"
+      :page-size="requestsPageSize"
+      :loading="requestsLoading"
+      @update:page="goToRequests"
+    />
 
-    <p v-if="requestsError" class="plans__error" role="alert" data-testid="requests-error">
-      {{ requestsError }}
+    <p v-if="requestsFailure" class="plans__error" role="alert" data-testid="requests-error">
+      {{ requestsFailure }}
     </p>
 
     <PanelCard v-if="showOnboarding" title="还没有收到方案">

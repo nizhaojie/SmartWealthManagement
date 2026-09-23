@@ -472,10 +472,13 @@ def test_the_chosen_purchase_is_adopted_as_is(
 
     # 同一条审核流水线：原稿立刻出现在理财顾问的待审队列里，并带类型标注。
     queue = auth_client.get(
-        "/api/internal/advisory/queue", headers=_employee_headers(auth_client, ADVISOR)
+        "/api/internal/advisory/queue",
+        headers=_employee_headers(auth_client, ADVISOR),
+        # 页长拉满：队列里还有别的用例留下的待审内容，要找的那条不必在第一页。
+        params={"page_size": 100},
     )
     assert queue.status_code == 200, queue.text
-    pending = queue.json()["data"]["pending_reviews"]
+    pending = queue.json()["data"]["items"]
     row = next(item for item in pending if item["content_ref"] == advice["id"])
     assert row["content_type"] == CONTENT_TYPE_OPERATION_ADVICE
     assert row["product_code"] == advice["product_code"]

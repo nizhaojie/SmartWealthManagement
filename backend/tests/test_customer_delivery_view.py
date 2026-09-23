@@ -234,10 +234,10 @@ def _customer_products(candidates: list[dict]) -> list[dict]:
     ]
 
 
-def _plans(client: TestClient, username: str) -> list[dict]:
+def _plans(client: TestClient, username: str) -> dict:
     response = client.get("/api/customer/advisory/plans", headers=_customer_headers(client, username))
     assert response.status_code == 200
-    return response.json()["data"]["plans"]
+    return response.json()["data"]
 
 
 def test_no_released_plan_yields_an_empty_list_not_a_404(auth_client: TestClient, customer):
@@ -245,7 +245,8 @@ def test_no_released_plan_yields_an_empty_list_not_a_404(auth_client: TestClient
     _generate_plan(auth_client, customer_id)
 
     headers = _customer_headers(auth_client, username)
-    assert auth_client.get("/api/customer/advisory/plans", headers=headers).json()["data"]["plans"] == []
+    empty = auth_client.get("/api/customer/advisory/plans", headers=headers).json()["data"]
+    assert empty == {"items": [], "total": 0, "page": 1, "page_size": 20}
     # 尚无已放行的方案时，最新一份那个出口仍是 404（语义不变）。
     assert auth_client.get("/api/customer/advisory/plan", headers=headers).status_code == 404
 
@@ -263,7 +264,7 @@ def test_released_finals_are_listed_newest_first_with_the_advisor_confirmed_allo
     second_draft = _generate_plan(auth_client, customer_id)
     second_final = _release(auth_client, second_draft["id"])
 
-    plans = _plans(auth_client, username)
+    plans = _plans(auth_client, username)["items"]
     assert [plan["id"] for plan in plans] == [second_final["id"], first_final["id"]]
 
     delivered = plans[1]
@@ -295,7 +296,7 @@ def test_the_customer_delivery_view_carries_no_internal_fields(auth_client: Test
 
     headers = _customer_headers(auth_client, username)
     delivery_view = auth_client.get("/api/customer/advisory/plan", headers=headers).json()["data"]
-    listed = _plans(auth_client, username)[0]
+    listed = _plans(auth_client, username)["items"][0]
     detail = auth_client.get(
         f"/api/customer/advisory/plans/{final['id']}", headers=headers
     ).json()["data"]
@@ -335,7 +336,7 @@ def test_a_customer_cannot_read_another_customers_final_by_id(auth_client: TestC
             == 404
         )
         assert auth_client.get("/api/customer/advisory/plan", headers=headers_a).status_code == 404
-        assert _plans(auth_client, username_a) == []
+        assert _plans(auth_client, username_a)["items"] == []
     finally:
         _delete_customer(other_id)
 

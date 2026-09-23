@@ -1,21 +1,42 @@
+import type { PageQuery, Paginated } from "@wealth/shared";
 import { http } from "../api/http";
-import type {
-  AdvisoryComment,
-  AdvisoryDraft,
-  AdvisoryFinal,
-  AdvisoryHistoryEntry,
-  AdvisoryQueue,
-  AdvisoryReviewStatus,
+import { queryString } from "../api/query";
+import {
+  REQUEST_STATUS_PENDING,
+  type AdvisoryComment,
+  type AdvisoryDraft,
+  type AdvisoryFinal,
+  type AdvisoryHistoryEntry,
+  type AdvisoryReviewStatus,
+  type PendingRequest,
+  type PendingReview,
 } from "./types";
 
-export function getQueue(): Promise<AdvisoryQueue> {
-  return http.get<AdvisoryQueue>("/api/internal/advisory/queue");
+/** 待审内容的一页（两类内容合并后的队列，见 `app.advisory.queue`）。 */
+export function getQueue(query: PageQuery): Promise<Paginated<PendingReview>> {
+  const search = queryString({ page: query.page, page_size: query.page_size });
+  return http.get<Paginated<PendingReview>>(`/api/internal/advisory/queue${search}`);
 }
 
-export function getMyHistory(): Promise<AdvisoryHistoryEntry[]> {
-  return http
-    .get<{ history: AdvisoryHistoryEntry[] }>("/api/internal/advisory/history")
-    .then((data) => data.history);
+/** 顾问自己审核过的一页，最近的在前。 */
+export function getMyHistory(query: PageQuery): Promise<Paginated<AdvisoryHistoryEntry>> {
+  const search = queryString({ page: query.page, page_size: query.page_size });
+  return http.get<Paginated<AdvisoryHistoryEntry>>(`/api/internal/advisory/history${search}`);
+}
+
+/**
+ * 待生成的方案请求一页。
+ *
+ * 它不是队列接口的一段：方案请求是独立列表资源，「待处理」的那些才是在等顾问
+ * 点「生成」的（ADR-0024）。状态由服务端筛，`total` 才是过滤后的总数。
+ */
+export function listQueueRequests(query: PageQuery): Promise<Paginated<PendingRequest>> {
+  const search = queryString({
+    status: REQUEST_STATUS_PENDING,
+    page: query.page,
+    page_size: query.page_size,
+  });
+  return http.get<Paginated<PendingRequest>>(`/api/internal/advisory-requests${search}`);
 }
 
 export function generatePlan(input: {

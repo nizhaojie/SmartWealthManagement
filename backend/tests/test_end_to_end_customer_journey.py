@@ -574,7 +574,7 @@ def _walk_full_journey(
         headers=advisor,
     )
     assert queue.status_code == 200
-    assert any(row["id"] == request_id for row in queue.json()["data"]["requests"])
+    assert any(row["id"] == request_id for row in queue.json()["data"]["items"])
 
     # 顾问先请数据分析 Agent 看一眼在售产品的风险分布（统一入口 → data_analysis）。
     analytics = client.post(

@@ -47,6 +47,13 @@ export type Pagination<T> = {
   goTo: (page: number) => Promise<void>;
   /** 筛选条件变了：回到第一页再取。停在第 3 页会看到「筛选后为空」，那不是筛选的结果。 */
   reset: () => Promise<void>;
+  /**
+   * 清空并回到第一页，**不取数**。
+   *
+   * 会话结束（登出 / 换人登录）时用：那一刻不该再发请求（令牌已经交回，请求只会
+   * 撞 401），而留着上一位的数据更糟——新会话会看到别人的列表与总数。
+   */
+  clear: () => void;
 };
 
 /**
@@ -106,5 +113,12 @@ export function usePagination<T>(
     await refresh();
   }
 
-  return { items, total, page, pageSize, loading, errorMessage, refresh, goTo, reset };
+  function clear(): void {
+    items.value = [];
+    total.value = 0;
+    page.value = 1;
+    errorMessage.value = "";
+  }
+
+  return { items, total, page, pageSize, loading, errorMessage, refresh, goTo, reset, clear };
 }

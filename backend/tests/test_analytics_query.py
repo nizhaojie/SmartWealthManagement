@@ -29,6 +29,7 @@ from app.db.analytics_account import (
     ANALYTICS_VIEW_NAMES,
     CUSTOMER_VIEW_NAMES,
     EMPLOYEE_VIEW_NAMES,
+    AnalyticsIdentity,
     setup_analytics_account,
 )
 from app.db.models import AnalyticsQueryAudit
@@ -627,8 +628,7 @@ def test_identity_is_reset_before_the_connection_returns_to_pool(
     execution.execute_query(
         base_url,
         "SELECT customer_id FROM va_customer_overview",
-        employee_id=1,
-        role=ACCOUNT_MANAGER,
+        identity=AnalyticsIdentity.employee(employee_id=1, role=ACCOUNT_MANAGER),
         settings=settings,
     )
 

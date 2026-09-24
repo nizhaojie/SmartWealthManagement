@@ -35,6 +35,9 @@ DEPENDENCY_EVENT_BUS = "event_bus"
 # 检索链上的 LLM 重排。它是增强：超时 / 失败都退回 RRF 序，回答照常产出。这一条
 # 留痕的意义是让「系统有多少时间在没有重排的情况下工作」可统计（ADR-0022）。
 DEPENDENCY_RERANK = "rerank"
+# 客户侧的数据查询分支（ADR-0025）。它没有可退的备路——失败就是失败，绝不用知识
+# 库的答案冒充数据答案，因此这里留痕的是「这一轮客户没能拿到自己的数据」。
+DEPENDENCY_DATA_QUERY = "data_query"
 
 # 降级原因。同一依赖可以有多种原因，统计按依赖分组、按原因下钻。
 REASON_RETRY_EXHAUSTED = "retry_exhausted"

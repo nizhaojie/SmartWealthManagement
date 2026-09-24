@@ -1,4 +1,4 @@
-"""调试级留痕：完整提示词、原始检索片段、token 与耗时明细。
+"""调试级留痕：完整提示词、原始检索片段、数据查询的查询材料、token 与耗时明细。
 
 审计级留痕是 `conversation_archive`（见 app.agent.archive），永久保存；这里是调试级，
 保留期满后删除。两者分表存储，所以清理调试级在结构上就不可能碰到审计级。
@@ -29,6 +29,7 @@ def record(
     user_id: int | None = None,
     prompt: list | None = None,
     retrieval_snippets: list | None = None,
+    data_query: dict | None = None,
     prompt_tokens: int | None = None,
     completion_tokens: int | None = None,
     duration_ms: int | None = None,
@@ -42,6 +43,7 @@ def record(
             agent_type=agent_type,
             prompt=prompt,
             retrieval_snippets=retrieval_snippets,
+            data_query=data_query,
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
             duration_ms=duration_ms,

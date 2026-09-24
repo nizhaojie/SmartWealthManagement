@@ -1021,6 +1021,12 @@ class AgentDebugTrace(Base):
     agent_type: Mapped[str] = mapped_column(String(32), comment="Agent")
     prompt: Mapped[list | None] = mapped_column(JSON, comment="完整提示词（按角色分条）")
     retrieval_snippets: Mapped[list | None] = mapped_column(JSON, comment="原始检索片段")
+    # 客户侧数据查询这一轮的查询材料（ADR-0025）：生成的查询、命中的视图、行数。
+    # 与上两列并列而不并进去：它们的语义是「送进模型的提示词」与「检索到的原始
+    # 片段」，数据查询既不经过检索，也不是同一回事。
+    data_query: Mapped[dict | None] = mapped_column(
+        JSON, comment="数据查询的查询材料（生成的查询、命中的视图、行数）"
+    )
     prompt_tokens: Mapped[int | None] = mapped_column(comment="输入 token 数")
     completion_tokens: Mapped[int | None] = mapped_column(comment="输出 token 数")
     duration_ms: Mapped[int | None] = mapped_column(comment="耗时（毫秒）")

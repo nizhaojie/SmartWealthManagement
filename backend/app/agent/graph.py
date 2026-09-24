@@ -11,10 +11,16 @@ from sqlalchemy.orm import Session
 from app import degradation
 from app.agent import archive, debug_trace, memory
 from app.agent.citations import Citation, reconcile_answer
-from app.agent.config import CUSTOMER_SERVICE_CONFIG
+from app.agent.config import CUSTOMER_SERVICE_CONFIG, CUSTOMER_SERVICE_VIEW_NAMES
 from app.agent.fusion import fuse_and_rank
 from app.agent.intent import RETRIEVAL_INTENTS, Intent, classify_intent
 from app.agent.risk_intent import detect_risk_intent
+from app.analytics import catalog
+from app.analytics.audience import Audience
+from app.analytics.errors import OUT_OF_SCOPE_CODE, QUERY_TIMEOUT_CODE
+from app.analytics.graph import AnalyticsState
+from app.analytics.service import run_restricted_query
+from app.db.analytics_account import AnalyticsIdentity
 from app.event_bus import (
     EVENT_RISK_INTENT_DETECTED,
     SOURCE_CUSTOMER_SERVICE,
@@ -56,6 +62,110 @@ def fallback_message(settings: Settings) -> str:
 
 def handoff_message(settings: Settings) -> str:
     return f"已为您转接人工客服，请拨打 {settings.human_service_channel}，会有专属客服为您处理。"
+
+
+# ---- 客户的数据查询分支（ADR-0025）--------------------------------------------
+#
+# 数据查询有三条出口，话术彼此必须可区分，且**都不回退到知识检索**：失败/超时是
+# 降级（明说查不了、写降级留痕），白名单外是边界（告诉客户能查什么），零行是事实
+# （如实说没有）。拿知识库里的泛泛之谈冒充数据答案是危险形态，因此这里没有兜底一问。
+
+DATA_QUERY_FAILURE_MESSAGE = (
+    "很抱歉，您的数据我暂时查不了。请稍后再试，或到资产页查看。"
+)
+DATA_QUERY_EMPTY_MESSAGE = "没有查到符合条件的数据。"
+
+
+def data_query_out_of_scope_message() -> str:
+    """白名单外的话术：说清不在可查范围，并把可查的东西列出来。
+
+    清单由视图目录生成（``catalog.queryable_topics``），不在这里另抄一遍白名单——
+    抄一遍，白名单改了话术就会撒谎。
+    """
+    topics = "、".join(catalog.queryable_topics(CUSTOMER_SERVICE_VIEW_NAMES))
+    return (
+        f"这个问题不在我能查询的范围内。我可以帮您查的是：{topics}。"
+        "您可以换个问法问问自己名下的数据。"
+    )
+
+
+@dataclass
+class DataQueryTurn:
+    """数据查询分支的一条回答，以及这一轮查询的留痕材料。"""
+
+    answer: str
+    # 生成的查询、命中的视图、行数与业务错误码。交给客服回合写进调试级留痕
+    # （30 天），不写进工具调用：数据查询是一类分支而不是一个工具（ADR-0025），
+    # 记成工具调用会让「这个 Agent 有什么工具」与它实际做的事对不上。
+    material: dict
+
+
+def answer_customer_data_question(
+    db: Session,
+    settings: Settings,
+    *,
+    customer_id: int,
+    question: str,
+    history: list[dict],
+) -> DataQueryTurn:
+    """把客户的一句数据问题跑成一条面向客户的文本（ADR-0025）。
+
+    复用数据分析 Agent 的那条链路（选视图 → 生成 → 校验 → 执行 → 解读），只换
+    两样：执行身份是凭证客户——客户域视图的行级条件因此锁死为本人；使用者口径是
+    客户——解读说的是事实，不带评价。客户看到的文字进审计级留痕
+    （``app.agent.archive``），查询本身的材料进调试级留痕。
+    """
+    final_state: AnalyticsState = run_restricted_query(
+        db,
+        settings,
+        identity=AnalyticsIdentity.customer(customer_id=customer_id),
+        question=question,
+        history=history,
+        view_names=CUSTOMER_SERVICE_VIEW_NAMES,
+        audience=Audience.CUSTOMER,
+    )
+    material = _data_query_material(final_state)
+    error_code = final_state.get("error_code")
+    if error_code == OUT_OF_SCOPE_CODE:
+        return DataQueryTurn(
+            answer=data_query_out_of_scope_message(), material=material
+        )
+    if error_code is not None:
+        _report_data_query_failure(db, error_code, final_state.get("error_message"))
+        return DataQueryTurn(answer=DATA_QUERY_FAILURE_MESSAGE, material=material)
+    if not final_state["result"].rows:
+        return DataQueryTurn(answer=DATA_QUERY_EMPTY_MESSAGE, material=material)
+    return DataQueryTurn(answer=final_state["interpretation"], material=material)
+
+
+def _data_query_material(final_state: AnalyticsState) -> dict:
+    """这一轮数据查询的原始材料：走了哪条出口、查了什么、取回几行。"""
+    result = final_state.get("result")
+    return {
+        "sql": final_state.get("sql"),
+        "views": [view.name for view in final_state.get("views", [])],
+        "row_count": len(result.rows) if result is not None else None,
+        "truncated": result.truncated if result is not None else None,
+        "error_code": final_state.get("error_code"),
+    }
+
+
+def _report_data_query_failure(
+    db: Session, error_code: int, message: str | None
+) -> None:
+    """失败 / 超时留一条降级痕迹：客户察觉不到降级与正常的区别，统计要能察觉。"""
+    degradation.record(
+        db,
+        dependency=degradation.DEPENDENCY_DATA_QUERY,
+        reason=(
+            degradation.REASON_TIMEOUT
+            if error_code == QUERY_TIMEOUT_CODE
+            else degradation.REASON_UNAVAILABLE
+        ),
+        agent_type=CUSTOMER_SERVICE_CONFIG.name,
+        trace_id=get_trace_id(),
+        detail=f"{error_code}: {message}",
+    )
 
 
 def report_model_failure(db: Session, exc: AppError) -> None:
@@ -111,6 +221,9 @@ class AgentState(TypedDict, total=False):
     # 真正送进（或本该送进）模型的完整提示词。只有会调用模型的节点会写它：
     # 兜底与转人工是固定的脚本，不产生提示词，所以留痕里这一项为空。
     prompt: list[dict]
+    # 数据查询分支这一轮的查询材料（生成的查询、命中的视图、行数）。它同样不是
+    # 提示词，但属于「这一轮到底发生了什么」，随调试级留痕落库。
+    data_query: dict
 
 
 @dataclass
@@ -304,6 +417,22 @@ def _build_graph(db: Session, settings: Settings, driver: Driver, graph_namespac
     def handoff_node(state: AgentState) -> dict:
         return {"answer": handoff_message(settings), "citations": []}
 
+    def data_query_node(state: AgentState) -> dict:
+        # 数据查询是一类分支而不是一个工具（ADR-0025）：路由由 classify 定死，
+        # 模型不参与「要不要查数据」这个决定。
+        turn = answer_customer_data_question(
+            db,
+            settings,
+            customer_id=state["user_id"],
+            question=state["question"],
+            history=state.get("history", []),
+        )
+        return {
+            "answer": turn.answer,
+            "citations": [],
+            "data_query": turn.material,
+        }
+
     graph.add_node("classify", classify_node)
     graph.add_node("retrieve", retrieve_node)
     graph.add_node("graph_augment", graph_augment_node)
@@ -311,6 +440,7 @@ def _build_graph(db: Session, settings: Settings, driver: Driver, graph_namespac
     graph.add_node("fallback", fallback_node)
     graph.add_node("chitchat", chitchat_node)
     graph.add_node("handoff", handoff_node)
+    graph.add_node("data_query", data_query_node)
 
     graph.set_entry_point("classify")
 
@@ -320,6 +450,9 @@ def _build_graph(db: Session, settings: Settings, driver: Driver, graph_namespac
             return "chitchat"
         if intent == Intent.HANDOFF:
             return "handoff"
+        # 非检索类意图不碰知识库：数据查询走复用的分析链路，没有引用可谈。
+        if intent == Intent.DATA_QUERY:
+            return "data_query"
         assert intent in RETRIEVAL_INTENTS
         return "retrieve"
 
@@ -346,6 +479,7 @@ def _build_graph(db: Session, settings: Settings, driver: Driver, graph_namespac
     graph.add_edge("fallback", END)
     graph.add_edge("chitchat", END)
     graph.add_edge("handoff", END)
+    graph.add_edge("data_query", END)
 
     return graph.compile()
 
@@ -494,6 +628,7 @@ def run_customer_service_turn(
         user_id=user_id,
         prompt=final_state.get("prompt"),
         retrieval_snippets=_serialize_snippets(final_state.get("chunks", [])),
+        data_query=final_state.get("data_query"),
         prompt_tokens=token_usage.prompt_tokens if token_usage else None,
         completion_tokens=token_usage.completion_tokens if token_usage else None,
         duration_ms=duration_ms,

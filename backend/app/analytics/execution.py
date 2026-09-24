@@ -2,9 +2,10 @@
 
 - 执行账号只对语义视图有 SELECT 权限（ticket 01），访问视图外对象在
   MySQL 层即被拒绝，这里把它映射为业务错误码而不是 500；
-- 执行前在同一连接上 ``apply_analytics_identity`` 设置当前员工身份，
-  归还连接池前 ``reset_analytics_identity`` 清理——会话变量跟随连接，
-  不清理会让下一个借用该连接的请求继承上一个人的行级范围；
+- 执行前在同一连接上 ``apply_identity`` 设置当前身份（员工或客户，由
+  调用方给出，ADR-0025），归还连接池前 ``reset_analytics_identity``
+  清理——会话变量跟随连接，不清理会让下一个借用该连接的请求继承上一个人
+  的行级范围；
 - 查询超时上限：``SESSION max_execution_time``（毫秒），超时映射为
   业务错误码；
 - 结果行数上限：``fetchmany(max_rows + 1)``，超出即截断并置 truncated
@@ -31,8 +32,9 @@ from app.analytics.errors import (
     QUERY_TIMEOUT_MESSAGE,
 )
 from app.db.analytics_account import (
+    AnalyticsIdentity,
     analytics_url_for,
-    apply_analytics_identity,
+    apply_identity,
     reset_analytics_identity,
 )
 from app.exceptions import AppError
@@ -77,14 +79,13 @@ def execute_query(
     base_url: str,
     sql: str,
     *,
-    employee_id: int,
-    role: str,
+    identity: AnalyticsIdentity,
     settings: Settings,
 ) -> QueryResult:
     engine = engine_for(base_url, settings)
     with engine.connect() as connection:
         try:
-            apply_analytics_identity(connection, employee_id=employee_id, role=role)
+            apply_identity(connection, identity)
             connection.execute(
                 text(
                     "SET SESSION max_execution_time ="

@@ -2,7 +2,8 @@
 
 默认读取随仓库提供的 ``query_examples.json``；``analytics_examples_path``
 指向另一个 JSON 文件即可整体替换。示例按视图过滤——只注入与当前问题
-相关视图的示例，避免提示词膨胀。
+相关视图的示例，避免提示词膨胀；再按 Agent 的视图范围收一次，两域的
+示例因此与两域的视图一样互不可见（``examples_within_view_names``）。
 """
 
 import json
@@ -48,6 +49,20 @@ def examples_for_views(
     examples: tuple[QueryExample, ...], views: list[ViewSpec]
 ) -> list[QueryExample]:
     return examples_for_view_names(examples, (view.name for view in views))
+
+
+def examples_within_view_names(
+    examples: tuple[QueryExample, ...], view_names: Iterable[str]
+) -> tuple[QueryExample, ...]:
+    """只保留视图面被候选集**完全覆盖**的示例（ADR-0025）。
+
+    与 ``examples_for_view_names`` 的交集口径不同：这里要的是「这条示例不越域」。
+    产品要素是员工侧与客户域共有的那一张视图，一条「客户拿自己的风险等级筛产品」
+    的示例与员工候选集有交集，却带着客户域的视图——按交集放行就等于让员工侧的
+    提示词里出现客户域的视图名。
+    """
+    allowed = set(view_names)
+    return tuple(example for example in examples if set(example.views) <= allowed)
 
 
 def examples_for_view_names(

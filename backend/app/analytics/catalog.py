@@ -24,6 +24,10 @@ class ViewSpec:
     name: str
     summary: str  # 场景与口径说明，随列清单一并注入提示词
     keywords: tuple[str, ...]
+    # 可查项的人话名称：客户问到白名单之外时，把它列出来告诉客户「能查什么」
+    # （ADR-0025）。留空的视图不进那张清单——员工侧视图不进客户候选集，也就
+    # 没有对客户报菜名的场合。
+    label: str = ""
 
 
 # 员工侧：行级范围由角色与归属关系决定，敏感字段已脱敏（迁移 0008）。
@@ -50,6 +54,7 @@ EMPLOYEE_VIEW_CATALOG: tuple[ViewSpec, ...] = (
         name="va_product_element",
         summary="产品要素：产品主数据，不含客户数据，无行级过滤。",
         keywords=("产品要素", "费率", "起投", "期限", "基金经理", "业绩基准", "风险等级"),
+        label="产品要素",
     ),
     ViewSpec(
         name="va_risk_alert_stat",
@@ -69,6 +74,7 @@ CUSTOMER_VIEW_CATALOG: tuple[ViewSpec, ...] = (
             "market_value 是当前市值，cost_amount 是成本金额，本人数据不脱敏。"
         ),
         keywords=("持仓", "持有", "我的产品", "买了什么", "市值", "盈亏", "份额"),
+        label="持仓明细",
     ),
     ViewSpec(
         name="va_my_transactions",
@@ -77,7 +83,21 @@ CUSTOMER_VIEW_CATALOG: tuple[ViewSpec, ...] = (
             "（product_code、product_name 只有申赎有，payee_name、payee_account 只有"
             "转账有，status 恒为「已确认」）。"
         ),
-        keywords=("交易", "流水", "充值", "充", "入金", "转账", "申购", "赎回", "扣款"),
+        # 「转」单字也在关键词里：客户的口语是「这个月转了多少」，不是「转账」；
+        # 关键词只决定注入哪些视图定义，不构成权限边界。
+        keywords=(
+            "交易",
+            "流水",
+            "充值",
+            "充",
+            "入金",
+            "转",
+            "转账",
+            "申购",
+            "赎回",
+            "扣款",
+        ),
+        label="交易流水",
     ),
     ViewSpec(
         name="va_my_funding_account",
@@ -86,6 +106,7 @@ CUSTOMER_VIEW_CATALOG: tuple[ViewSpec, ...] = (
             "一致——它不含持仓市值，也不是画像里的总资产。"
         ),
         keywords=("余额", "资金账户", "可用余额", "账户余额", "多少钱"),
+        label="资金账户余额",
     ),
     ViewSpec(
         name="va_my_risk_assessment",
@@ -94,6 +115,7 @@ CUSTOMER_VIEW_CATALOG: tuple[ViewSpec, ...] = (
             "风险等级（C1–C5），valid_until 为有效期至。"
         ),
         keywords=("风险等级", "风险承受", "风评", "测评", "风险测评"),
+        label="风险承受等级",
     ),
 )
 
@@ -117,6 +139,20 @@ def select_views(
         for spec in VIEW_CATALOG
         if (allowed is None or spec.name in allowed)
         and any(keyword in question for keyword in spec.keywords)
+    ]
+
+
+def queryable_topics(view_names: Collection[str]) -> list[str]:
+    """给定视图范围里的「可查项」名称，顺序跟随传入的视图名。
+
+    客户问到候选集之外时，话术要把可查的东西列出来（ADR-0025）——那张清单由这里
+    从目录生成，而不是在手写话术里再抄一遍白名单：抄一遍，改白名单时话术就会撒谎。
+    """
+    specs = {spec.name: spec for spec in VIEW_CATALOG}
+    return [
+        specs[name].label
+        for name in view_names
+        if name in specs and specs[name].label
     ]
 
 

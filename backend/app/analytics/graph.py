@@ -1,9 +1,11 @@
 """数据分析 Agent 的查询链路：选视图 → 生成 → 校验 → 执行 → 解读。
 
 ADR-0007：与智能客服共用一套 LangGraph 运行时。链路是线性的；任一环节
-失败把业务错误码写进 state 并短路到 END，由 service 层统一留痕并抛出
-——这样被拒绝的尝试也能留下包含所生成查询的完整记录。多轮追问的上一轮
-问题由 service 层放进 ``history``，生成节点把它作为上下文。
+失败把业务错误码写进 state 并短路到 END，由**调用方**决定怎么呈现——员工
+路径（``service.run_query``）统一留痕并抛出，被拒绝的尝试因此也留下包含所
+生成查询的完整记录；客服的数据查询分支把它转成面向客户的话术（ADR-0025）。
+多轮追问的上一轮问题由调用方放进 ``history``：它既是生成的上下文，也进选
+视图的语境（``select_views_node``）。
 """
 
 from collections.abc import Collection
@@ -14,9 +16,10 @@ from sqlalchemy.orm import Session
 
 from app.analytics import catalog, execution, interpretation, llm, validation
 from app.analytics import examples as query_examples
+from app.analytics.audience import Audience
 from app.analytics.errors import OUT_OF_SCOPE_CODE, OUT_OF_SCOPE_MESSAGE
 from app.analytics.examples import QueryExample
-from app.db.models import Employee
+from app.db.analytics_account import AnalyticsIdentity
 from app.exceptions import AppError
 from app.settings import Settings
 
@@ -38,8 +41,9 @@ def build_graph(
     db: Session,
     settings: Settings,
     *,
-    employee: Employee,
+    identity: AnalyticsIdentity,
     view_names: Collection[str] | None = None,
+    audience: Audience = Audience.EMPLOYEE,
 ):
     """查询链路：选视图 → 生成 → 校验 → 执行 → 解读（ADR-0010）。
 
@@ -47,6 +51,9 @@ def build_graph(
     Agent 传入预警视图，于是超出风控域的问题在选视图一步就没有候选，直接判为
     「超出可查范围」——模型看不到也生成不出别的域的查询。语义视图分员工 / 客户
     两域（ADR-0025），调用方都显式传入自己那一域，两域因此互不可见。
+
+    ``identity`` 决定查得到哪些行（执行时写进连接的会话变量），``audience`` 决定
+    生成与解读面向谁说话。两者由同一个调用点给出，见 ``service.run_restricted_query``。
     """
     graph = StateGraph(AnalyticsState)
 
@@ -65,6 +72,13 @@ def build_graph(
                 "error_message": OUT_OF_SCOPE_MESSAGE,
             }
         all_examples = query_examples.load_examples(settings)
+        if view_names is not None:
+            # 示例与视图一样分域：跨域示例（产品要素是两域共有的那一张视图）不得
+            # 进提示词，否则员工侧会看到「怎么查客户自己的账」的样例，两域就互相
+            # 看得见了。
+            all_examples = query_examples.examples_within_view_names(
+                all_examples, view_names
+            )
         return {
             "views": views,
             "view_definitions": catalog.view_definitions(db, views),
@@ -80,6 +94,7 @@ def build_graph(
                 state["examples"],
                 settings,
                 history=state.get("history", []),
+                audience=audience,
             )
         except AppError as exc:
             return {"error_code": exc.code, "error_message": exc.message}
@@ -97,8 +112,7 @@ def build_graph(
             result = execution.execute_query(
                 execution.base_url_of(db),
                 state["sql"],
-                employee_id=employee.id,
-                role=employee.employee_role,
+                identity=identity,
                 settings=settings,
             )
         except AppError as exc:
@@ -107,7 +121,11 @@ def build_graph(
 
     def interpret_node(state: AnalyticsState) -> dict:
         text = interpretation.generate_interpretation(
-            state["question"], state["views"], state["result"], settings
+            state["question"],
+            state["views"],
+            state["result"],
+            settings,
+            audience=audience,
         )
         return {"interpretation": text}
 

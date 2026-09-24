@@ -5,6 +5,11 @@
 Agent 配置里（``AgentConfig.view_names``），风控监测 Agent 因此只看得到预警统计
 视图——「不新建一套查询链路」在代码上就是这一处复用。
 
+链路本身（``run_restricted_query``）不认身份域：它只收一个 ``AnalyticsIdentity``
+与一个使用者口径。员工路径（``run_query``）在此之上加审计留痕与短期记忆；客户路径
+（智能客服的数据查询分支，ADR-0025）在此之上把失败与越界转成话术，因为它面向的是
+客户而不是能读业务错误码的内部员工。
+
 多轮追问依赖短期记忆（与智能客服同一套 Redis 记忆，按员工 + 会话标识
 命名空间隔离）：上一轮问题进入查询生成的上下文，「那上个季度呢」才能
 被理解。只有成功作答的轮次进入记忆——答不上来的轮次不构成上下文。
@@ -21,12 +26,14 @@ from app.agent import debug_trace, memory
 from app.agent.config import DATA_ANALYSIS_CONFIG, AgentConfig
 from app.analytics import audit, classification
 from app.analytics import examples as query_examples
+from app.analytics.audience import Audience
 from app.analytics.graph import AnalyticsState, build_graph
 from app.analytics.schemas import (
     AnalyticsExampleItem,
     AnalyticsHistoryItem,
     AnalyticsQueryResponse,
 )
+from app.db.analytics_account import AnalyticsIdentity
 from app.db.models import AnalyticsQueryAudit, Employee
 from app.exceptions import AppError
 from app.pagination import PageParams, count_matching, paginated_response
@@ -39,6 +46,33 @@ DEFAULT_MEMORY_NAMESPACE = "analytics"
 def _memory_session(employee: Employee, session_id: str, namespace: str) -> str:
     # 与客服会话同库存储，按身份与用途命名空间隔离。
     return f"{namespace}:{employee.id}:{session_id}"
+
+
+def run_restricted_query(
+    db: Session,
+    settings: Settings,
+    *,
+    identity: AnalyticsIdentity,
+    question: str,
+    history: Collection[dict] = (),
+    view_names: Collection[str] | None = None,
+    audience: Audience = Audience.EMPLOYEE,
+) -> AnalyticsState:
+    """跑一次受限查询链路的终态：选视图 → 生成 → 校验 → 执行 → 解读。
+
+    失败**不抛异常**：业务错误码落在 ``error_code`` 里，由调用方决定怎么呈现——
+    员工路径留痕后抛出（``run_query``），客户路径把它转成话术（ADR-0025）。
+    调用方给出的 ``identity`` 与 ``audience`` 必须成对：前者决定查得到哪些行，
+    后者决定说给谁听。
+    """
+    graph = build_graph(
+        db,
+        settings,
+        identity=identity,
+        view_names=view_names,
+        audience=audience,
+    )
+    return graph.invoke({"question": question, "history": list(history)})
 
 
 def run_query(
@@ -58,10 +92,17 @@ def run_query(
             cache, _memory_session(employee, session_id, memory_namespace)
         )
 
-    graph = build_graph(db, settings, employee=employee, view_names=config.view_names)
     started = time.monotonic()
-    final_state: AnalyticsState = graph.invoke(
-        {"question": question, "history": history}
+    final_state: AnalyticsState = run_restricted_query(
+        db,
+        settings,
+        identity=AnalyticsIdentity.employee(
+            employee_id=employee.id, role=employee.employee_role
+        ),
+        question=question,
+        history=history,
+        view_names=config.view_names,
+        audience=Audience.EMPLOYEE,
     )
     # 响应时间按 Agent 记一笔（数据分析与风控监测共用这条链路，agent_type 来自配置）。
     debug_trace.record_response_time(
@@ -175,13 +216,12 @@ def list_example_questions(
     """示例问题：与注入提示词的「问题 → 查询」示例同源，改配置即改界面。
 
     ``view_names`` 把示例收窄到某个 Agent 的视图范围：风控监测界面不该提示
-    员工去问持仓类问题。
+    员工去问持仓类问题，员工侧也不该看到客户问自己账目的那些示例。收窄按「视图面
+    被候选集完全覆盖」判定，与提示词注入同一口径（``examples_within_view_names``）。
     """
     examples = query_examples.load_examples(settings)
     if view_names is not None:
-        examples = tuple(
-            query_examples.examples_for_view_names(examples, view_names)
-        )
+        examples = query_examples.examples_within_view_names(examples, view_names)
     return [
         AnalyticsExampleItem(question=example.question) for example in examples
     ]

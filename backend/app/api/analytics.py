@@ -2,6 +2,7 @@ import redis
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
+from app.agent.config import DATA_ANALYSIS_CONFIG
 from app.analytics.schemas import AnalyticsQueryRequest
 from app.analytics.service import (
     list_example_questions,
@@ -58,5 +59,7 @@ def get_examples(
     _employee: Employee = Depends(current_employee),
     settings: Settings = Depends(get_settings),
 ):
-    items = list_example_questions(settings)
+    # 收窄到数据分析 Agent 自己的视图范围：示例与视图一样分域，员工侧不提示
+    # 客户问自己账目的那些问法（ADR-0025）。
+    items = list_example_questions(settings, view_names=DATA_ANALYSIS_CONFIG.view_names)
     return ok([item.model_dump() for item in items])

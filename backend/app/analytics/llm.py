@@ -12,6 +12,7 @@ fake provider 是确定性实现，且**可被配置为返回指定查询**—�
 
 from dataclasses import dataclass
 
+from app.analytics.audience import Audience
 from app.analytics.errors import (
     GENERATION_FAILED_CODE,
     GENERATION_FAILED_MESSAGE,
@@ -24,12 +25,30 @@ from app.llm.provider import chat_completion
 from app.replay import library as replay_library
 from app.settings import Settings
 
-SYSTEM_PROMPT = (
+_EMPLOYEE_SYSTEM_PROMPT = (
     "你是数据分析 Agent 的查询生成器，把内部员工的自然语言问题转成一条 MySQL 查询。"
     "硬性规则：只输出一条 SELECT 语句；只能查询给定的语义视图，不得访问任何其他表；"
     "不得使用注释、分号、SET 或变量；只输出 SQL 本身，不要输出解释。"
     "如果给定的语义视图无法回答该问题，只输出 OUT_OF_SCOPE。"
 )
+
+# 客户口径多两条约束，都是 ADR-0025 那条边界的落点：查询范围已经由视图锁死为本人，
+# 因此不需要（也不允许）再按客户标识筛；产品查询只筛不排序——按收益或费率排序就是
+# 在替客户比较产品，那是投顾助手的产物。
+_CUSTOMER_SYSTEM_PROMPT = (
+    "你是智能客服的数据查询生成器，把客户本人的问题转成一条 MySQL 查询。"
+    "硬性规则：只输出一条 SELECT 语句；只能查询给定的语义视图，不得访问任何其他表；"
+    "不得使用注释、分号、SET 或变量；只输出 SQL 本身，不要输出解释。"
+    "给定的语义视图已经锁定为提问客户本人的数据，不要按客户标识筛选。"
+    "涉及产品时只允许按风险等级筛选（客户等级 Cn 可筛 R1–Rn），不得评分、不得排序，"
+    "只按产品代码排序。"
+    "如果给定的语义视图无法回答该问题，只输出 OUT_OF_SCOPE。"
+)
+
+_SYSTEM_PROMPTS: dict[Audience, str] = {
+    Audience.EMPLOYEE: _EMPLOYEE_SYSTEM_PROMPT,
+    Audience.CUSTOMER: _CUSTOMER_SYSTEM_PROMPT,
+}
 
 _OUT_OF_SCOPE_TOKEN = "OUT_OF_SCOPE"
 
@@ -72,6 +91,7 @@ def generate_query(
     examples: list[QueryExample],
     settings: Settings,
     history: list[dict] | None = None,
+    audience: Audience = Audience.EMPLOYEE,
 ) -> str:
     history = history or []
     # 回放模式（ADR-0008）不发起模型调用：预置问题返回预写 SQL，其余问题与
@@ -87,7 +107,7 @@ def generate_query(
     if settings.resolved_llm_provider == "fake":
         return _fake_generate(question, view_names, view_definitions, examples, history)
     return _openai_compatible_generate(
-        question, view_definitions, examples, settings, history
+        question, view_definitions, examples, settings, history, audience
     )
 
 
@@ -121,6 +141,7 @@ def _openai_compatible_generate(
     examples: list[QueryExample],
     settings: Settings,
     history: list[dict],
+    audience: Audience,
 ) -> str:
     example_text = "\n".join(
         f"问题：{example.question}\n查询：{example.sql}" for example in examples
@@ -129,7 +150,7 @@ def _openai_compatible_generate(
         f"{message['role']}：{message['content']}" for message in history
     )
     messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "system", "content": _SYSTEM_PROMPTS[audience]},
         {
             "role": "user",
             "content": (

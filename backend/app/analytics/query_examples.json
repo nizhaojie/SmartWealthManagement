@@ -23,5 +23,30 @@
     "question": "还没处理的预警有多少",
     "sql": "SELECT COUNT(*) AS alert_count FROM va_risk_alert_stat WHERE alert_status = '未处理'",
     "views": ["va_risk_alert_stat"]
+  },
+  {
+    "question": "我持有哪些产品",
+    "sql": "SELECT product_code, product_name, product_type, shares, market_value FROM va_my_holdings ORDER BY product_code",
+    "views": ["va_my_holdings"]
+  },
+  {
+    "question": "这个月转了多少",
+    "sql": "SELECT transaction_type, amount, traded_at FROM va_my_transactions WHERE traded_at >= DATE_FORMAT(CURDATE(), '%Y-%m-01') ORDER BY traded_at",
+    "views": ["va_my_transactions"]
+  },
+  {
+    "question": "我的资金账户余额是多少",
+    "sql": "SELECT available_balance FROM va_my_funding_account",
+    "views": ["va_my_funding_account"]
+  },
+  {
+    "question": "我的风险承受等级是什么",
+    "sql": "SELECT risk_level, valid_until FROM va_my_risk_assessment",
+    "views": ["va_my_risk_assessment"]
+  },
+  {
+    "question": "有什么适合我的风险等级的产品",
+    "sql": "SELECT product_code, product_name, risk_level FROM va_product_element WHERE CAST(SUBSTRING(risk_level, 2) AS UNSIGNED) <= CAST(SUBSTRING((SELECT risk_level FROM va_my_risk_assessment), 2) AS UNSIGNED) ORDER BY product_code",
+    "views": ["va_product_element", "va_my_risk_assessment"]
   }
 ]

@@ -39,9 +39,12 @@
 
 再一条横切 slice（2026-09-23）：`customer-nl2sql` —— **客户端数据查询，智能客服接入 NL2SQL**。数据分析的 NL2SQL 链路（语义视图、只读校验、受限账号、fail closed）员工侧早已完整，但客户身份落不进现有视图——`va_*` 的行级条件是员工侧口径。本 slice 给客服图的 `classify` 增加数据查询分支，确定性路由到复用的 analytics 链路；新建四张客户域语义视图（持仓、流水、资金账户、风险测评结论）行级锁凭证客户，员工侧五视图一行不动。边界钉在 ADR-0025：允许客户拿风险承受等级筛产品（Cn 筛 R1–Rn）但**只筛不排序、按产品代码排序**，因此仍是事实性内容、不违反「客服工具集内不存在推荐类能力」；结果以文本解读送达（SSE 与前端零改动），失败/超时降级留痕、**绝不回退到知识检索**，白名单外（画像、服务记录、风控预警）明确告知不可查。纯后端，不依赖任何未完成的 slice。拆三份 issue，顺序推进，第二份做完即有可演示的完整状态。
 
-上面两份新 spec 共拆 7 份 ticket（`advisor-review-reminder` 2 份：计数 store → 导航角标；`operation-advice-product-choice` 5 份：可选项端点 → 发起受理接手产品与金额 → 赎回按份额成交 → 发起表单 → 端到端与既有断言收口）。全部 spec 已拆成 ticket，存于 `.scratch/<slug>/issues/`，共 83 个（其中 `customer-deposit` 的四份在链尾：它的前置 `operation-advice-and-customer-trading` 与 `onboarding-funding-account-and-target-allocation` 都已实现，因此那四份里的 #01 可直接开始）。依赖是一条串行链：每份 spec 的第一个 ticket 被上一份 spec 的最后一个 ticket 阻塞，spec 内部亦为顺序推进。唯一的例外是 `foundation-and-customer-service-slice #07`（共享包边界检查），它只依赖 #01，可提前做。
+再一条横切 slice（2026-09-24）：`risk-rule-management` —— **规则的编辑器**。`risk-monitoring-agent` 的用户故事 22 承诺「规则存在库中而非硬编码，so that 调整阈值不需要改代码发版」，但只兑现了一半：两个 `PATCH` 让专员能改既有规则的灵敏度，20 条种子却仍是唯一来源（`rules.py:84-322`），想加一条本地口径的规则只能改代码出迁移。本 slice 补上创建、修改与删除，同时把可写的边界钉死：专员能配的是**组合**（在给定的字段、算子与值域里挑），不是**表达**（拼逻辑、造新算子）——后者会让 `fin_risk_rule` 变成存在数据库里的代码，而 `operators.py:9-11` 与 `fields.py:3-8` 两处开篇都写着集合是有限且封闭的。顺带修掉一个潜伏的崩点：三条 CHECK 各自守住一列，却不校验两列搭配，于是 `field = product_id` + `operator = gt` 两列各自合法、DB 收下，直到**下一笔交易到达**才抛 `TypeError`；写入侧因此加三档校验（名录 → 字段×算子允许矩阵 → 阈值值域）。它**推翻** `risk-monitoring-agent` 的 Out of Scope 第二条（「规则的可视化编辑器（本 slice 只做查看与启停）」）并**修改**其 `#01` 的三处（启停理由从可空收紧为必填、`category` 补一条 DB CHECK、种子从「只补缺失」改为「表为空才播种」），清单见该 spec 的头表。新增两条 ADR：0026（规则的身份就是它的判定形状——判定形状不可改，换形状只能删除重建）、0027（删除是软删、编号永不复用、种子只在建库时播种）。拆五份 issue：数据层与种子语义 → 允许矩阵与值域校验 → 三个写接口与留痕 → 规则管理界面 → 端到端收口，顺序推进；**第四份做完就有可演示的完整状态**（专员新建一条必然命中的规则 → 补录一笔交易 → 预警列表出现对应预警，而**已有交易不产生任何新预警**——不做回算是一条明确的决定，见该 spec 的 Q18）。纯后端加内部端，不依赖任何未完成的 slice（`risk-monitoring-agent` 五份 issue 均已 `implemented`）。
+
+上面两份新 spec 共拆 7 份 ticket（`advisor-review-reminder` 2 份：计数 store → 导航角标；`operation-advice-product-choice` 5 份：可选项端点 → 发起受理接手产品与金额 → 赎回按份额成交 → 发起表单 → 端到端与既有断言收口）。全部 spec 已拆成 ticket，存于 `.scratch/<slug>/issues/`，共 106 个（本行此前写 83，已经过期——`list-pagination`、`session-renewal`、`rag-retrieval-upgrade` 三条 slice 的 issue 也不在本节列出；数字按 `.scratch/*/issues/*.md` 实际清点，2026-09-24。其中 `customer-deposit` 的四份在链尾：它的前置 `operation-advice-and-customer-trading` 与 `onboarding-funding-account-and-target-allocation` 都已实现，因此那四份里的 #01 可直接开始）。依赖是一条串行链：每份 spec 的第一个 ticket 被上一份 spec 的最后一个 ticket 阻塞，spec 内部亦为顺序推进。唯一的例外是 `foundation-and-customer-service-slice #07`（共享包边界检查），它只依赖 #01，可提前做。
 
 **当前 frontier**：待重新核对。`.scratch/*/issues/*.md` 里的 `Status:` 标记已经落后于代码——例如 `advisory-plan-visibility` 的三份仍标 `ready-for-agent`，但 `apps/customer/src/advisory/AdvisoryPlanPage.vue` 与 `backend/app/advisory/final.py` 的 `serialize_final_for_customer` 都已经存在；`advisory-agent-and-review-flow` 的 #01–#03 同理。在逐份核对 `Status:` 之前，本行不作断言——写一个过时的答案比留白更容易误导人。
+（2026-09-24 只补一条已核实的：`risk-rule-management` 的 5 份 issue 已就位，其 #01 的前置 `risk-monitoring-agent #05` 标记为 `implemented` 且对应代码在 `backend/app/api/risk_query.py`，所以这一条的起点可用——但这不改变上面那句「其余状态待人逐份核对」的结论。）
 
 七条护栏测试（ADR-0009）分布：
 
@@ -123,6 +126,7 @@
 - [ ] 工单派生与处置流程
 - [ ] Redis Pub/Sub 事件总线
 - [ ] 内部端预警列表、预警详情、工单处置页
+- [ ] 规则管理支持创建、修改、删除（`risk-rule-management`：规则编辑器 + 写入侧三档校验 + 软删与种子语义，见 ADR-0026 / ADR-0027）
 
 **输入端是本节的缺口**：以上全部做完之后，「交易事件由接口提交」这条排除会留下一个空转的监测——应用里没有任何真实触发点。补它的是横切 slice `operation-advice-and-customer-trading`（客户交易 + 种子历史交易回放），以及其中的护栏 7（内部补录只对风控专员开放）。
 

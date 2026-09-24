@@ -81,7 +81,7 @@ describe("第三栏的注入与塌陷", () => {
     await goTo("/knowledge");
     expect(hasInspector(app)).toBe(false);
 
-    // 历史查询搬进顶栏的抽屉之后，数据分析页不再注入检查器：右栏没有别的东西要放，
+    // 历史查询搬进抽屉之后，数据分析页不再注入检查器：右栏没有别的东西要放，
     // 第三栏因此塌掉（05）。它自己的两栏形态另有一条用例（analyticsHistoryDrawer.spec.ts）。
     await goTo("/data-analysis");
     expect(hasInspector(app)).toBe(false);

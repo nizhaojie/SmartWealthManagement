@@ -15,7 +15,7 @@ import type { AnalyticsHistoryItem } from "./types";
  * 需要一条跨组件通道；抽屉只有一个入口——打开就取，那条通道就没有存在的理由了。
  *
  * 开合是双向的（`v-model:open`）：抽屉会被**人**从自己那一侧关掉——关闭按钮、Esc、点遮罩，
- * 父组件的 `open` 必须跟上，否则关一次之后顶栏那个入口就点不开了。
+ * 父组件的 `open` 必须跟上，否则关一次之后页头那个入口就点不开了。
  */
 const open = defineModel<boolean>({ required: true });
 
@@ -29,7 +29,7 @@ const emit = defineEmits<{
  * 关闭都会经过的那个钩子。只监听 `close` 不够：这个版本从抽屉那一侧关上时一个事件都不派发
  * （`close` 与 `update:modelValue` 都挂在 leave 过渡的钩子上，而 `v-show` 这一路并没有走过渡
  * ——关闭按钮按下去，遮罩是立刻 `display: none` 的，事件一个也没有），父组件的 `open` 会一直
- * 停在 true：关一次之后顶栏那个入口就点不开了。因此在这里显式把模型置回 false，再放行关闭。
+ * 停在 true：关一次之后页头那个入口就点不开了。因此在这里显式把模型置回 false，再放行关闭。
  */
 function handleClose(done: () => void): void {
   open.value = false;

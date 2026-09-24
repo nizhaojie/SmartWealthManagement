@@ -158,7 +158,7 @@ onMounted(() => {
 
     <!-- 抽屉挂在这里只是「由这一页提供」：它 append-to-body，位置与主区布局无关。
          开合走 v-model：人从抽屉那侧关掉（关闭按钮 / Esc / 点遮罩）时，这里也要跟上，
-         否则顶栏那个入口会以为它还是开着的。 -->
+         否则页头那个入口会以为它还是开着的。 -->
     <AnalyticsHistoryDrawer v-model="historyOpen" @reuse="reuseQuestion" />
   </div>
 </template>

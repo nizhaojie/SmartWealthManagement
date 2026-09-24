@@ -24,6 +24,8 @@
 - [ ] 空态示例问题改为 emit「填进输入框」，不发起查询；空态因此仍留在页面上
 - [ ] 同步三个 spec：`analyticsConversation.spec.ts`（示例问题改为只填不发、输入区改为单行）、`clearConversation.spec.ts` 与 `analyticsHistoryDrawer.spec.ts`（提问框选择器）、`analyticsHistoryDrawer.spec.ts`（入口从顶栏改页头）
 
+**与客服侧**有意**留的一处不同（别顺手抹平）**：输入框自己的描边留着——客服侧在 `.composer` 上把 `el-input__wrapper` 的描边去掉了，这一页不去。两条输入带的底色不同（客服侧 `--wm-bg-page`、这一页 `--wm-bg-subtle`），图标底座与输入框之间留一道描边，输入区的边界才看得出来。两侧 composer 的「同形」到图标 + 单行 + 回车提交为止；Q8 已经认下「不进 shared、各写一份」的代价，这里只是把那笔代价写明，供后来者按需取舍。
+
 **实现落点：** `apps/internal/src/analytics/MessageComposer.vue`、`EmptyConversation.vue`、`DataAnalysisWorkspace.vue` 与同目录三个 spec。**不进 `packages/shared`**（Q8 的同一条理由）。
 
 **验收：** 输入框左侧有图标、单行、按回车直接发出且输入框里不可能出现换行；「历史查询」在「清空对话」右边，点开是抽屉；空态那句引导铺满面板宽度；点一条「试试这些」只把问题填进输入框，页面上不出现新一轮问答。

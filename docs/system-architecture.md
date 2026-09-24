@@ -112,9 +112,9 @@ flowchart LR
 ```
 
 要点：
-- **5 张语义视图**（`analytics/catalog.py:24-53`）：`va_customer_overview`、`va_holding_distribution`、`va_transaction_stat`、`va_product_element`、`va_risk_alert_stat`。视图的列清单从 `information_schema` 内省，防止与迁移漂移。
-- **行级权限内建在视图定义里**（迁移 `0008`）：理财顾问/风控专员全量，客户经理只见名下客户，未设置身份返回零行（fail closed）。视图由 `NO SQL` 函数读会话变量 `@analytics_employee_id` / `@analytics_employee_role`。
-- **三重保护**：① 受限 DB 账号 `wealth_analytics` 只对该 5 张视图有 SELECT（`app/db/analytics_account.py`）；② 提示词只允许单条 SELECT 且只允许视图；③ 代码校验拒绝注释、多语句、会话变量、非 SELECT 首词、写类/DDL 关键词（`analytics/validation.py:64-81`）。
+- **语义视图分两域**（`analytics/catalog.py`）：员工侧 5 张——`va_customer_overview`、`va_holding_distribution`、`va_transaction_stat`、`va_product_element`、`va_risk_alert_stat`（迁移 `0008`）；客户域 4 张——`va_my_holdings`、`va_my_transactions`、`va_my_funding_account`、`va_my_risk_assessment`（迁移 `0030`，ADR-0025）。候选集由各 Agent 的 `AgentConfig.view_names` 声明，两域互不可见。视图的列清单从 `information_schema` 内省，防止与迁移漂移。
+- **行级权限内建在视图定义里**：员工侧（迁移 `0008`）理财顾问/风控专员全量，客户经理只见名下客户；客户域（迁移 `0030`）锁死为凭证客户本人。两域都是未设置身份返回零行（fail closed），各由 `NO SQL` 函数读自己的会话变量——员工侧 `@analytics_employee_id` / `@analytics_employee_role`，客户域 `@analytics_customer_id`。
+- **三重保护**：① 受限 DB 账号 `wealth_analytics` 只对这组视图有 SELECT（`app/db/analytics_account.py`）；② 提示词只允许单条 SELECT 且只允许视图；③ 代码校验拒绝注释、多语句、会话变量、非 SELECT 首词、写类/DDL 关键词（`analytics/validation.py:64-81`）。
 - 执行侧：结果行数上限 200（超出截断并标记）、`max_execution_time` 5s、连接归还前重置身份。
 - 留痕：`AnalyticsQueryAudit`（成功与拒绝都记）。
 
@@ -374,8 +374,8 @@ flowchart TB
 
 **怎么用**：
 1. **唯一的权威写入源**。所有领域模块经 ORM 读写。
-2. **语义视图 + 行级权限函数**在迁移 `0008_semantic_views.py`：`analytics_employee_id()` / `analytics_employee_role()`（`NO SQL`，只读会话变量）与 5 张只读视图。
-3. **受限执行账号** `wealth_analytics`：不在迁移里创建，而是 `app/db/analytics_account.py:64` 用 root 连接 `CREATE USER` 并**只 GRANT 5 张视图的 SELECT**。执行 SQL 前 `SET @analytics_employee_id/@analytics_employee_role`，归还前重置（`analytics/execution.py:76`）。
+2. **语义视图 + 行级权限函数**在两处迁移：员工侧 `0008_semantic_views.py`（`analytics_employee_id()` / `analytics_employee_role()` 与 5 张只读视图），客户域 `0030_customer_domain_semantic_views.py`（`analytics_customer_id()` 与 4 张只读视图，ADR-0025）。函数都是 `NO SQL`，只读会话变量。
+3. **受限执行账号** `wealth_analytics`：不在迁移里创建，而是 `app/db/analytics_account.py:64` 用 root 连接 `CREATE USER` 并**只 GRANT 这组视图的 SELECT**。执行 SQL 前 `SET @analytics_employee_id/@analytics_employee_role` 或 `@analytics_customer_id`，归还前重置（`analytics/execution.py:76`）。
 4. **初始化顺序有依赖**（`app/db/setup.py:8-15`）：迁移 → 种子数据 → FAQ 入库 → 建受限账号授权。`pnpm dev` 启动后端前会重跑一次。
 
 ### 3.2 Redis（`redis:7-alpine`，6380 → 6379）

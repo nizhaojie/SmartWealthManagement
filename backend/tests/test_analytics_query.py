@@ -16,11 +16,17 @@ from fastapi.testclient import TestClient
 from sqlalchemy import bindparam, create_engine, select, text
 from sqlalchemy.orm import Session as OrmSession
 
+from app.agent.config import DATA_ANALYSIS_CONFIG
 from app.analytics import catalog, execution
 from app.analytics import llm as analytics_llm
 from app.analytics.audit import STATUS_REJECTED, STATUS_SUCCESS
 from app.auth.roles import ACCOUNT_MANAGER
-from app.db.analytics_account import ANALYTICS_VIEW_NAMES, setup_analytics_account
+from app.db.analytics_account import (
+    ANALYTICS_VIEW_NAMES,
+    CUSTOMER_VIEW_NAMES,
+    EMPLOYEE_VIEW_NAMES,
+    setup_analytics_account,
+)
 from app.db.models import AnalyticsQueryAudit
 from app.main import app
 from app.settings import get_settings
@@ -356,6 +362,21 @@ def test_only_relevant_view_definitions_are_injected(analytics_client: TestClien
 
 def test_view_catalog_covers_exactly_the_grant_list():
     assert {spec.name for spec in catalog.VIEW_CATALOG} == set(ANALYTICS_VIEW_NAMES)
+
+
+def test_view_catalogs_are_split_by_domain():
+    # 目录分两域，且与授权清单的两半一一对应（ADR-0025）。两域重叠意味着
+    # 同一张视图会被两个域各注入一次，而它们的行级口径并不相同。
+    assert {spec.name for spec in catalog.EMPLOYEE_VIEW_CATALOG} == set(EMPLOYEE_VIEW_NAMES)
+    assert {spec.name for spec in catalog.CUSTOMER_VIEW_CATALOG} == set(CUSTOMER_VIEW_NAMES)
+    assert set(EMPLOYEE_VIEW_NAMES).isdisjoint(CUSTOMER_VIEW_NAMES)
+
+
+def test_the_employee_candidate_set_excludes_the_customer_domain():
+    # 「两域互不可见」在员工这一侧就是这一行：候选集显式收在员工侧。
+    # 缺了它，VIEW_CATALOG 里的客户域视图会被一起注入员工的提示词。
+    assert DATA_ANALYSIS_CONFIG.view_names == EMPLOYEE_VIEW_NAMES
+    assert set(DATA_ANALYSIS_CONFIG.view_names or ()).isdisjoint(CUSTOMER_VIEW_NAMES)
 
 
 def test_examples_are_configurable_without_code_change(

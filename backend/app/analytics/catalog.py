@@ -1,8 +1,13 @@
-"""语义视图目录：每个视图的场景说明、口径与关键词（ADR-0010）。
+"""语义视图目录：每个视图的场景说明、口径与关键词（ADR-0010、ADR-0025）。
 
 按问题关键词只注入相关视图的定义，不注入全部——否则提示词随视图增多
 而膨胀。视图的列清单不在此处手维护，而是从 information_schema 内省得到，
 保证注入的定义与迁移创建的视图不漂移。
+
+目录分两域，与视图本身一样互相独立：员工侧五张（``EMPLOYEE_VIEW_CATALOG``）、
+客户域四张（``CUSTOMER_VIEW_CATALOG``）。Agent 的候选集由 ``select_views`` 的
+``allowed`` 收窄——每个 Agent 在自己的配置里声明看得到哪一域
+（``app.agent.config.AgentConfig.view_names``），两域因此互不可见。
 """
 
 from collections.abc import Collection
@@ -21,7 +26,8 @@ class ViewSpec:
     keywords: tuple[str, ...]
 
 
-VIEW_CATALOG: tuple[ViewSpec, ...] = (
+# 员工侧：行级范围由角色与归属关系决定，敏感字段已脱敏（迁移 0008）。
+EMPLOYEE_VIEW_CATALOG: tuple[ViewSpec, ...] = (
     ViewSpec(
         name="va_customer_overview",
         summary=(
@@ -52,6 +58,49 @@ VIEW_CATALOG: tuple[ViewSpec, ...] = (
     ),
 )
 
+# 客户域：行级范围锁死为凭证客户本人，未设置身份返回零行；本人数据不脱敏。
+# 关键词按客户口语选取（「这个月充了多少」里的「充」也得命中），因为它们直接
+# 决定一个问题有没有候选视图——一个都匹配不上就是「超出可查范围」。
+CUSTOMER_VIEW_CATALOG: tuple[ViewSpec, ...] = (
+    ViewSpec(
+        name="va_my_holdings",
+        summary=(
+            "我的持仓明细：一行一条持仓，口径与资产页一致——只含「持有中」的持仓；"
+            "market_value 是当前市值，cost_amount 是成本金额，本人数据不脱敏。"
+        ),
+        keywords=("持仓", "持有", "我的产品", "买了什么", "市值", "盈亏", "份额"),
+    ),
+    ViewSpec(
+        name="va_my_transactions",
+        summary=(
+            "我的交易流水：一行一笔资金操作，申购 / 赎回 / 转账 / 充值共用同一个形状"
+            "（product_code、product_name 只有申赎有，payee_name、payee_account 只有"
+            "转账有，status 恒为「已确认」）。"
+        ),
+        keywords=("交易", "流水", "充值", "充", "入金", "转账", "申购", "赎回", "扣款"),
+    ),
+    ViewSpec(
+        name="va_my_funding_account",
+        summary=(
+            "我的资金账户：一行一位客户，available_balance 是可用余额，口径与资金页"
+            "一致——它不含持仓市值，也不是画像里的总资产。"
+        ),
+        keywords=("余额", "资金账户", "可用余额", "账户余额", "多少钱"),
+    ),
+    ViewSpec(
+        name="va_my_risk_assessment",
+        summary=(
+            "我的风险承受等级结论：一行一位客户，只含当前结论——risk_level 为本人"
+            "风险等级（C1–C5），valid_until 为有效期至。"
+        ),
+        keywords=("风险等级", "风险承受", "风评", "测评", "风险测评"),
+    ),
+)
+
+# 全部语义视图（两域合并）。它与授权清单必须一致；各 Agent 的候选集另由
+# ``select_views(allowed=...)`` 收窄到自己的那一域。
+VIEW_CATALOG: tuple[ViewSpec, ...] = EMPLOYEE_VIEW_CATALOG + CUSTOMER_VIEW_CATALOG
+
 
 def select_views(
     question: str, *, allowed: Collection[str] | None = None
@@ -59,8 +108,9 @@ def select_views(
     """按问题关键词筛出相关视图；一个都匹配不上时返回空（超出可查范围）。
 
     ``allowed`` 把候选收窄到某个 Agent 的视图范围（如风控监测 Agent 只看得到
-    预警统计视图）。它是提示词注入范围的收紧，不是权限边界——行级权限与脱敏
-    内建在视图定义里，与这里无关。
+    预警统计视图、智能客服看得到客户域视图）。它是提示词注入范围的收紧，不是权限
+    边界——行级权限与脱敏内建在视图定义里，与这里无关。缺省是目录内的全部视图；
+    两域互不可见靠各 Agent 显式传入自己那一域来保证（``AgentConfig.view_names``）。
     """
     return [
         spec

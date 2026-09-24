@@ -1,13 +1,14 @@
-"""数据分析 Agent 的受限执行账号与语义视图清单（ADR-0010 的地基）。
+"""受限执行账号与语义视图清单（ADR-0010、ADR-0025 的地基）。
 
 安全性由结构保证：
-- 语义视图由迁移脚本创建（见 migrations/versions/0008），本模块的
-  ``ANALYTICS_VIEW_NAMES`` 是授权清单，有测试保证它与迁移创建的视图集合一致；
+- 语义视图由迁移脚本创建（员工侧见 migrations/versions/0008，客户域见 0030），
+  本模块的两个视图名清单是授权清单，有测试保证它们的并集与迁移创建的视图集合一致；
 - 执行账号 ``wealth_analytics`` 只对这组视图有 SELECT 权限，对基础表无任何权限；
-- 行级权限内建在视图定义中：视图通过 ``analytics_employee_id()`` /
-  ``analytics_employee_role()`` 两个函数读取当前连接上的会话变量，
-  执行查询前必须用 ``apply_analytics_identity`` 在同一连接上设置当前员工身份。
-  未设置身份时视图返回零行（fail closed）。
+- 行级权限内建在视图定义中，分两域：员工侧视图通过 ``analytics_employee_id()`` /
+  ``analytics_employee_role()`` 读会话变量，客户域视图通过 ``analytics_customer_id()``
+  读会话变量。执行查询前必须用 ``apply_analytics_identity``（员工）或
+  ``apply_customer_identity``（客户）在同一连接上设置身份；未设置身份时视图返回零行
+  （fail closed）。两域各读各的变量，因此一身员工身份查不到客户域的行，反之亦然。
 """
 
 import re
@@ -20,13 +21,25 @@ from app.settings import get_settings
 
 _IDENTIFIER = re.compile(r"[A-Za-z0-9_]+")
 
-ANALYTICS_VIEW_NAMES: tuple[str, ...] = (
+# 员工侧视图：行级范围由角色与归属关系决定（迁移 0008）。
+EMPLOYEE_VIEW_NAMES: tuple[str, ...] = (
     "va_customer_overview",
     "va_holding_distribution",
     "va_transaction_stat",
     "va_product_element",
     "va_risk_alert_stat",
 )
+
+# 客户域视图：行级范围锁死为凭证客户本人（迁移 0030，ADR-0025）。
+CUSTOMER_VIEW_NAMES: tuple[str, ...] = (
+    "va_my_holdings",
+    "va_my_transactions",
+    "va_my_funding_account",
+    "va_my_risk_assessment",
+)
+
+# 授权清单：受限账号对这组视图有 SELECT。两域两套视图，互相独立。
+ANALYTICS_VIEW_NAMES: tuple[str, ...] = EMPLOYEE_VIEW_NAMES + CUSTOMER_VIEW_NAMES
 
 # 拥有全量行级范围的角色；客户经理不在其中，只能看到名下客户。
 # 视图定义里是同样的字面量，此处用于执行层判断与测试对照。
@@ -55,10 +68,27 @@ def apply_analytics_identity(
     connection.execute(text("SET @analytics_employee_role = :role"), {"role": role})
 
 
+def apply_customer_identity(connection: Connection, *, customer_id: int) -> None:
+    """在连接上设置当前客户身份：客户域视图只返回这位客户自己的行。
+
+    与员工身份分开的会话变量（``@analytics_customer_id``）：一位客户拿到员工身份、
+    或一位员工拿到客户身份，都只会让另一域的视图返回零行。设置与清理的时机同
+    ``apply_analytics_identity``——必须在执行查询的同一连接上设置，归还连接池前
+    ``reset_analytics_identity``。
+    """
+    connection.execute(
+        text("SET @analytics_customer_id = :customer_id"), {"customer_id": customer_id}
+    )
+
+
 def reset_analytics_identity(connection: Connection) -> None:
-    """清空连接上的员工身份，回到 fail-closed 状态（视图返回零行）。"""
+    """清空连接上的两域身份，回到 fail-closed 状态（视图返回零行）。
+
+    两域变量一起清：只清一域的话，下一个借用该连接的请求会继承另一个域的身份。
+    """
     connection.execute(text("SET @analytics_employee_id = NULL"))
     connection.execute(text("SET @analytics_employee_role = NULL"))
+    connection.execute(text("SET @analytics_customer_id = NULL"))
 
 
 def setup_analytics_account(target_url: str) -> None:

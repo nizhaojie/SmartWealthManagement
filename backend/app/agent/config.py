@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 
 from app.agent.classification import ADVISORY_CONTENT, FACTUAL_CONTENT
+from app.db.analytics_account import EMPLOYEE_VIEW_NAMES
 
 
 @dataclass(frozen=True)
@@ -10,9 +11,10 @@ class AgentConfig:
     tools: tuple[str, ...]
     content_classification_default: str
     retrieval_top_k: int = 5
-    # 受限查询可用的语义视图（ADR-0010）；None 表示目录内的全部视图。它收在配置里
-    # 而不是由调用点逐次传入——「这个 Agent 看得到哪些视图」是 Agent 定义的一部分，
-    # 与工具集、内容分类默认值同类。
+    # 受限查询可用的语义视图（ADR-0010、ADR-0025）；None 表示目录内的全部视图。
+    # 它收在配置里而不是由调用点逐次传入——「这个 Agent 看得到哪些视图」是 Agent
+    # 定义的一部分，与工具集、内容分类默认值同类。两域视图互不可见因此也落在这里：
+    # 员工侧的 Agent 声明员工侧视图，客户域的那一份声明客户域视图。
     view_names: tuple[str, ...] | None = None
 
 
@@ -27,6 +29,9 @@ DATA_ANALYSIS_CONFIG = AgentConfig(
     tools=("analytics_query_generation", "analytics_query_execution"),
     content_classification_default=FACTUAL_CONTENT,
     # 数据分析不使用知识库检索，retrieval_top_k 保持缺省。
+    # 候选集显式收在员工侧：语义视图分员工 / 客户两域（ADR-0025），不写死这一行的话
+    # 目录里的客户域视图会被一起注入员工侧的提示词——两域就互相看得见了。
+    view_names=EMPLOYEE_VIEW_NAMES,
 )
 
 ADVISORY_CONFIG = AgentConfig(

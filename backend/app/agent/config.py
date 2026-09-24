@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 
 from app.agent.classification import ADVISORY_CONTENT, FACTUAL_CONTENT
-from app.db.analytics_account import EMPLOYEE_VIEW_NAMES
+from app.db.analytics_account import CUSTOMER_VIEW_NAMES, EMPLOYEE_VIEW_NAMES
 
 
 @dataclass(frozen=True)
@@ -18,10 +18,18 @@ class AgentConfig:
     view_names: tuple[str, ...] | None = None
 
 
+# 智能客服 Agent 的数据查询候选集：客户域四张，加产品要素。产品要素本无行级过滤
+# 且是已披露信息，客户拿自己的风险等级筛产品（Cn 筛 R1–Rn）就走它，因此它在客户
+# 候选集里而不在「员工侧不可见」的那一边（ADR-0025）。
+CUSTOMER_SERVICE_VIEW_NAMES: tuple[str, ...] = CUSTOMER_VIEW_NAMES + ("va_product_element",)
+
 CUSTOMER_SERVICE_CONFIG = AgentConfig(
     name="customer_service",
     tools=("knowledge_search",),
     content_classification_default=FACTUAL_CONTENT,
+    # 与员工侧一样显式声明自己那一域：缺省 None 是目录内的全部视图，而
+    # 「两域互不可见」是双向的——客服这一侧也不能看见员工侧的客户概况与预警统计。
+    view_names=CUSTOMER_SERVICE_VIEW_NAMES,
 )
 
 DATA_ANALYSIS_CONFIG = AgentConfig(

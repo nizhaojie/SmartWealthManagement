@@ -66,6 +66,9 @@ _VIEW_DEFINITIONS: dict[str, str] = {
     # 那一类记录在客户眼前就是整行消失**（ADR-0019 那次正是这个失败形态），
     # `test_customer_transaction_view_merges_all_three_sources` 专门盯着它。
     # 状态列：转账与充值受理通过即入账，恒为「已确认」，与客户侧合并读同一个词。
+    # 三个字面量（「转账」「充值」「已确认」）与 `app/customer_transactions/service.py`
+    # 的同名常量是同一份口径，迁移里只能是冻结的字面量（迁移不该 import 应用代码，
+    # 否则回放历史迁移会跟着代码改），改动时两处要一起改。
     "va_my_transactions": f"""
         CREATE VIEW va_my_transactions AS
         SELECT

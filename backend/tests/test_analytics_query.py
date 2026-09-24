@@ -16,7 +16,11 @@ from fastapi.testclient import TestClient
 from sqlalchemy import bindparam, create_engine, select, text
 from sqlalchemy.orm import Session as OrmSession
 
-from app.agent.config import DATA_ANALYSIS_CONFIG
+from app.agent.config import (
+    CUSTOMER_SERVICE_CONFIG,
+    CUSTOMER_SERVICE_VIEW_NAMES,
+    DATA_ANALYSIS_CONFIG,
+)
 from app.analytics import catalog, execution
 from app.analytics import llm as analytics_llm
 from app.analytics.audit import STATUS_REJECTED, STATUS_SUCCESS
@@ -377,6 +381,17 @@ def test_the_employee_candidate_set_excludes_the_customer_domain():
     # 缺了它，VIEW_CATALOG 里的客户域视图会被一起注入员工的提示词。
     assert DATA_ANALYSIS_CONFIG.view_names == EMPLOYEE_VIEW_NAMES
     assert set(DATA_ANALYSIS_CONFIG.view_names or ()).isdisjoint(CUSTOMER_VIEW_NAMES)
+
+
+def test_the_customer_candidate_set_is_the_customer_domain_plus_products():
+    # 反过来也一样：客户候选集 = 客户域四张 + 产品要素（产品是已披露信息、无行级
+    # 过滤，客户拿自己的风险等级筛产品走它）。员工侧那四张——客户概况、持仓分布、
+    # 交易统计、预警统计——一张都不在客户候选集里（ADR-0025）。
+    assert CUSTOMER_SERVICE_CONFIG.view_names == CUSTOMER_SERVICE_VIEW_NAMES
+    assert set(CUSTOMER_SERVICE_VIEW_NAMES) >= set(CUSTOMER_VIEW_NAMES)
+    assert set(CUSTOMER_SERVICE_VIEW_NAMES) & set(EMPLOYEE_VIEW_NAMES) == {
+        "va_product_element"
+    }
 
 
 def test_examples_are_configurable_without_code_change(

@@ -7,20 +7,27 @@
 
 阈值判断的任何环节都不经过模型。模型只在预警产生之后参与，把结构化的命中结果
 讲成人话。
+
+一条判定形状的文字形态也在这里：命中依据（`evidence`）与规则描述（`rule_description`）
+共用同一个主语函数，两者只差中间有没有观测值——「7 小时内交易金额的笔数 12 ≥ 阈值 10」
+与「7 小时内交易金额的笔数 ≥ 阈值 10」。各写一套的话，规则管理页上的描述与预警里的依据
+会是同一件事的两种说法。
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from datetime import timedelta
+from typing import Any
 
 from app.risk_monitoring.context import MonitoringContext, RuleHit, RuleSpec, TransactionEvent
-from app.risk_monitoring.fields import FIELD_REGISTRY
+from app.risk_monitoring.fields import FIELD_REGISTRY, FieldSpec
 from app.risk_monitoring.operators import (
     OPERATOR_REGISTRY,
     SCOPE_DAILY,
     SCOPE_SINGLE,
     SCOPE_WINDOW,
+    OperatorSpec,
     aggregate,
     compare,
     format_threshold,
@@ -58,6 +65,39 @@ def _scope_text(scope: str, window_hours: int | None) -> str:
     if scope == SCOPE_WINDOW:
         return f"{window_hours} 小时内"
     return ""
+
+
+def _rule_subject(
+    field_spec: FieldSpec, operator_spec: OperatorSpec, window_hours: int | None
+) -> str:
+    """一条判定形状的主语：作用域 + 字段标签 + 算子的量词。
+
+    「7 小时内交易金额的笔数」「同日交易金额的合计」「交易金额」（单笔算子没有作用域，
+    也没有量词）。命中依据与规则描述都从它开始拼。
+    """
+    return (
+        f"{_scope_text(operator_spec.scope, window_hours)}"
+        f"{field_spec.label}{operator_spec.measure}"
+    )
+
+
+def rule_description(
+    *,
+    field: str,
+    operator: str,
+    threshold: Mapping[str, Any],
+    window_hours: int | None,
+) -> str:
+    """描述留空时自动生成的那句话：与 `evidence` 同一套词，只是没有观测值。
+
+    例：「7 小时内交易金额的笔数 ≥ 阈值 10」。它描述的是规则**要什么条件**，不描述
+    某一笔交易满足了多少——所以没有观测值那一格。
+    """
+    operator_spec = OPERATOR_REGISTRY[operator]
+    return (
+        f"{_rule_subject(FIELD_REGISTRY[field], operator_spec, window_hours)} "
+        f"{operator_spec.symbol} 阈值 {format_threshold(operator, threshold)}"
+    )
 
 
 def evaluate_rule(rule: RuleSpec, context: MonitoringContext) -> RuleHit | None:
@@ -107,9 +147,8 @@ def evaluate_rule(rule: RuleSpec, context: MonitoringContext) -> RuleHit | None:
         threshold=threshold_text,
         observed_value=format_value(observed),
         evidence=(
-            f"{_scope_text(operator_spec.scope, rule.window_hours)}"
-            f"{field_spec.label}{operator_spec.measure} {format_value(observed)}"
-            f" {operator_spec.symbol} 阈值 {threshold_text}"
+            f"{_rule_subject(field_spec, operator_spec, rule.window_hours)} "
+            f"{format_value(observed)} {operator_spec.symbol} 阈值 {threshold_text}"
         ),
     )
 

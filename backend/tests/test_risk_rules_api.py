@@ -257,8 +257,33 @@ def test_threshold_that_is_not_a_number_is_rejected(auth_client: TestClient):
     assert _matched_rule_codes("60000.00") == {"R001"}
 
 
-def test_enabling_change_is_recorded_without_requiring_a_reason(auth_client: TestClient):
-    """启停留痕不强制理由——spec 只对阈值调整要求「调整有记录」。"""
+def test_enabling_change_is_recorded(auth_client: TestClient):
+    headers = _headers(auth_client, RISK_OFFICER_USERNAME)
+    rule_id = _rule_id(auth_client, "R001", headers)
+
+    response = auth_client.patch(
+        f"/api/internal/risk-rules/{rule_id}/enabled",
+        headers=headers,
+        json={"enabled": False, "reason": "误报过多，暂停观察"},
+    )
+    assert response.status_code == 200
+
+    changes = auth_client.get(f"/api/internal/risk-rules/{rule_id}/changes", headers=headers)
+    records = changes.json()["data"]
+    assert len(records) == 1
+    assert records[0]["change_type"] == "启停变更"
+    assert records[0]["old_value"] == {"enabled": True}
+    assert records[0]["new_value"] == {"enabled": False}
+    assert records[0]["changed_by_name"] == "周风控"
+
+
+def test_enabling_change_without_a_reason_is_rejected(auth_client: TestClient):
+    """启停的理由从可空收紧为必填（spec 头表）。
+
+    它原来是五个写动作里唯一可以不署名的，那会让五种留痕的形状里有一个不一致——下一个
+    读到的人会把它当成漏写补上。代价认下：列表里那个开关从「一下点开」变成「点一下先
+    弹理由」。
+    """
     headers = _headers(auth_client, RISK_OFFICER_USERNAME)
     rule_id = _rule_id(auth_client, "R001", headers)
 
@@ -267,16 +292,16 @@ def test_enabling_change_is_recorded_without_requiring_a_reason(auth_client: Tes
         headers=headers,
         json={"enabled": False},
     )
-    assert response.status_code == 200
 
-    records = auth_client.get(f"/api/internal/risk-rules/{rule_id}/changes", headers=headers).json()[
-        "data"
-    ]
-    assert len(records) == 1
-    assert records[0]["change_type"] == "启停变更"
-    assert records[0]["old_value"] == {"enabled": True}
-    assert records[0]["new_value"] == {"enabled": False}
-    assert records[0]["changed_by_name"] == "周风控"
+    assert response.status_code == 400
+    assert "理由" in response.json()["message"]
+    assert _matched_rule_codes("60000.00") == {"R001"}
+    assert (
+        auth_client.get(
+            f"/api/internal/risk-rules/{rule_id}/changes", headers=headers
+        ).json()["data"]
+        == []
+    )
 
 
 def test_only_risk_officers_can_change_rules(auth_client: TestClient):

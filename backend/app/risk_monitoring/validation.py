@@ -25,17 +25,21 @@
 或者永远不会命中的规则」。前端也读同一份契约（`GET /api/internal/risk-rules/schema`）：
 schema 列出的允许算子就是这里收下的那些，同一份来源。前端禁掉的选项与这里拒掉的组合
 一旦漂移，表现是「下拉里能选、一提交被拒」——不会有断言失败，只会有人反复试。
+
+规则名称与权重不属于判定形状，也放在这一处挡：名称去空白后不能为空，权重必须落在可写
+区间内。它们错了不会让规则永远不命中，但同样只有在这里才会被说清楚——「名称 200 个字」
+与「权重 9」都该当场返回，而不是等数据库用列宽与精度把话说了。
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
 from app.exceptions import AppError
-from app.risk_monitoring.fields import FIELD_KEYS, FIELD_REGISTRY
+from app.risk_monitoring.fields import FIELD_KEYS, FIELD_REGISTRY, ValueRange
 from app.risk_monitoring.grading import LEVEL_LIGHT, LEVEL_MODERATE, LEVEL_SEVERE
 from app.risk_monitoring.operators import (
     OPERATOR_KEYS,
@@ -45,12 +49,24 @@ from app.risk_monitoring.operators import (
     UnknownOperatorError,
     format_value,
     normalize_threshold,
+    to_comparable,
 )
 from app.risk_monitoring.rules import RULE_CATEGORIES
 
 # 预警等级的封闭清单：与 `fin_risk_rule.alert_level` 的 CHECK 约束、`grading` 里那三个
 # 标签是同一份。它不参与分级（分级看命中条数与历史），但它是规则自身的必选项。
 ALERT_LEVELS: tuple[str, ...] = (LEVEL_LIGHT, LEVEL_MODERATE, LEVEL_SEVERE)
+
+# 规则名称的列宽（`fin_risk_rule.rule_name` 是 `String(128)`）：超了当场返回，不让 MySQL
+# 去截断或报错。
+RULE_NAME_MAX_LENGTH = 128
+
+# 规则权重的默认值与可写区间（spec 的参数清单：可填，默认 1.00，区间 [0.50, 5.00]）。
+# 权重不参与分级、也不决定是否命中，但它进置信度与「归到哪个规则分类」的判断——区间外的
+# 值会让那两处都说不清。列是 `Numeric(5, 2)`，取值按两位小数归一，与库里存下的同一个数。
+WEIGHT_DEFAULT = Decimal("1.00")
+WEIGHT_QUANTUM = Decimal("0.01")
+WEIGHT_RANGE = ValueRange(lower=Decimal("0.50"), upper=Decimal("5.00"))
 
 BAD_REQUEST = 400
 
@@ -78,10 +94,10 @@ def validate_rule_definition(
 
     名单里的每一个值都由后端说了算：前端下拉里能选什么，就是这里的清单。
     """
-    _require_in_registry(category, RULE_CATEGORIES, "规则分类")
+    normalize_category(category)
     _require_in_registry(field, FIELD_KEYS, "规则字段")
     _require_in_registry(operator, OPERATOR_KEYS, "规则算子")
-    _require_in_registry(alert_level, ALERT_LEVELS, "预警等级")
+    normalize_alert_level(alert_level)
     return RuleShape(
         field=field,
         operator=operator,
@@ -110,6 +126,59 @@ def validate_rule_shape(
     normalized = _normalize_threshold(operator, threshold)
     _require_in_value_range(field, normalized)
     return normalized
+
+
+def normalize_category(category: str) -> str:
+    """规则分类必须落在 `RULE_CATEGORIES` 里（库里的 CHECK 是同一份清单）。
+
+    「创建」与「修改基本信息」两个入口都走它：分类在两个入口上读同一份清单、报同一句
+    话，专员不会因为换了入口就看到两种口径。
+    """
+    _require_in_registry(category, RULE_CATEGORIES, "规则分类")
+    return category
+
+
+def normalize_alert_level(alert_level: str) -> str:
+    """预警等级必须落在三个等级里；同样供创建与修改两个入口复用。"""
+    _require_in_registry(alert_level, ALERT_LEVELS, "预警等级")
+    return alert_level
+
+
+def normalize_rule_name(rule_name: str) -> str:
+    """规则名称的去空白形态；空的不收，超过列宽的也不收。
+
+    「去空白后非空」而不是「非空」：一串空格在界面上与空标题没有区别，落库之后才会在
+    列表里显示成一条没有名字的规则。
+    """
+    checked = (rule_name or "").strip()
+    if not checked:
+        raise AppError(BAD_REQUEST, "规则名称不能为空")
+    if len(checked) > RULE_NAME_MAX_LENGTH:
+        raise AppError(BAD_REQUEST, f"规则名称不能超过 {RULE_NAME_MAX_LENGTH} 字")
+    return checked
+
+
+def normalize_weight(weight: Any) -> Decimal:
+    """规则权重：不给按 1.00，给了就必须落在 [0.50, 5.00] 内（spec 的参数清单）。
+
+    数值的接受范围与阈值一致（字符串、整数、浮点都收，非数值一律拒），走的是求值侧
+    同一份 `to_comparable`——「权重 1.5」与「权重 "1.5"」在这里是同一个数。
+
+    `None` 等同「没给」：创建时它是「用默认值」，而不是「权重为空」——列非空，空白没有
+    意义。取值按两位小数归一，与 `Numeric(5, 2)` 存进去的那个数是同一个，否则留痕快照
+    会记下一个库里并不存在的数（0.505 落库成 0.51）。
+    """
+    if weight is None:
+        return WEIGHT_DEFAULT
+    comparable = to_comparable(weight)
+    if not isinstance(comparable, Decimal):
+        raise AppError(BAD_REQUEST, f"规则权重必须是数值：{weight}")
+    if not WEIGHT_RANGE.contains(comparable):
+        raise AppError(
+            BAD_REQUEST,
+            f"规则权重 {format_value(comparable)} 不在 {WEIGHT_RANGE.describe()} 内",
+        )
+    return comparable.quantize(WEIGHT_QUANTUM, rounding=ROUND_HALF_UP)
 
 
 def _require_in_registry(value: str, allowed: tuple[str, ...], label: str) -> None:

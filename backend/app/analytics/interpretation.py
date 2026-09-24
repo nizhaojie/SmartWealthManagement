@@ -1,4 +1,4 @@
-"""结果解读：把结果集与原始问题一起送入模型，生成自然语言解读。
+"""结果解读：员工侧把结果集与原始问题送入模型；客户侧由结果集直接生成。
 
 解读必须说明数据口径——同一个「收益率」在不同口径下是不同的数字，
 只给结论不给口径会误导。因此无论真假 provider，视图的口径说明都
@@ -8,7 +8,14 @@
 解读按使用者口径分两套（ADR-0025）：员工侧是内部研判，客户侧是**面向本人的
 事实陈述**。两者差在说话对象与边界上——客户那一套把数字直接写进文本，不许出现
 投资建议、收益预测与产品推荐（只筛不排序的产品清单才轮得到客服说，见 ADR-0005）。
+
+客户侧不把解读交给模型。模型会把视图说明里的字段名写成具体数字（例如没查到的
+风险承受等级和有效期），也会只看见一部分行就给全体计数。客户看到的句子由结果集
+直接生成：行数、低基数列的完整计数、每一行的原值，都来自查询结果本身。
 """
+
+from collections import Counter
+from decimal import Decimal
 
 from app.analytics.audience import Audience
 from app.analytics.catalog import ViewSpec
@@ -38,6 +45,13 @@ _SYSTEM_PROMPTS: dict[Audience, str] = {
     Audience.CUSTOMER: _CUSTOMER_SYSTEM_PROMPT,
 }
 
+# 一列取值种类不超过这个数时，把每种取值的行数写进解读。产品代码这类高基数列
+# 不计数，避免一句解读变成第二张宽表；它们的原值仍逐行出现。
+_COUNT_CARDINALITY_LIMIT = 12
+# 员工侧仍由模型措辞，但只把这么多行原文放进提示词。完整计数另附，模型不得
+# 凭这段样例给全体重新计数。
+_ROW_PREVIEW_LIMIT = 20
+
 
 def generate_interpretation(
     question: str,
@@ -54,7 +68,7 @@ def generate_interpretation(
         if preset is not None:
             return preset.interpretation
         return _fake_interpret(question, views, result, audience=audience)
-    if settings.resolved_llm_provider == "fake":
+    if audience == Audience.CUSTOMER or settings.resolved_llm_provider == "fake":
         return _fake_interpret(question, views, result, audience=audience)
     return _openai_compatible_interpret(question, views, result, settings, audience)
 
@@ -79,21 +93,57 @@ def _fake_interpret(
     )
 
 
+def _cell_text(value: object) -> str:
+    if value is None:
+        return "空"
+    if isinstance(value, Decimal):
+        return format(value, "f")
+    return str(value)
+
+
+def _column_counts(result: QueryResult) -> str:
+    """低基数列的完整计数。用全部行，不用送进模型的那一段样例。"""
+    parts: list[str] = []
+    for index, column in enumerate(result.columns):
+        values = [_cell_text(row[index]) for row in result.rows]
+        distinct = set(values)
+        if len(distinct) == 1 and len(values) > 1:
+            parts.append(f"{column}全部为 {values[0]}，共 {len(values)} 行")
+            continue
+        if not 1 < len(distinct) <= _COUNT_CARDINALITY_LIMIT:
+            continue
+        counts = Counter(values)
+        listed = "、".join(
+            f"{value} {counts[value]} 行"
+            for value in sorted(counts, key=lambda item: (-counts[item], item))
+        )
+        parts.append(f"按{column}：{listed}")
+    return "。".join(parts)
+
+
+def _row_lines(result: QueryResult, *, limit: int | None = None) -> str:
+    rows = result.rows if limit is None else result.rows[:limit]
+    return "；".join(
+        "，".join(
+            f"{column} 为 {_cell_text(value)}"
+            for column, value in zip(result.columns, row)
+        )
+        for row in rows
+    )
+
+
 def _fake_customer_interpret(views: list[ViewSpec], result: QueryResult) -> str:
     """客户口径的确定性解读：数字直接写进文本，不加任何评价。
 
-    真实 provider 下的措辞由模型给，这里给的是同一份要求的确定性版本——测试与
-    回放看到的就是客户会看到的形态。
+    客户侧无论 provider 都走这里。模型解读会把口径说明里的字段名写成具体数字，
+    也会只看见一部分行就给全体计数；这两件事都违反「不得编造结果中不存在的数字」。
     """
     truncated_note = "（结果超出行数上限，已截断）" if result.truncated else ""
-    rows = "；".join(
-        "，".join(
-            f"{column} 为 {value}" for column, value in zip(result.columns, row)
-        )
-        for row in result.rows[:5]
-    )
+    counts = _column_counts(result)
+    count_sentence = f"{counts}。" if counts else ""
+    rows = _row_lines(result)
     return (
-        f"为您查到 {len(result.rows)} 行数据{truncated_note}：{rows}。"
+        f"为您查到 {len(result.rows)} 行数据{truncated_note}。{count_sentence}{rows}。"
         f"数据口径：{_basis_text(views)}"
     )
 
@@ -105,9 +155,9 @@ def _openai_compatible_interpret(
     settings: Settings,
     audience: Audience,
 ) -> str:
-    rows_preview = "\n".join(
-        ", ".join(str(value) for value in row) for row in result.rows[:20]
-    )
+    preview = _row_lines(result, limit=_ROW_PREVIEW_LIMIT)
+    omitted = max(len(result.rows) - _ROW_PREVIEW_LIMIT, 0)
+    counts = _column_counts(result)
     messages = [
         {"role": "system", "content": _SYSTEM_PROMPTS[audience]},
         {
@@ -116,8 +166,11 @@ def _openai_compatible_interpret(
                 f"原始问题：{question}\n\n"
                 f"视图口径说明：{_basis_text(views)}\n\n"
                 f"结果列：{', '.join(result.columns)}\n"
-                f"结果行（共 {len(result.rows)} 行"
-                f"{'，已截断' if result.truncated else ''}）：\n{rows_preview}"
+                f"结果共 {len(result.rows)} 行"
+                f"{'，已截断' if result.truncated else ''}。\n"
+                f"已核算的列计数（以此为准，不要根据样例重新计数）：{counts or '无'}\n"
+                f"样例行（前 {_ROW_PREVIEW_LIMIT} 行，其余 {omitted} 行未列出）：\n{preview}\n"
+                "只使用结果列里出现过的字段。结果里没有的客户风险承受等级、有效期等不要写。"
             ),
         },
     ]

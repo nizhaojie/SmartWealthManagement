@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import type { AnalyticsExampleItem } from "./types";
 
-// 空态：一句引导 + 示例问题。示例问题**点了就发问**，不再只填入输入框——
-// 对话范式里那次「再按一次提问」是多余的（见 spec 的「对话壳与输入」一节）。
+// 空态：一句引导 + 示例问题。示例问题**点了只把问题填进输入框**，不替人发送——
+// 与抽屉里「再问一次」同一条语义：示例是把一句话送到手边，问不问、要不要先改几个字，
+// 由员工自己决定（见 ticket 06）。
 //
 // 引导里写明可查范围：数据只能来自语义视图（已脱敏），超出范围的问法会被拒绝。
 // 先说出来，「超出可查范围」才是可预期的结果，而不是碰了才知道。
 defineProps<{ examples: AnalyticsExampleItem[] }>();
-const emit = defineEmits<{ ask: [question: string] }>();
+const emit = defineEmits<{ pick: [question: string] }>();
 </script>
 
 <template>
@@ -24,7 +25,7 @@ const emit = defineEmits<{ ask: [question: string] }>();
         type="button"
         class="empty__item"
         data-testid="example-question"
-        @click="emit('ask', example.question)"
+        @click="emit('pick', example.question)"
       >
         {{ example.question }}
       </button>
@@ -43,9 +44,9 @@ const emit = defineEmits<{ ask: [question: string] }>();
   padding: var(--wm-space-5) var(--wm-space-4);
 }
 
+/* 不限宽：这句话铺满面板宽度。限宽会让它挤成左半边的一小列，右侧空出大片无用的白。 */
 .empty__guide {
   margin: 0;
-  max-width: 60ch;
   color: var(--wm-text-muted);
   font-size: 0.88rem;
   line-height: 1.8;

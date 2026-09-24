@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { nextTick, ref } from "vue";
+import { EditPen } from "@element-plus/icons-vue";
 import type { InputInstance } from "element-plus";
 
-// 底部输入区：多行自适应（2–4 行），**Ctrl+Enter 提交、Enter 换行**。
-// Enter 留给换行是双向的收益：中文输入法组字时的 Enter 上屏天然不会被当成发送。
+// 底部输入区：**单行**输入，与客服侧的对话输入同一形态——左侧一个图标底座、中间输入、右侧发送。
+// 回车即提交，走的是表单的原生隐式提交（不挂 keydown）：「没有换行」是单行 input 的形态决定的，
+// 不是靠拦键盘；中文输入法组字时的回车由输入法自己吃掉，也就不会把半句送出去。
 //
 // 提交之后清空并留在输入框里（接着问下一句），清空与聚焦都在这里做完——
 // 页面只管把问题送出去，不用记住输入框的状态。
@@ -30,35 +32,35 @@ async function submit(): Promise<void> {
 
 <template>
   <form class="ask" @submit.prevent="submit">
+    <span class="ask__icon" aria-hidden="true">
+      <el-icon><EditPen /></el-icon>
+    </span>
+
     <el-input
       ref="inputRef"
       v-model="text"
       name="question"
-      type="textarea"
-      :autosize="{ minRows: 2, maxRows: 4 }"
-      placeholder="用一句自然语言描述你要看的数据（Ctrl + Enter 发送）"
-      @keydown.ctrl.enter.prevent="submit"
+      class="ask__input"
+      placeholder="用一句自然语言描述你要看的数据（回车发送）"
     />
 
-    <div class="ask__row">
-      <el-button
-        type="primary"
-        native-type="submit"
-        name="ask"
-        data-testid="ask"
-        :loading="busy"
-      >
-        发送
-      </el-button>
-    </div>
+    <el-button
+      type="primary"
+      native-type="submit"
+      name="ask"
+      data-testid="ask"
+      :loading="busy"
+    >
+      发送
+    </el-button>
   </form>
 </template>
 
 <style scoped>
 .ask {
   display: flex;
-  flex-direction: column;
-  gap: var(--wm-space-2);
+  align-items: center;
+  gap: var(--wm-space-3);
   flex-shrink: 0;
   padding: var(--wm-space-3) var(--wm-space-4);
   /* 输入带用实线顶部分隔，与上方消息区拉开区分度（细线属令牌纪律声明的极少数例外） */
@@ -66,10 +68,21 @@ async function submit(): Promise<void> {
   background-color: var(--wm-bg-subtle);
 }
 
-.ask__row {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: var(--wm-space-3);
+/* 图标底座：与客服侧的 composer 同形，白底方章把图标从灰底上托起来 */
+.ask__icon {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: var(--wm-space-5);
+  height: var(--wm-space-5);
+  border-radius: var(--wm-radius-sm);
+  background-color: var(--wm-bg-card);
+  color: var(--wm-text-muted);
+  /* el-icon 的 svg 以 1em 计，font-size 即图标尺寸 */
+  font-size: var(--wm-space-4);
+}
+
+.ask__input {
+  flex: 1;
 }
 </style>

@@ -59,9 +59,9 @@ async function mountWorkspace(): Promise<VueWrapper> {
   return wrapper;
 }
 
-/** 提问框随问答线程换成 2–4 行自适应的多行输入；形态再变一次时只需改这一行。 */
+/** 提问框是单行输入（ticket 06 起从多行换回来）；形态再变一次时只需改这一行。 */
 async function askQuestion(app: VueWrapper, text: string): Promise<void> {
-  await app.get("textarea[name='question']").setValue(text);
+  await app.get("input[name='question']").setValue(text);
   // jsdom 不实现「点 submit 按钮即提交表单」，这里直接触发 submit 事件（与登录页用例同一手法）。
   await app.get("form.ask").trigger("submit");
   await flushPromises();

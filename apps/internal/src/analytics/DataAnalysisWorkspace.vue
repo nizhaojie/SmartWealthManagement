@@ -3,8 +3,6 @@ import { computed, onMounted, ref } from "vue";
 import { ElMessageBox } from "element-plus";
 import { ApiError, PageHeader } from "@wealth/shared";
 import { errorMessage } from "../format";
-import { actionButton } from "../shell/actionButton";
-import { useTopbarActions } from "../shell/pageSlots";
 import AnalyticsHistoryDrawer from "./AnalyticsHistoryDrawer.vue";
 import ConversationThread from "./ConversationThread.vue";
 import EmptyConversation from "./EmptyConversation.vue";
@@ -18,7 +16,7 @@ import type { AnalyticsExampleItem } from "./types";
 const draft = ref("");
 const examples = ref<AnalyticsExampleItem[]>([]);
 
-// 历史查询挂在顶栏的抽屉里（05）：入口是壳层顶栏右侧的一个按钮，抽屉自己取数取页。
+// 历史查询挂在抽屉里（05）：入口是页头那个按钮，抽屉自己取数取页。
 const historyOpen = ref(false);
 
 // 这一段页面生命周期里刚落地的轮次：只有它的解读逐字上屏。刷新或切模块回来时读到的是
@@ -45,13 +43,13 @@ async function loadExamples(): Promise<void> {
 }
 
 /**
- * 发出一轮提问。入口有两个且只有两个：输入区的提交，与空态里点一条示例问题
- * （点了就发，不再只填进输入框）。两者都是「发出一条消息」，没有别的分支。
+ * 发出一轮提问。入口只有一个：输入区的提交（ticket 06 起，空态的示例问题只填进输入框，
+ * 不再直接走到这里）。所以「发出」这件事在界面上总要过员工那一下回车。
  */
 async function ask(text: string): Promise<void> {
   const question = text.trim();
-  // 空问题与「上一轮还在途」在这里再拦一道：输入区那一层的守卫是为了不吞掉已输入的字，
-  // 而空态的示例问题不经过输入区，直接走到这里。
+  // 空问题与「上一轮还在途」在这里再拦一道：输入区那一层已经拦过，这里的守卫是给
+  // 「同一帧里两次提交」这类漏网留的余量。
   if (!question || asking.value) return;
 
   // 这一轮先入线程（问题 + 「正在查询」的助手位）：失败也留在线程里，它不是没问过。
@@ -101,16 +99,14 @@ async function clearThread(): Promise<void> {
   thread.discardContext();
 }
 
-// 历史查询的入口挂在壳层顶栏右侧（`AppShell` 的 `topbar-right`，由壳转发页面级操作）：
-// 搬进抽屉之后这一页不再注入检查器，AppShell 据此自动塌成两栏（三栏与否只有一个来源）。
-const historyButton = actionButton({
-  label: "历史查询",
-  name: "open-history",
-  onClick: () => {
-    historyOpen.value = true;
-  },
-});
-useTopbarActions(() => ({ component: historyButton }));
+// 历史查询的入口在**页头**、「清空对话」的右侧（ticket 06 从顶栏搬回来）：两个都是
+// 「这一页的对话控制」，分居顶栏与页头不成组。它仍是个抽屉，不占第三栏——这一页不注入
+// 检查器，AppShell 据此自动塌成两栏。
+
+/** 把一句话送进输入框，**不自动发送**：「再问一次」与「试试这些」共用的那一半。 */
+function fillDraft(question: string): void {
+  draft.value = question;
+}
 
 /**
  * 「再问一次」把问题送回输入框，**不自动发送**。
@@ -120,7 +116,7 @@ useTopbarActions(() => ({ component: historyButton }));
  * 要不要先改几个字，都由员工自己决定。
  */
 function reuseQuestion(question: string): void {
-  draft.value = question;
+  fillDraft(question);
   historyOpen.value = false;
 }
 
@@ -141,11 +137,15 @@ onMounted(() => {
         >
           清空对话
         </el-button>
+        <el-button name="open-history" data-testid="open-history" @click="historyOpen = true">
+          历史查询
+        </el-button>
       </template>
     </PageHeader>
 
     <div class="analytics__panel">
-      <EmptyConversation v-if="thread.isEmpty" :examples="examples" @ask="ask" />
+      <!-- 示例问题只填进输入框，不替人发问：空态因此留在页面上（ticket 06）。 -->
+      <EmptyConversation v-if="thread.isEmpty" :examples="examples" @pick="fillDraft" />
       <ConversationThread
         v-else
         :messages="thread.messages"

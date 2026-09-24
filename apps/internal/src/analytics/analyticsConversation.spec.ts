@@ -1,4 +1,5 @@
-// 对话壳与输入区（ticket 03）：主区是一条**可累积的线程**，底部是一个多行输入区。
+// 对话壳与输入区（ticket 03）：主区是一条**可累积的线程**，底部是一个单行输入区
+// （ticket 06 从多行换回单行——与客服侧的对话输入同形，回车即发送、没有换行）。
 //
 // 这里钉的是这次改动要修的核心缺陷——「连问两次，上一轮还看得见」。表单范式下
 // `result` 是单槽，第二问必然覆盖第一问，追问在界面上不成立。
@@ -71,9 +72,9 @@ async function mountWorkspace(options: { hang?: boolean } = {}): Promise<VueWrap
   return wrapper;
 }
 
-/** 输入区是 2–4 行自适应的多行输入（ticket 03 起从单行输入换过来）。 */
+/** 输入区是单行输入（ticket 06 起从 2–4 行自适应换回来）。形态再变一次时只需改这一行。 */
 function composer(app: VueWrapper) {
-  return app.get("textarea[name='question']");
+  return app.get("input[name='question']");
 }
 
 /** 每一次查询请求的请求体：问的是哪一句，只能从这里看。 */
@@ -126,19 +127,18 @@ describe("空态", () => {
     expect(app.find("[data-testid='conversation-thread']").exists()).toBe(false);
   });
 
-  it("点示例问题直接发问，而不是只填进输入框", async () => {
+  it("点示例问题只把问题填进输入框，不自动发问", async () => {
     const app = await mountWorkspace();
 
     await app.get("[data-testid='example-question']").trigger("click");
     await flushPromises();
-    await playOutTypewriter();
 
-    const asked = requestedUrls(fetchMock, "/api/internal/analytics/query");
-    expect(asked).toHaveLength(1);
-    expect(queryBodies()[0]?.question).toBe(EXAMPLE);
-    // 这一问已经在线程里（问与答都要出现），不是回填到输入框等用户再按一次。
-    expect(app.get("[data-testid='user-bubble']").text()).toContain(EXAMPLE);
-    expect((composer(app).element as HTMLTextAreaElement).value).toBe("");
+    // 一个请求都没发出去：示例只是把一句话送到手边（与抽屉的「再问一次」同一条语义）。
+    expect(requestedUrls(fetchMock, "/api/internal/analytics/query")).toHaveLength(0);
+    expect((composer(app).element as HTMLInputElement).value).toBe(EXAMPLE);
+    // 还没问过，所以空态与示例都还留着，线程也没立起来。
+    expect(app.find("[data-testid='conversation-empty']").exists()).toBe(true);
+    expect(app.find("[data-testid='user-bubble']").exists()).toBe(false);
   });
 });
 
@@ -261,18 +261,21 @@ describe("加载态", () => {
 });
 
 describe("输入区", () => {
-  it("Ctrl+Enter 提交，Enter 只换行", async () => {
+  it("单行输入：回车交给表单提交，没有换行", async () => {
     const app = await mountWorkspace();
 
-    await composer(app).setValue("这个月新增了几个客户");
-    await composer(app).trigger("keydown", { key: "Enter" });
-    await flushPromises();
-    // Enter 留给换行：中文输入法组字时的 Enter 上屏也就不会被当成发送。
-    expect(requestedUrls(fetchMock, "/api/internal/analytics/query")).toHaveLength(0);
+    // 「没有换行」由形态保证——单行 input 装不下换行，回车的默认行为就是提交表单，
+    // 不必再拦一次键盘（与客服侧的 composer 同一形态）。
+    // 隐式提交本身是浏览器的行为，jsdom 不实现，所以这里钉的是形态与「提交就发一次」。
+    expect(app.find("textarea[name='question']").exists()).toBe(false);
+    expect(composer(app).element.tagName).toBe("INPUT");
 
-    await composer(app).trigger("keydown", { key: "Enter", ctrlKey: true });
+    await composer(app).setValue("这个月新增了几个客户");
+    await app.get("form.ask").trigger("submit");
     await flushPromises();
     await playOutTypewriter();
+
+    expect(queryBodies()[0]?.question).toBe("这个月新增了几个客户");
     expect(requestedUrls(fetchMock, "/api/internal/analytics/query")).toHaveLength(1);
   });
 
@@ -281,7 +284,7 @@ describe("输入区", () => {
 
     await ask(app, "这个月新增了几个客户");
 
-    const element = composer(app).element as HTMLTextAreaElement;
+    const element = composer(app).element as HTMLInputElement;
     expect(element.value).toBe("");
     expect(document.activeElement).toBe(element);
   });

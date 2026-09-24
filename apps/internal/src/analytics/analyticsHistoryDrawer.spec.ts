@@ -1,8 +1,9 @@
-// 历史查询抽屉（ticket 05）：留痕从右栏搬进顶栏的抽屉，右栏因此塌成两栏。
+// 历史查询抽屉（ticket 05）：留痕从右栏搬进抽屉，右栏因此塌成两栏；入口在页头
+// （ticket 06 从顶栏搬回「清空对话」右侧）。
 //
-// 挂 `App.vue` 而不是单挂工作区，是因为两件事只有在这一层才成立：顶栏那个入口是壳转发
-// 页面级操作渲染出来的，第三栏在不在也由壳裁定。抽屉自己的行为（列记录、SQL 行内展开、
-// 「再问一次」、分页走服务端）同样在真实壳里验——免得「搬进抽屉了」只对了一半。
+// 挂 `App.vue` 而不是单挂工作区，是因为「第三栏在不在」只有在这一层才成立：它由壳裁定。
+// 抽屉自己的行为（列记录、SQL 行内展开、「再问一次」、分页走服务端）同样在真实壳里验——
+// 免得「搬进抽屉了」只对了一半。
 //
 // 旧文件（`analyticsHistoryRail.spec.ts`）的前提是「证明这张卡真的在第三栏」，那个前提
 // 已经不存在：这里不是给它打补丁，是换一组问题。
@@ -116,7 +117,7 @@ async function mountAnalysis(
   return wrapper;
 }
 
-/** 顶栏那个入口：抽屉的唯一入口（页头的「清空对话」是另一件事）。 */
+/** 页头那个入口：抽屉的唯一入口（它左边的「清空对话」是另一件事）。 */
 async function openHistory(app: VueWrapper): Promise<void> {
   await app.get('[data-testid="open-history"]').trigger("click");
   await flushPromises();
@@ -133,11 +134,11 @@ async function closeDrawer(app: VueWrapper): Promise<void> {
 }
 
 /**
- * 提问框是多行输入（`el-input type="textarea"`，见 `MessageComposer.vue`）。
+ * 提问框是单行输入（见 `MessageComposer.vue`）。
  * 「再问一次」把问题送回的就是它，形态再变一次时只需改这一行。
  */
 function questionText(app: VueWrapper): string {
-  return (app.get("textarea[name='question']").element as HTMLTextAreaElement).value;
+  return (app.get("input[name='question']").element as HTMLInputElement).value;
 }
 
 /** 这次请求带的页码：抽屉底的翻页控件交给服务端的就是这个数。 */
@@ -169,15 +170,20 @@ afterEach(() => {
 });
 
 describe("数据分析页的两栏形态", () => {
-  it("这一页不再渲染第三栏，历史查询的入口改挂顶栏", async () => {
+  it("这一页不再渲染第三栏，历史查询的入口在「清空对话」右侧", async () => {
     const app = await mountAnalysis();
 
     // 不再注入检查器，壳据此自动塌成两栏——这一页的右栏没有别的东西要放。
     expect(app.classes()).not.toContain("app-shell--with-inspector");
     expect(app.find(".app-shell__inspector").exists()).toBe(false);
 
-    // 入口在顶栏（壳转发出来的页面级操作），页面上没有常驻的历史查询。
-    expect(app.find(".app-shell__topbar-end [data-testid='open-history']").exists()).toBe(true);
+    // 入口在页头的操作区里、「清空对话」的右边；顶栏不再有这一页的按钮。
+    const actions = app.get(".page-header__actions");
+    expect(actions.findAll("button").map((button) => button.attributes("data-testid"))).toEqual([
+      "clear-thread",
+      "open-history",
+    ]);
+    expect(app.find(".app-shell__topbar-end [data-testid='open-history']").exists()).toBe(false);
     expect(app.find('[data-testid="history-drawer"]').exists()).toBe(false);
 
     await openHistory(app);

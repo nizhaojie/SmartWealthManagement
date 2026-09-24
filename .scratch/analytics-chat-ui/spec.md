@@ -2,6 +2,8 @@
 
 Status: ready-for-agent
 
+**后续推翻（2026-09-24，见 `issues/06-composer-and-empty-state-polish.md`）**：Q14（Ctrl+Enter 发送 / Enter 换行）、Q9 的「入口挂顶栏」、以及「空态示例问题点击直接发问」这三条已被 ticket 06 改掉——输入区改回单行回车发送（与客服侧同形），「历史查询」回到页头「清空对话」右侧，示例问题改为只填入输入框。上面的访谈清单是当时的记录，不追改。
+
 前置：`data-analysis-agent`（已实现，语义视图 + NL2SQL + 查询界面）、`frontend-rebuild`（已实现，三栏外壳与设计令牌）、`list-pagination`（已实现——右栏分页控件就是它留下的）。
 
 **本 slice 不新增 ADR。** 判定见 Further Notes。

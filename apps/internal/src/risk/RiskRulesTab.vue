@@ -435,11 +435,11 @@ useTabSummary(
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="规则" prop="rule_name" min-width="140" />
-        <el-table-column label="判定字段" prop="field_label" min-width="110" />
+        <el-table-column label="规则" prop="rule_name" min-width="130" />
+        <el-table-column label="判定字段" prop="field_label" min-width="90" />
         <el-table-column label="算子" prop="operator_label" min-width="100" />
-        <el-table-column label="阈值" prop="threshold_text" min-width="120" />
-        <el-table-column label="启停" min-width="80">
+        <el-table-column label="阈值" prop="threshold_text" min-width="100" />
+        <el-table-column label="启停" min-width="70">
           <template #default="{ row }">
             <!-- 已删除的行不留启停控件：删除是终态，撤销它没有入口（要停用请用启停）。 -->
             <el-switch
@@ -453,23 +453,22 @@ useTabSummary(
           </template>
         </el-table-column>
         <!--
-          操作列的 min-width 按角色取下限：专员是三个链接按钮（查看变更记录 / 编辑 / 删除）
-          一行放得下（约 190px），非专员只剩「查看变更记录」一个（约 120px）。
-          旧版固定 310px 是按四个默认按钮给的——非专员那一列右侧空出一大截，而各列
+          操作列的 min-width 按角色取下限：专员是三个默认小按钮（查看变更记录 / 编辑 / 删除）
+          一行放得下（约 250px），非专员只剩「查看变更记录」一个（约 130px）。
+          旧版固定 310px 是按四个按钮给的——非专员那一列右侧空出一大截，而各列
           min-width 合计（970px）又顶出容器，平白多出一条横向滚动条。
+          为了给默认按钮腾宽度，其余各列也按表头/内容宽度收紧：
+          110 + 130 + 90 + 100 + 100 + 70 + 250 = 850px，在「1200px 视口 + 侧栏展开 +
+          检查器收起」的可用宽度（873px）内，专员与非专员两个视图都不出横向滚动条。
         -->
-        <el-table-column label="操作" :min-width="canManage ? 190 : 120">
+        <el-table-column label="操作" :min-width="canManage ? 250 : 130">
           <template #default="{ row }">
-            <el-button link type="primary" size="small" data-testid="view-changes" @click="openChanges(row)">
+            <el-button size="small" data-testid="view-changes" @click="openChanges(row)">
               查看变更记录
             </el-button>
             <template v-if="canManage && !isDeleted(row)">
-              <el-button link type="primary" size="small" data-testid="edit-rule" @click="openEditor(row)">
-                编辑
-              </el-button>
-              <el-button link type="danger" size="small" data-testid="delete-rule" @click="removeRule(row)">
-                删除
-              </el-button>
+              <el-button size="small" data-testid="edit-rule" @click="openEditor(row)">编辑</el-button>
+              <el-button size="small" data-testid="delete-rule" @click="removeRule(row)">删除</el-button>
             </template>
           </template>
         </el-table-column>

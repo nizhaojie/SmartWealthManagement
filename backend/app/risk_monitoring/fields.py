@@ -15,9 +15,9 @@
 
 - `allowed_operators`：这个字段允许配哪些算子（写入侧第二档校验）。一份「字段 ×
   算子」的允许矩阵因此就是这张注册表本身——加一种可配的组合是改那一行，不是在
-  `if` 里补一个分支。取值不是数值的字段（`product_id` 是产品标识）只允许不去比
-  数值的算子；取值语义是小时、百分比或等级差的字段不允许求和类聚合——把时刻、
-  比例、等级差加起来得到的数没有任何含义。
+  `if` 里补一个分支。取值是**标识**而不是量的字段（`product_id`）只允许不去比数值
+  的算子；取值语义是小时、百分比或等级差的字段不允许求和类聚合——把时刻、比例、
+  等级差加起来得到的数没有任何含义，那种规则配出来只会是永远不命中。
 - `value_range`：阈值的物理值域（写入侧第三档校验），同时也下发给前端。
 
 两处声明都只写在这里：写入侧拿它们拒绝，`GET /api/internal/risk-rules/schema` 拿
@@ -47,6 +47,7 @@ from app.risk_monitoring.operators import (
     WINDOW_DISTINCT_COUNT_GTE,
     WINDOW_MAX_GTE,
     WINDOW_SUM_GTE,
+    format_value,
 )
 
 PURCHASE = "申购"
@@ -110,31 +111,27 @@ class ValueRange:
         """值域的人类可读形式：校验失败的消息与界面提示都直接用这一句。"""
         bounds: list[str] = []
         if self.lower is not None:
-            bounds.append(f"{'≥' if self.lower_inclusive else '>'} {_number_text(self.lower)}")
+            bounds.append(f"{'≥' if self.lower_inclusive else '>'} {format_value(self.lower)}")
         if self.upper is not None:
-            bounds.append(f"{'≤' if self.upper_inclusive else '<'} {_number_text(self.upper)}")
+            bounds.append(f"{'≤' if self.upper_inclusive else '<'} {format_value(self.upper)}")
         return " 且 ".join(bounds)
 
     def as_payload(self) -> dict[str, Any]:
         """给前端的形态：两端、端点是否含，外加一句可以直接展示的文本。"""
         return {
-            "min": _number_text(self.lower) if self.lower is not None else None,
-            "max": _number_text(self.upper) if self.upper is not None else None,
+            "min": format_value(self.lower) if self.lower is not None else None,
+            "max": format_value(self.upper) if self.upper is not None else None,
             "min_inclusive": self.lower_inclusive,
             "max_inclusive": self.upper_inclusive,
             "text": self.describe(),
         }
 
 
-def _number_text(value: Decimal) -> str:
-    """数值的展示形态：`50.00` 写成 `50`，与求值侧 `format_value` 同一口径。"""
-    return format(value.normalize(), "f")
-
-
 # ---------------- 字段 × 算子的允许矩阵 ----------------
 
-# 比较类：拿取值直接与阈值比。数值字段都能配，`product_id` 不能——它的取值是产品标识，
-# 阈值却被归一化成 Decimal，拿去比会在求值那一刻抛 TypeError，整笔交易的判定跟着失败。
+# 比较类：拿取值直接与阈值比。取值是量的字段都能配，`product_id` 不能——它的取值是产品
+# 标识（代理键），产品 5 号不比 3 号大，「标识 > 3」既不是监管口径，也没人说得清它筛掉了
+# 什么。它不会报错，这正是要挡在写入侧的原因：它只会在库里静静地永远不命中。
 COMPARISON_OPERATORS: tuple[str, ...] = (GT, GTE, LT, LTE, EQ, NE, BETWEEN, OUTSIDE)
 
 # 不做加法的聚合：数笔数、去重数、比大小。它们要么整笔不用取值，要么只用大小关系。
@@ -157,9 +154,11 @@ MONEY_FIELD_OPERATORS: tuple[str, ...] = (
 # 加起来得到的数没有含义，那种规则配出来只会是永远不命中，或者口径没人说得清。
 NON_ADDITIVE_OPERATORS: tuple[str, ...] = COMPARISON_OPERATORS + NON_SUM_AGGREGATE_OPERATORS
 
-# 金额的值域：正的金额，上界不设——金额本身没有物理上限，不同规则的阈值可以落在任何
-# 正的金额上。下界开区间：阈值 0 的金额规则（「金额 > 0」）等于不筛，不是一条规则。
-POSITIVE_AMOUNT_RANGE: ValueRange = ValueRange(lower=Decimal("0"), lower_inclusive=False)
+# 取值为正的字段共用的值域：下界 0 落在**开**区间上，上界不设。阈值 0 意味着「金额 /
+# 比例 / 间隔 > 0」这种等于不筛的条件，不是一条规则；上界则本来就没有物理意义——一笔
+# 交易的金额可以远超客户的总资产，反向交易的间隔可以很长。金额、占总资产比例与反向
+# 交易间隔三类字段都取这份。
+POSITIVE_VALUE_RANGE: ValueRange = ValueRange(lower=Decimal("0"), lower_inclusive=False)
 
 
 def _amount(_context: MonitoringContext, event: TransactionEvent) -> FieldValue:
@@ -283,7 +282,7 @@ FIELD_REGISTRY: dict[str, FieldSpec] = {
             description="本笔交易的成交金额",
             extract=_amount,
             allowed_operators=MONEY_FIELD_OPERATORS,
-            value_range=POSITIVE_AMOUNT_RANGE,
+            value_range=POSITIVE_VALUE_RANGE,
         ),
         FieldSpec(
             key=FIELD_PURCHASE_AMOUNT,
@@ -291,7 +290,7 @@ FIELD_REGISTRY: dict[str, FieldSpec] = {
             description="本笔为申购时的金额；其他交易类型不适用",
             extract=_typed_amount(PURCHASE),
             allowed_operators=MONEY_FIELD_OPERATORS,
-            value_range=POSITIVE_AMOUNT_RANGE,
+            value_range=POSITIVE_VALUE_RANGE,
         ),
         FieldSpec(
             key=FIELD_REDEEM_AMOUNT,
@@ -299,7 +298,7 @@ FIELD_REGISTRY: dict[str, FieldSpec] = {
             description="本笔为赎回时的金额；其他交易类型不适用",
             extract=_typed_amount(REDEEM),
             allowed_operators=MONEY_FIELD_OPERATORS,
-            value_range=POSITIVE_AMOUNT_RANGE,
+            value_range=POSITIVE_VALUE_RANGE,
         ),
         FieldSpec(
             key=FIELD_HOUR_OF_DAY,
@@ -316,8 +315,8 @@ FIELD_REGISTRY: dict[str, FieldSpec] = {
             description="金额占客户画像总资产的百分比；无画像时不适用",
             extract=_amount_to_assets_ratio,
             allowed_operators=NON_ADDITIVE_OPERATORS,
-            # 比例是正的；上界不设——一笔交易的金额可以远超客户的总资产。
-            value_range=ValueRange(lower=Decimal("0"), lower_inclusive=False),
+            # 比例取正值；上界不设——一笔交易的金额可以远超客户的总资产。
+            value_range=POSITIVE_VALUE_RANGE,
         ),
         FieldSpec(
             key=FIELD_RISK_LEVEL_GAP,
@@ -334,8 +333,8 @@ FIELD_REGISTRY: dict[str, FieldSpec] = {
             description="与同一产品上最近一次反向交易的间隔小时数；无反向交易时不适用",
             extract=_reverse_interval_hours,
             allowed_operators=NON_ADDITIVE_OPERATORS,
-            # 间隔是正的；「间隔 < 0 小时」这种规则永远不会命中。
-            value_range=ValueRange(lower=Decimal("0"), lower_inclusive=False),
+            # 间隔取正值：「间隔 < 0 小时」这种规则永远不会命中。
+            value_range=POSITIVE_VALUE_RANGE,
         ),
         FieldSpec(
             key=FIELD_THRESHOLD_AVOIDANCE_AMOUNT,
@@ -343,7 +342,7 @@ FIELD_REGISTRY: dict[str, FieldSpec] = {
             description="金额落在申报阈值九成至阈值之间时的金额，用于识别拆分",
             extract=_threshold_avoidance_amount,
             allowed_operators=MONEY_FIELD_OPERATORS,
-            value_range=POSITIVE_AMOUNT_RANGE,
+            value_range=POSITIVE_VALUE_RANGE,
         ),
         FieldSpec(
             key=FIELD_SMALL_AMOUNT,
@@ -351,7 +350,7 @@ FIELD_REGISTRY: dict[str, FieldSpec] = {
             description="金额低于小额上限时的金额，用于识别化整为零",
             extract=_small_amount,
             allowed_operators=MONEY_FIELD_OPERATORS,
-            value_range=POSITIVE_AMOUNT_RANGE,
+            value_range=POSITIVE_VALUE_RANGE,
         ),
         FieldSpec(
             key=FIELD_LARGE_ROUND_AMOUNT,
@@ -359,16 +358,17 @@ FIELD_REGISTRY: dict[str, FieldSpec] = {
             description="金额不低于整数化下限且为万元整数倍时的金额",
             extract=_large_round_amount,
             allowed_operators=MONEY_FIELD_OPERATORS,
-            value_range=POSITIVE_AMOUNT_RANGE,
+            value_range=POSITIVE_VALUE_RANGE,
         ),
         FieldSpec(
             key=FIELD_PRODUCT_ID,
             label="产品标识",
             description="交易对应的产品标识",
             extract=_product_id,
-            # 取值是产品标识而不是数：凡是要拿它比数值的算子（比较类与求和/最大值）都会
-            # 在求值时抛错，去重计数是唯一用得上这个取值的算子。计数类的语义与字段无关
-            # ——那等于在数交易笔数，该写在 `amount` 上。
+            # 取值是产品标识（代理键）而不是量：拿它比大小或求和的语义不成立——产品 5 号
+            # 不比 3 号大，「标识合计」更没人说得清是什么。去重计数是唯一用得上这个取值的
+            # 算子（窗内涉及几种产品，是拆分规避的真实口径）；计数类的语义与字段无关，
+            # 那等于在数交易笔数，该写在 `amount` 上。
             allowed_operators=(WINDOW_DISTINCT_COUNT_GTE,),
             # 产品标识本身没有数值值域；它那一个算子的阈值是去重后的产品数，不是字段取值。
         ),

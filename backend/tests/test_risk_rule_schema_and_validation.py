@@ -1,10 +1,10 @@
 """字段 × 算子允许矩阵、阈值值域，以及把两者下发给前端的 `GET /schema`。
 
 规则可以创建之后，`fin_risk_rule` 的每一列都有 CHECK 守着，两列的**搭配**却没有：`field =
-product_id`（取值是产品标识）配 `operator = gt`（阈值被归一化成 `Decimal`）两列各自合法，
-它直到下一笔交易到达才在比较时抛 `TypeError`；而阈值落在物理值域之外的规则更安静——它
-永远不会命中，没有任何提示。三档校验（名录 → 搭配 → 值域）挡的就是这两种规则（ADR-0026），
-这份文件断言它真的挡得住，且**挡在写入之前**。
+product_id` 配 `operator = gt` 两列各自合法，库里收下，而它是一条没有任何含义的规则——
+拿产品标识比数值，既不是监管口径，也永远筛不出该筛的东西；阈值落在物理值域之外的规则
+同样安静——它永远不会命中。两种都不会报错，只会在库里躺着。三档校验（名录 → 搭配 →
+值域）挡的就是这两种规则（ADR-0026），这份文件断言它真的挡得住，且**挡在写入之前**。
 
 schema 端点与校验必须读同一份注册表：前端禁掉的选项与后端拒掉的组合一旦漂移，表现是
 「下拉里能选、一提交被拒」——不会有断言失败，只会有人反复试。所以下面的断言是双向的：
@@ -162,11 +162,13 @@ def test_every_field_declares_operators_that_exist():
         assert set(spec.allowed_operators) <= set(OPERATOR_KEYS), key
 
 
-def test_a_field_whose_value_is_not_a_number_only_combines_with_distinct_count():
-    """`product_id` 的取值是产品标识，拿它比数值会在求值时抛 TypeError。
+def test_a_field_whose_value_is_an_identifier_only_combines_with_distinct_count():
+    """`product_id` 的取值是产品标识（代理键），不是一个可以比大小或求和的量。
 
-    它只留下去重计数——那是唯一用得上这个取值的算子。计数类的语义与字段无关（等于在数
-    交易笔数），要数笔数该写在 `amount` 上。
+    拿它比数值不会抛错——它是个整数，`to_comparable` 会把它转成 `Decimal` 正常比完——但
+    比出来的东西没有任何含义：「产品 5 号比 3 号大」既不是监管口径，也筛不出该筛的东西。
+    因此这里只留下去重计数（窗内涉及几种产品，是拆分规避的真实口径）；计数类的语义与
+    字段无关，那等于在数交易笔数，该写在 `amount` 上。
     """
     assert FIELD_REGISTRY["product_id"].allowed_operators == (WINDOW_DISTINCT_COUNT_GTE,)
 

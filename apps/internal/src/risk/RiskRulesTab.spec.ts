@@ -4,8 +4,9 @@
 // 会让人以为规则变少了），以及总数说的是全部规则而不是本页条数。
 //
 // 编辑器那几条盯的是「前端禁掉的选项与后端拒掉的组合不会漂移」的前端一侧：算子的可选项
-// 随字段收敛、阈值输入随算子变形、窗长只对时间窗算子出现、判定形状在编辑态只读。选项全部
-// 来自 `GET /schema`，所以夹具就是那份载荷的形状。
+// 随字段收敛、阈值输入随算子变形、窗长只对时间窗算子出现、判定形状在编辑态只读（阈值
+// 可在编辑对话框里改，保存时阈值有变化就单独走调阈值接口）。选项全部来自 `GET /schema`，
+// 所以夹具就是那份载荷的形状。
 //
 // 「理由」走 `ElMessageBox.prompt`：真实浮层在 jsdom 里只有时序、没有行为，这里换成替身，
 // 钉住的是我们交出去的那份契约（`inputValidator` 拒绝空理由、取消不写数据）。
@@ -342,6 +343,7 @@ describe("规则编辑器", () => {
   beforeEach(() => {
     listRiskRules.mockReset();
     setRiskRuleEnabled.mockReset();
+    setRiskRuleThreshold.mockReset();
     createRiskRule.mockReset();
     updateRiskRule.mockReset();
     successSpy.mockClear();
@@ -394,7 +396,7 @@ describe("规则编辑器", () => {
     expect(wrapper.find('[data-testid="editor-window"]').exists()).toBe(true);
   });
 
-  it("编辑态的判定形状与阈值四项控件只读，基本信息仍可改", async () => {
+  it("编辑态的判定形状只读、阈值可改，基本信息仍可改", async () => {
     listRiskRules.mockResolvedValue(
       makePage([makeRule({ operator: "window_count_gte", operator_label: "时间窗内计数", window_hours: 24 })], 1),
     );
@@ -403,14 +405,14 @@ describe("规则编辑器", () => {
     await rowControl(wrapper, 0, "edit-rule").trigger("click");
     await flushPromises();
 
-    // 编号只读，判定形状（字段 / 算子 / 窗长）与阈值四项只读：改形状等于换一条规则。
+    // 编号与判定形状（字段 / 算子 / 窗长）只读：改形状等于换一条规则；阈值可直接改。
     expect(isDisabled(wrapper.get('[data-testid="editor-code"]'))).toBe(true);
     expect(isDisabled(wrapper.get('[data-testid="editor-field"]'))).toBe(true);
     expect(isDisabled(wrapper.get('[data-testid="editor-operator"]'))).toBe(true);
     expect(isDisabled(wrapper.get('[data-testid="editor-window"]'))).toBe(true);
-    expect(isDisabled(wrapper.get('[data-testid="editor-threshold-value"]'))).toBe(true);
+    expect(isDisabled(wrapper.get('[data-testid="editor-threshold-value"]'))).toBe(false);
     expect(wrapper.get('[data-testid="shape-note"]').text()).toContain(
-      "要改判定形状请删除后重建，要改阈值请用「调整阈值」",
+      "要改判定形状请删除后重建，阈值可在上方直接调整",
     );
 
     // 可改的那几项要留着：编辑器只锁判定形状，不锁名称、规则分类、描述、预警等级与规则权重。
@@ -501,6 +503,44 @@ describe("规则编辑器", () => {
       weight: 1,
       reason: "口径表述跟不上业务了",
     });
+    // 阈值没动就不多发一次调阈值请求。
+    expect(setRiskRuleThreshold).not.toHaveBeenCalled();
+  });
+
+  it("编辑对话框里改阈值，保存时带着同一条理由单独走调阈值接口", async () => {
+    setRiskRuleThreshold.mockResolvedValue(
+      makeRule({ threshold: { value: "80000" }, threshold_text: "80000" }),
+    );
+    const wrapper = await mountTab();
+
+    await rowControl(wrapper, 0, "edit-rule").trigger("click");
+    await flushPromises();
+    await typeInto(wrapper, "editor-threshold-value", "80000");
+    await typeInto(wrapper, "editor-reason", "监管口径调整");
+
+    await wrapper.get('[data-testid="save-rule"]').trigger("click");
+    await flushPromises();
+
+    // 只动了阈值就不发 update：后端 update 即使内容没变也会留一条变更记录。
+    expect(updateRiskRule).not.toHaveBeenCalled();
+    expect(setRiskRuleThreshold).toHaveBeenCalledWith(1, { value: "80000" }, "监管口径调整");
+    // 行上换成了调阈值接口返回的那份规则（带新阈值）。
+    expect(wrapper.get('[data-testid="rules-table"]').text()).toContain("80000");
+  });
+
+  it("什么都没改就保存，不发任何请求并就地说明", async () => {
+    const wrapper = await mountTab();
+
+    await rowControl(wrapper, 0, "edit-rule").trigger("click");
+    await flushPromises();
+    await typeInto(wrapper, "editor-reason", "手滑点了保存");
+
+    await wrapper.get('[data-testid="save-rule"]').trigger("click");
+    await flushPromises();
+
+    expect(wrapper.get('[data-testid="editor-error"]').text()).toBe("没有要修改的内容");
+    expect(updateRiskRule).not.toHaveBeenCalled();
+    expect(setRiskRuleThreshold).not.toHaveBeenCalled();
   });
 });
 
@@ -597,7 +637,7 @@ describe("理由与已删除", () => {
     expect(bodyRows(wrapper)[1]!.classes()).toContain("rules__row--deleted");
     expect(bodyRows(wrapper)[1]!.text()).toContain("已删除");
     expect(rowHas(wrapper, 1, "edit-rule")).toBe(false);
-    expect(rowHas(wrapper, 1, "edit-threshold")).toBe(false);
+    expect(rowHas(wrapper, 1, "delete-rule")).toBe(false);
     expect(rowHas(wrapper, 1, "rule-enabled")).toBe(false);
     expect(rowHas(wrapper, 1, "view-changes")).toBe(true);
     // 上面那一行（没删的）照旧。
@@ -657,7 +697,7 @@ describe("非风控专员", () => {
     expect(wrapper.get('[data-testid="create-rule"]').attributes("disabled")).toBeDefined();
     expect(rowHas(wrapper, 0, "edit-rule")).toBe(false);
     expect(rowHas(wrapper, 0, "delete-rule")).toBe(false);
-    expect(rowHas(wrapper, 0, "edit-threshold")).toBe(false);
+    expect(rowHas(wrapper, 0, "view-changes")).toBe(true);
     expect(isDisabled(rowControl(wrapper, 0, "rule-enabled"))).toBe(true);
     // 只读提示沿用既有的那句话。
     expect(wrapper.get('[data-testid="rule-read-only"]').text()).toBe(

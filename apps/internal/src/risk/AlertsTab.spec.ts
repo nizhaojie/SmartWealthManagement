@@ -5,7 +5,8 @@
 //   1. 排序方式真的发给服务端了（不是排完本页就当排过了）；
 //   2. 翻页时筛选与排序原样带走——少了它们，第 2 页会变成「全部预警的第 2 页」，
 //      与页面上还留着的筛选条件对不上，而看起来完全正常；
-//   3. 改筛选或改排序都回到第一页：停在第 3 页看到的空表不是新条件的结果。
+//   3. 点「查询」才应用筛选并回到第一页：选到一半的条件不改写列表，停在第 3 页看到的
+//      空表不是新条件的结果。
 import ElementPlus from "element-plus";
 import { flushPromises, mount, type VueWrapper } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -98,6 +99,12 @@ async function turnPage(): Promise<void> {
   await flushPromises();
 }
 
+/** 点「查询」提交筛选表单：草稿里的条件只有这一刻才会被应用。 */
+async function clickApply(): Promise<void> {
+  await activeWrapper!.get('[data-testid="alert-filters"]').trigger("submit");
+  await flushPromises();
+}
+
 function lastCall(): [AlertFilters, PageQuery] {
   return listAlerts.mock.calls.at(-1) as [AlertFilters, PageQuery];
 }
@@ -158,6 +165,11 @@ describe("AlertsTab 的分页", () => {
     await mountTab();
 
     await chooseOption("等级", "重度");
+    // 选到一半的条件不动列表：要点「查询」才应用。
+    expect(lastCall()[0].alertLevel).toBeUndefined();
+
+    await clickApply();
+
     expect(lastCall()[0].alertLevel).toBe("重度");
     expect(lastCall()[1].page).toBe(1);
 
@@ -179,6 +191,10 @@ describe("AlertsTab 的分页", () => {
     expect(lastCall()[1].page).toBe(2);
 
     await chooseOption("排序", "按等级（重到轻）");
+    // 排序同样是「点查询才生效」。
+    expect(lastCall()[0].orderBy).toBe("created_desc");
+
+    await clickApply();
 
     expect(lastCall()[0].orderBy).toBe("level_desc");
     expect(lastCall()[1].page).toBe(1);

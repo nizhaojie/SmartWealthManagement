@@ -1,5 +1,6 @@
 <script setup lang="ts">
 // 规则管理：查看、新建、编辑、删除、启停与调阈值都只放开给风控专员，其他角色看到的是只读表格。
+// 调阈值没有独立入口——点「编辑」即可调整，保存时阈值变化单独走调阈值接口留痕。
 //
 // 列表分页由 `usePagination` 接管（ADR-0024）。规则按编号升序，是唯一一个排序键
 // 本来就稳定（编号唯一）的列表，所以这里没有排序控件。
@@ -47,11 +48,6 @@ const includeDeleted = ref(false);
 const schema = ref<RiskRuleSchema | null>(null);
 const schemaError = ref("");
 
-const editing = ref<RiskRule | null>(null);
-const thresholdOpen = ref(false);
-const thresholdDraft = ref<Record<string, string>>({});
-const thresholdReason = ref("");
-const thresholdError = ref("");
 const saving = ref(false);
 
 // 写操作的失败原因自己留一份，不复用列表的 `errorMessage`：`refresh()` 每次取数都会
@@ -143,34 +139,6 @@ async function toggleRule(rule: RiskRule): Promise<boolean> {
   }
 }
 
-function openThreshold(rule: RiskRule): void {
-  editing.value = rule;
-  thresholdDraft.value = { ...rule.threshold };
-  thresholdReason.value = "";
-  thresholdError.value = "";
-  thresholdOpen.value = true;
-}
-
-async function submitThreshold(): Promise<void> {
-  const rule = editing.value;
-  if (!rule) return;
-  if (!thresholdReason.value.trim()) {
-    thresholdError.value = "调整理由不能为空";
-    return;
-  }
-  saving.value = true;
-  thresholdError.value = "";
-  try {
-    replaceRule(await setRiskRuleThreshold(rule.id, { ...thresholdDraft.value }, thresholdReason.value.trim()));
-    thresholdOpen.value = false;
-    ElMessage.success("阈值已更新");
-  } catch (error) {
-    thresholdError.value = errorMessage(error, "阈值更新失败");
-  } finally {
-    saving.value = false;
-  }
-}
-
 async function removeRule(rule: RiskRule): Promise<void> {
   const reason = await askReason(
     `删除规则 ${rule.rule_code}`,
@@ -241,7 +209,8 @@ const draft = reactive({
 });
 
 // 判定形状在编辑态只读：改它等于换一条规则，历史预警与留痕都会顶着旧编号解释旧口径
-// （ADR-0026）。阈值也在这四个控件里——它有单独的入口，理由也单独留痕。
+// （ADR-0026）。阈值也在这四个控件里——编辑保存时一并提交：阈值有变化就单独走调阈值
+// 接口，让阈值调整的留痕口径不变。
 const isCreating = computed(() => editorMode.value === "create");
 const shapeReadOnly = computed(() => !isCreating.value);
 const editorTitle = computed(() =>
@@ -252,6 +221,28 @@ const draftThresholdKeys = computed(() => thresholdKeys(schema.value, draft.oper
 const showWindowHours = computed(() => usesWindowHours(schema.value, draft.operator));
 const fieldHint = computed(() => fieldSpec(schema.value, draft.field)?.description ?? "");
 const rangeHint = computed(() => valueRangeHint(schema.value, draft.field));
+
+/** 编辑态里阈值这四个格子相对这条规则现值有没有动过：没动就不发调阈值请求。 */
+const thresholdChanged = computed(() => {
+  const rule = editorRule.value;
+  if (!rule) return false;
+  const payload = thresholdPayload(schema.value, draft.operator, draft.threshold);
+  const keys = new Set([...Object.keys(payload), ...Object.keys(rule.threshold)]);
+  return [...keys].some((key) => (payload[key] ?? "").trim() !== String(rule.threshold[key] ?? "").trim());
+});
+
+/** 基本信息五项相对这条规则现值有没有动过：没动就不发 update。 */
+const basicInfoChanged = computed(() => {
+  const rule = editorRule.value;
+  if (!rule) return false;
+  return (
+    draft.rule_name.trim() !== rule.rule_name ||
+    draft.category !== rule.category ||
+    draft.description.trim() !== rule.description ||
+    draft.alert_level !== rule.alert_level ||
+    (draft.weight ?? null) !== rule.weight
+  );
+});
 
 // 换字段之后原来的算子可能不再被允许（比如从「交易金额」换到「产品标识」，`gte` 就不在
 // 允许清单里了）。放着一个允许清单外的算子不提，只会在提交时被后端顶回来。
@@ -343,15 +334,34 @@ async function submitEditor(): Promise<void> {
     } else {
       const rule = editorRule.value;
       if (!rule) return;
-      replaceRule(
-        await updateRiskRule(rule.id, {
+      // 一次「编辑」按需提交：基本信息有变化才走 update，阈值有变化再单独走调阈值
+      // 接口（阈值调整的留痕口径不变，共用编辑框里这条理由）。后端两个入口都会留痕，
+      // 没变化也发就会留下一条前后快照一模一样的变更记录；两边都没动就明说，不发请求。
+      if (!basicInfoChanged.value && !thresholdChanged.value) {
+        editorError.value = "没有要修改的内容";
+        return;
+      }
+      let current = rule;
+      if (basicInfoChanged.value) {
+        current = await updateRiskRule(rule.id, {
           rule_name: draft.rule_name.trim(),
           category: draft.category,
           description: draft.description.trim(),
           alert_level: draft.alert_level as AlertLevel,
           weight: draft.weight,
           reason,
-        }),
+        });
+        // 同步到 editorRule：接下来阈值那步失败时，重试只会重发失败的那半步。
+        editorRule.value = current;
+      }
+      replaceRule(
+        thresholdChanged.value
+          ? await setRiskRuleThreshold(
+              rule.id,
+              thresholdPayload(schema.value, draft.operator, draft.threshold),
+              reason,
+            )
+          : current,
       );
       editorOpen.value = false;
       ElMessage.success("规则已更新");
@@ -442,22 +452,24 @@ useTabSummary(
             <span v-else class="rules__hint">—</span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" min-width="310">
+        <!--
+          操作列的 min-width 按角色取下限：专员是三个链接按钮（查看变更记录 / 编辑 / 删除）
+          一行放得下（约 190px），非专员只剩「查看变更记录」一个（约 120px）。
+          旧版固定 310px 是按四个默认按钮给的——非专员那一列右侧空出一大截，而各列
+          min-width 合计（970px）又顶出容器，平白多出一条横向滚动条。
+        -->
+        <el-table-column label="操作" :min-width="canManage ? 190 : 120">
           <template #default="{ row }">
-            <el-button size="small" data-testid="view-changes" @click="openChanges(row)">
+            <el-button link type="primary" size="small" data-testid="view-changes" @click="openChanges(row)">
               查看变更记录
             </el-button>
             <template v-if="canManage && !isDeleted(row)">
-              <el-button size="small" data-testid="edit-rule" @click="openEditor(row)">编辑</el-button>
-              <el-button
-                size="small"
-                name="edit-threshold"
-                data-testid="edit-threshold"
-                @click="openThreshold(row)"
-              >
-                调整阈值
+              <el-button link type="primary" size="small" data-testid="edit-rule" @click="openEditor(row)">
+                编辑
               </el-button>
-              <el-button size="small" data-testid="delete-rule" @click="removeRule(row)">删除</el-button>
+              <el-button link type="danger" size="small" data-testid="delete-rule" @click="removeRule(row)">
+                删除
+              </el-button>
             </template>
           </template>
         </el-table-column>
@@ -546,6 +558,7 @@ useTabSummary(
         <div class="editor__field">
           <span class="editor__label">阈值（必填）</span>
           <!-- 输入框的数量与键名随算子的 `threshold_keys` 走：`gte` 一个、`between` 两个。 -->
+        <!-- 判定形状（字段 / 算子 / 时间窗）在编辑态只读，阈值在两种模式下都可改。 -->
           <div class="editor__threshold">
             <label v-for="key in draftThresholdKeys" :key="key" class="editor__threshold-item">
               <span class="editor__hint">{{ thresholdKeyLabel(key) }}</span>
@@ -553,7 +566,6 @@ useTabSummary(
                 v-model="draft.threshold[key]"
                 :name="`rule-threshold-${key}`"
                 :data-testid="`editor-threshold-${key}`"
-                :disabled="shapeReadOnly"
               />
             </label>
           </div>
@@ -592,7 +604,7 @@ useTabSummary(
         </label>
 
         <p v-if="shapeReadOnly" class="editor__hint" data-testid="shape-note">
-          要改判定形状请删除后重建，要改阈值请用「调整阈值」。
+          要改判定形状请删除后重建，阈值可在上方直接调整（保存时生效并单独留痕）。
         </p>
 
         <label class="editor__field">
@@ -616,44 +628,6 @@ useTabSummary(
       <template #footer>
         <el-button @click="editorOpen = false">取消</el-button>
         <el-button type="primary" data-testid="save-rule" :loading="saving" @click="submitEditor">
-          保存
-        </el-button>
-      </template>
-    </el-dialog>
-
-    <el-dialog
-      v-model="thresholdOpen"
-      :title="editing ? `调整阈值：${editing.rule_name}` : '调整阈值'"
-      width="440px"
-    >
-      <label v-for="(_, key) in thresholdDraft" :key="key" class="threshold__field">
-        <span class="threshold__label">{{ key }}</span>
-        <el-input v-model="thresholdDraft[key]" :name="`threshold-${key}`" data-testid="threshold-input" />
-      </label>
-
-      <label class="threshold__field">
-        <span class="threshold__label">调整理由（必填）</span>
-        <el-input
-          v-model="thresholdReason"
-          name="threshold-reason"
-          type="textarea"
-          :rows="3"
-          data-testid="threshold-reason"
-        />
-      </label>
-
-      <p v-if="thresholdError" class="rules__error" role="alert" data-testid="threshold-error">
-        {{ thresholdError }}
-      </p>
-
-      <template #footer>
-        <el-button @click="thresholdOpen = false">取消</el-button>
-        <el-button
-          type="primary"
-          data-testid="save-threshold"
-          :loading="saving"
-          @click="submitThreshold"
-        >
           保存
         </el-button>
       </template>
@@ -765,17 +739,5 @@ useTabSummary(
   flex: 1;
   flex-direction: column;
   gap: var(--wm-space-1);
-}
-
-.threshold__field {
-  display: flex;
-  flex-direction: column;
-  gap: var(--wm-space-1);
-  margin-bottom: var(--wm-space-3);
-}
-
-.threshold__label {
-  color: var(--wm-text-muted);
-  font-size: 0.8rem;
 }
 </style>

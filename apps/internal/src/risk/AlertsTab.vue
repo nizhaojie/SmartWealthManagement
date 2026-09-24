@@ -4,7 +4,7 @@
 // 排序原来是在这里对本页数据做的（`sortAlerts`）。分页之后前端手里只有当前页，
 // 本地排序会让「按等级（重到轻）」只在这一页内成立、翻页即乱——所以排序方式改成
 // 一个查询参数，由服务端连同筛选一起算出这一页该是哪几条。
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import { PaginationBar, PanelCard, usePagination } from "@wealth/shared";
 import { formatDateTime } from "../format";
@@ -31,10 +31,26 @@ const emit = defineEmits<{ summary: [value: TabSummary] }>();
 
 const router = useRouter();
 
+// 筛选与排序分两份：控件绑的是「草稿」，取数读的是「已应用」。草稿只在本组件里可见，
+// 这样选到一半的条件不会立刻改写列表——点「查询」才把草稿抄到已应用那边并回第一页。
+const levelDraft = ref<AlertLevel | "">("");
+const statusDraft = ref<AlertStatus | "">("");
+const dateRangeDraft = ref<[string, string] | null>(null);
+const sortDraft = ref<AlertOrder>("created_desc");
+
 const levelFilter = ref<AlertLevel | "">("");
 const statusFilter = ref<AlertStatus | "">("");
 const dateRange = ref<[string, string] | null>(null);
 const sortBy = ref<AlertOrder>("created_desc");
+
+function applyFilters(): void {
+  levelFilter.value = levelDraft.value;
+  statusFilter.value = statusDraft.value;
+  dateRange.value = dateRangeDraft.value;
+  sortBy.value = sortDraft.value;
+  // 已应用的值只有这一条路会变，翻页重置也只在这里做：草稿改动本身不触发取数。
+  void reset();
+}
 
 const rangeLabel = computed(() =>
   dateRange.value ? `${dateRange.value[0]} ~ ${dateRange.value[1]}` : "不限",
@@ -74,8 +90,7 @@ function openAlert(alertId: number): void {
 }
 
 // 改筛选或改排序都是「换了一批数据」，回到第一页；停在第 3 页会看到空表，而那不是
-// 新条件的结果，是页码的。
-watch([levelFilter, statusFilter, dateRange, sortBy], reset);
+// 新条件的结果，是页码的。重置只发生在 applyFilters 里（草稿改动不取数）。
 onMounted(() => {
   void reset();
 });
@@ -93,10 +108,10 @@ useTabSummary(
 <template>
   <div class="alerts">
     <PanelCard title="筛选">
-      <form class="filters" data-testid="alert-filters" @submit.prevent="reset">
+      <form class="filters" data-testid="alert-filters" @submit.prevent="applyFilters">
         <label class="filters__field">
           <span class="filters__label">等级</span>
-          <el-select v-model="levelFilter" name="alert-level" placeholder="全部" placement="top-start">
+          <el-select v-model="levelDraft" name="alert-level" placeholder="全部" placement="top-start">
             <el-option label="全部" value="" />
             <el-option v-for="level in ALERT_LEVELS" :key="level" :label="level" :value="level" />
           </el-select>
@@ -104,7 +119,7 @@ useTabSummary(
 
         <label class="filters__field">
           <span class="filters__label">状态</span>
-          <el-select v-model="statusFilter" name="alert-status" placeholder="全部" placement="top-start">
+          <el-select v-model="statusDraft" name="alert-status" placeholder="全部" placement="top-start">
             <el-option label="全部" value="" />
             <el-option v-for="status in ALERT_STATUSES" :key="status" :label="status" :value="status" />
           </el-select>
@@ -113,7 +128,7 @@ useTabSummary(
         <label class="filters__field filters__field--wide">
           <span class="filters__label">产生时间</span>
           <el-date-picker
-            v-model="dateRange"
+            v-model="dateRangeDraft"
             type="daterange"
             value-format="YYYY-MM-DD"
             start-placeholder="开始日期"
@@ -123,7 +138,7 @@ useTabSummary(
 
         <label class="filters__field">
           <span class="filters__label">排序</span>
-          <el-select v-model="sortBy" name="alert-sort" placement="top-start">
+          <el-select v-model="sortDraft" name="alert-sort" placement="top-start">
             <el-option
               v-for="option in ALERT_SORT_OPTIONS"
               :key="option.value"

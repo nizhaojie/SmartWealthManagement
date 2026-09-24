@@ -51,14 +51,13 @@ watch(revealed, (value) => {
       </span>
     </p>
 
-    <!-- 被拒绝的查询看到的是一句说清原因的警示，不是一张空表格。 -->
+    <!-- 被拒绝的查询看到的是一句说清原因的警示，不是一张空表格。
+         这一块不用 el-alert：受合规约束的呈现面只吃样式、不吃语义——结构与 role="alert"
+         由我们自己持有（ADR-0009），Element Plus 只提供主题令牌。 -->
     <template v-else-if="message.status === 'failed'">
-      <el-alert
-        type="error"
-        :closable="false"
-        :title="notice?.headline"
-        data-testid="failure-reason"
-      />
+      <p class="answer__failure" role="alert" data-testid="failure-reason">
+        {{ notice?.headline }}
+      </p>
       <p v-if="notice?.detail" class="answer__detail" data-testid="failure-detail">
         后端原文：{{ notice.detail }}
       </p>
@@ -109,6 +108,17 @@ watch(revealed, (value) => {
   height: var(--wm-space-1);
   border-radius: var(--wm-radius-pill);
   background-color: var(--wm-text-muted);
+}
+
+/* 警示块：文案由业务码决定，底色与文字色都来自令牌 */
+.answer__failure {
+  margin: 0;
+  padding: var(--wm-space-3) var(--wm-space-4);
+  border-radius: var(--wm-radius-md);
+  background-color: var(--wm-bg-subtle);
+  color: var(--wm-color-danger);
+  font-size: 0.9rem;
+  line-height: 1.8;
 }
 
 /* 后端原文是诊断线索，不是第二句错误：压小、压低，不与上面的文案争注意力 */

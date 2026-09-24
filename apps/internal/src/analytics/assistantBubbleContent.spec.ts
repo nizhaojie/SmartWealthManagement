@@ -138,6 +138,14 @@ describe("五种业务码各自的文案", () => {
     );
   });
 
+  it("警示块自己持有结构与 role，不吃 Element Plus 的语义", () => {
+    const app = mountBubble(failed({ code: 1103, message: "查询未通过安全校验" }));
+
+    // 受合规约束的呈现面只吃样式、不吃语义（ADR-0009）：不拿 el-alert 顶替这段 ARIA。
+    expect(app.get("[data-testid='failure-reason']").attributes("role")).toBe("alert");
+    expect(app.find(".el-alert").exists()).toBe(false);
+  });
+
   it("认不出的码不编文案：后端那句话原样呈现", () => {
     const app = mountBubble(failed({ code: null, message: "对话连接已中断" }));
 

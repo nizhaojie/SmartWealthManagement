@@ -6,12 +6,13 @@ import { createTypewriter } from "./typewriter";
 // 前端这一处压；调观感只改这个数。与客服同一档（`ChatPage.vue` 的 30）。
 const TYPEWRITER_INTERVAL_MS = 30;
 
-// 伪流式只作用于解读这一段：整包到达后逐字上屏，表格与 SQL 等它播完再出现（见 04）。
+// 伪流式只作用于解读这一段：整包到达后逐字上屏，表格与 SQL 等它播完再出现——
+// 「播完」由 `done` 报出去，外框据此放出结果面。
 //
 // `typing` 说的是「这一轮是刚到的」：只有刚到的轮次才逐字播。读回的历史轮次
 // （刷新、切模块回来）是全文直出——20 轮一起重新逐字播放不是「逐字感」，是把页面拖住。
 const props = defineProps<{ text: string; typing?: boolean }>();
-const emit = defineEmits<{ grow: [] }>();
+const emit = defineEmits<{ grow: []; done: [] }>();
 
 const shown = ref("");
 const typewriter = createTypewriter(TYPEWRITER_INTERVAL_MS, (char) => {
@@ -31,6 +32,8 @@ watch(
     }
     shown.value = "";
     typewriter.push(text);
+    // 定案排在缓冲后面：报的是「解读已经上屏完毕」，不是「整包到了」。
+    typewriter.end(() => emit("done"));
   },
   { immediate: true },
 );

@@ -1,26 +1,33 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import { ElMessageBox } from "element-plus";
-import { ApiError, PageHeader, PanelCard, usePagination } from "@wealth/shared";
+import { ApiError, PageHeader, usePagination } from "@wealth/shared";
 import { errorMessage } from "../format";
 import { useInspector } from "../shell/pageSlots";
 import AnalyticsHistoryDetail from "./AnalyticsHistoryDetail.vue";
 import AnalyticsHistoryPanel from "./AnalyticsHistoryPanel.vue";
-import AnalyticsResultView from "./AnalyticsResultView.vue";
+import ConversationThread from "./ConversationThread.vue";
+import EmptyConversation from "./EmptyConversation.vue";
+import MessageComposer from "./MessageComposer.vue";
 import { listAnalyticsExamples, listAnalyticsHistory, runAnalyticsQuery } from "./api";
 import { useAnalyticsThreadStore } from "./threadStore";
-import type { AnalyticsExampleItem, AnalyticsHistoryItem, AnalyticsQueryResponse } from "./types";
+import type { AnalyticsExampleItem, AnalyticsHistoryItem } from "./types";
 
-const question = ref("");
-const asking = ref(false);
-const result = ref<AnalyticsQueryResponse | null>(null);
-const failureReason = ref("");
-
+// 主区是一条**对话线程**（表单已消失）：提问与回答在 store 里累积，主区只负责呈现。
+// 上一轮因此留在页面上，「追问」才在界面上成立——`session_id` 把它接到后端的短期记忆上。
+const draft = ref("");
 const examples = ref<AnalyticsExampleItem[]>([]);
 const selectedHistoryId = ref<number | null>(null);
 
-// 一轮问答不再是「一个被覆盖的结果」，而是一条可累积、活过刷新的线程（见 threadStore）。
 const thread = useAnalyticsThreadStore();
+
+/**
+ * 在途 = 线程里还立着一颗没收尾的助手位。加载态从线程本身读，不另立一份会漂移的状态：
+ * 「正在查询数据…」由那个助手位渲染，这里只管禁用提交。
+ */
+const asking = computed(() =>
+  thread.messages.some((message) => message.role === "assistant" && message.status === "pending"),
+);
 
 // 历史查询是留痕表里的一页（ADR-0024）：只增的列表，靠 page/page_size 逐页取。
 // 取数仍由这个页面做——栏只接收 props、上抛选中项与翻页，见下面的 useInspector。
@@ -47,43 +54,39 @@ async function loadExamples(): Promise<void> {
   try {
     examples.value = await listAnalyticsExamples();
   } catch {
+    // 示例问题取不到不是故障：空态少几个可点的例子，问题照样问得出来。
     examples.value = [];
   }
 }
 
-async function ask(): Promise<void> {
-  failureReason.value = "";
-  if (!question.value.trim()) {
-    failureReason.value = "请输入问题";
-    return;
-  }
+/**
+ * 发出一轮提问。入口有两个且只有两个：输入区的提交，与空态里点一条示例问题
+ * （点了就发，不再只填进输入框）。两者都是「发出一条消息」，没有别的分支。
+ */
+async function ask(text: string): Promise<void> {
+  const question = text.trim();
+  if (!question || asking.value) return;
+
   // 这一轮先入线程（问题 + 「正在查询」的助手位）：失败也留在线程里，它不是没问过。
-  const roundId = thread.beginRound(question.value);
-  asking.value = true;
+  const roundId = thread.beginRound(question);
   try {
     // 会话标识只在「清空对话」之后带：其余时候由登录凭证承载，同一次登录里的追问
     // 共用一个上下文（见 api.ts）。
     const response = await runAnalyticsQuery({
-      question: question.value,
+      question,
       sessionId: thread.sessionId ?? undefined,
     });
-    result.value = response;
     thread.settleRound(roundId, response);
     // 主区已经有新的结果了，先前点开的那条历史记录就该收起；这一轮的留痕是最新的一条，
     // 因此回到第一页取——停在原来的页上，刚问完的这一条不会出现。
     selectedHistoryId.value = null;
     await resetHistory();
   } catch (error) {
-    result.value = null;
-    const reason = errorMessage(error, "查询失败，请稍后重试");
-    failureReason.value = reason;
     // 业务码一并留下：五种失败各自成文案是呈现层的事（见 04），线程只负责别把它丢了。
     thread.failRound(roundId, {
       code: error instanceof ApiError ? error.code : null,
-      message: reason,
+      message: errorMessage(error, "查询失败，请稍后重试"),
     });
-  } finally {
-    asking.value = false;
   }
 }
 
@@ -111,16 +114,10 @@ async function clearThread(): Promise<void> {
     }
   }
   thread.discardContext();
-  result.value = null;
-  failureReason.value = "";
-}
-
-/** 示例问题只是把问题写进输入框；历史条目不再这么用——点它是「查看这条记录」。 */
-function reuseQuestion(value: string): void {
-  question.value = value;
 }
 
 // 历史查询常驻壳层右侧栏：数据仍由这个页面拉取，栏只接收 props、上抛选中项与翻页。
+// 05 会把这件事搬进顶栏的抽屉，右栏随之塌成两栏。
 useInspector(() => ({
   component: AnalyticsHistoryPanel,
   props: {
@@ -160,54 +157,19 @@ onMounted(async () => {
       </template>
     </PageHeader>
 
-    <PanelCard title="提问">
-      <form class="ask" @submit.prevent="ask">
-        <el-input
-          v-model="question"
-          name="question"
-          placeholder="用一句自然语言描述你要看的数据（Ctrl + Enter 提交）"
-          @keydown.ctrl.enter="ask"
-        />
-        <div class="ask__row">
-          <el-button
-            type="primary"
-            native-type="submit"
-            name="ask"
-            :loading="asking"
-            data-testid="ask"
-          >
-            提问
-          </el-button>
-        </div>
-      </form>
-
-      <div v-if="examples.length" class="examples">
-        <span class="examples__label">示例问题</span>
-        <button
-          v-for="example in examples"
-          :key="example.question"
-          type="button"
-          class="examples__item"
-          data-testid="example-question"
-          @click="reuseQuestion(example.question)"
-        >
-          {{ example.question }}
-        </button>
-      </div>
-
-      <p v-if="failureReason" class="analytics__error" role="alert" data-testid="failure-reason">
-        {{ failureReason }}
-      </p>
-    </PanelCard>
-
+    <!-- 历史查询的详情位：05 会把整件事搬进顶栏的抽屉，这里先留在对话面板上方。 -->
     <AnalyticsHistoryDetail v-if="selectedRecord" :record="selectedRecord" />
 
-    <!-- 被线程上限裁掉的更早轮次不静默丢：留一句说明，让人知道线程不是从头开始的。 -->
-    <p v-if="thread.droppedRounds" class="analytics__dropped" data-testid="dropped-rounds">
-      更早的一轮已从本页移除
-    </p>
+    <div class="analytics__panel">
+      <EmptyConversation v-if="thread.isEmpty" :examples="examples" @ask="ask" />
+      <ConversationThread
+        v-else
+        :messages="thread.messages"
+        :dropped-rounds="thread.droppedRounds"
+      />
 
-    <AnalyticsResultView v-if="result" :result="result" />
+      <MessageComposer v-model="draft" :busy="asking" @submit="ask" />
+    </div>
   </div>
 </template>
 
@@ -216,57 +178,22 @@ onMounted(async () => {
   display: flex;
   flex-direction: column;
   gap: var(--wm-space-4);
+  /* 对话页是内容区的全部：占满可用高度，滚动交给消息区 */
+  height: 100%;
+  min-height: 0;
 }
 
-.ask {
+/* 对话面板：消息区 + 输入区同处一个面板内，铺满剩余高度。
+   面板的 1px 描边是令牌纪律声明的极少数例外，由面板统一持有，消息区与输入区不再各自成卡。 */
+.analytics__panel {
   display: flex;
   flex-direction: column;
-  gap: var(--wm-space-3);
-}
-
-.ask__row {
-  display: flex;
-  justify-content: flex-end;
-}
-
-.examples {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--wm-space-2);
-  margin-top: var(--wm-space-3);
-}
-
-.examples__label {
-  color: var(--wm-text-muted);
-  font-size: 0.78rem;
-}
-
-.examples__item {
-  padding: var(--wm-space-1) var(--wm-space-2);
-  /* 细边框属令牌纪律声明的极少数 1px 例外 */
+  flex: 1;
+  min-height: 0;
   border: 1px solid var(--wm-border);
-  border-radius: var(--wm-radius-pill);
+  border-radius: var(--wm-radius-lg);
   background-color: var(--wm-bg-card);
-  color: var(--wm-color-primary-strong);
-  font-family: inherit;
-  font-size: 0.78rem;
-  cursor: pointer;
-}
-
-.examples__item:hover {
-  border-color: var(--wm-color-primary);
-}
-
-.analytics__error {
-  margin: var(--wm-space-3) 0 0;
-  color: var(--wm-color-danger);
-  font-size: 0.85rem;
-}
-
-.analytics__dropped {
-  margin: 0;
-  color: var(--wm-text-muted);
-  font-size: 0.8rem;
+  box-shadow: var(--wm-shadow-card);
+  overflow: hidden;
 }
 </style>

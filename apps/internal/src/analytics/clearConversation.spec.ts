@@ -59,11 +59,14 @@ async function mountWorkspace(): Promise<VueWrapper> {
   return wrapper;
 }
 
-/** 提问框在换成问答线程之前还是单行输入；形态再变一次时只需改这一行。 */
+/** 提问框随问答线程换成 2–4 行自适应的多行输入；形态再变一次时只需改这一行。 */
 async function askQuestion(app: VueWrapper, text: string): Promise<void> {
-  await app.get("input[name='question']").setValue(text);
+  await app.get("textarea[name='question']").setValue(text);
   // jsdom 不实现「点 submit 按钮即提交表单」，这里直接触发 submit 事件（与登录页用例同一手法）。
   await app.get("form.ask").trigger("submit");
+  await flushPromises();
+  // 解读是逐字上屏的（30ms/字）：把打字机走完再看文本。
+  await vi.advanceTimersByTimeAsync(4000);
   await flushPromises();
 }
 
@@ -100,11 +103,14 @@ beforeEach(() => {
   sessionStorage.clear();
   clearTokens();
   confirm.mockClear();
+  // 只 fake 打字机的 setInterval：setTimeout 保持真实，flushPromises 才 resolve 得掉。
+  vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
 });
 
 afterEach(() => {
   wrapper?.unmount();
   wrapper = null;
+  vi.useRealTimers();
   vi.unstubAllGlobals();
   localStorage.clear();
   sessionStorage.clear();

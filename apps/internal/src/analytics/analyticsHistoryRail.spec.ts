@@ -10,7 +10,7 @@ import App from "../App.vue";
 import { ADVISOR } from "../auth/identity";
 import { clearTokens, setTokens } from "../auth/tokenStore";
 import { router } from "../router";
-import { apiError, stubApiFetch } from "../testing";
+import { apiError, requestedUrls, stubApiFetch } from "../testing";
 
 const HISTORY_ITEMS = [
   {
@@ -62,11 +62,12 @@ const ANSWER = {
 
 let pinia: Pinia;
 let wrapper: VueWrapper | null = null;
+let fetchMock: ReturnType<typeof stubApiFetch>;
 
 async function mountAnalysis(
   options: { history?: unknown; historyResponder?: (url: string) => unknown } = {},
 ): Promise<VueWrapper> {
-  stubApiFetch((url) => {
+  fetchMock = stubApiFetch((url) => {
     if (url.includes("/api/internal/auth/me")) {
       return { real_name: "测试员工", employee_role: ADVISOR };
     }
@@ -102,15 +103,15 @@ function railItem(app: VueWrapper, id: number) {
 }
 
 /**
- * 提问框现在是单行输入（`el-input` 的默认形态，见 `DataAnalysisWorkspace.vue`）。
+ * 提问框现在是多行输入（`el-input type="textarea"`，见 `MessageComposer.vue`）。
  * 三处断言都从这里取它，形态再变一次时只需改这一行。
  */
 function questionInput(app: VueWrapper) {
-  return app.get("input[name='question']");
+  return app.get("textarea[name='question']");
 }
 
 function questionText(app: VueWrapper): string {
-  return (questionInput(app).element as HTMLInputElement).value;
+  return (questionInput(app).element as HTMLTextAreaElement).value;
 }
 
 /** 这次请求带的页码：栏底的翻页控件交给服务端的就是这个数。 */
@@ -121,6 +122,8 @@ function requestedPage(url: string): number {
 
 beforeEach(() => {
   localStorage.clear();
+  // 线程（ticket 02 起）落在 sessionStorage 里：不清掉，上一用例问过的那一轮会跟着进下一条用例。
+  sessionStorage.clear();
   clearTokens();
 });
 
@@ -129,6 +132,7 @@ afterEach(() => {
   wrapper = null;
   vi.unstubAllGlobals();
   localStorage.clear();
+  sessionStorage.clear();
   clearTokens();
 });
 
@@ -178,7 +182,9 @@ describe("数据分析的历史查询右侧栏", () => {
     await app.get("form.ask").trigger("submit");
     await flushPromises();
 
-    expect(app.get("[data-testid='interpretation']").text()).toBe("这个月新增 3 位客户。");
+    // 这一轮（问与答）落在了主区上——解读是逐字播的，这里只认它到了。
+    expect(app.get("[data-testid='user-bubble']").text()).toBe("这个月新增了几个客户");
+    expect(app.get("[data-testid='assistant-bubble']").attributes("data-status")).toBe("answered");
     expect(app.find("[data-testid='history-detail']").exists()).toBe(false);
   });
 
@@ -190,12 +196,16 @@ describe("数据分析的历史查询右侧栏", () => {
     expect(rail.find("[data-testid='history-empty']").exists()).toBe(false);
   });
 
-  it("点击示例问题仍写回提问框", async () => {
+  it("点击示例问题直接发问，而不是只填进提问框", async () => {
     const app = await mountAnalysis();
 
     await app.get("[data-testid='example-question']").trigger("click");
+    await flushPromises();
 
-    expect(questionText(app)).toBe(EXAMPLE);
+    // 对话范式里不再有「填入 → 用户再按一次提问」这一步：这一下就把请求打出去了。
+    expect(requestedUrls(fetchMock, "/api/internal/analytics/query")).toHaveLength(1);
+    expect(app.get("[data-testid='user-bubble']").text()).toBe(EXAMPLE);
+    expect(questionText(app)).toBe("");
   });
 });
 

@@ -1,23 +1,25 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import { ElMessageBox } from "element-plus";
-import { ApiError, PageHeader, usePagination } from "@wealth/shared";
+import { ApiError, PageHeader } from "@wealth/shared";
 import { errorMessage } from "../format";
-import { useInspector } from "../shell/pageSlots";
-import AnalyticsHistoryDetail from "./AnalyticsHistoryDetail.vue";
-import AnalyticsHistoryPanel from "./AnalyticsHistoryPanel.vue";
+import { actionButton } from "../shell/actionButton";
+import { useTopbarActions } from "../shell/pageSlots";
+import AnalyticsHistoryDrawer from "./AnalyticsHistoryDrawer.vue";
 import ConversationThread from "./ConversationThread.vue";
 import EmptyConversation from "./EmptyConversation.vue";
 import MessageComposer from "./MessageComposer.vue";
-import { listAnalyticsExamples, listAnalyticsHistory, runAnalyticsQuery } from "./api";
+import { listAnalyticsExamples, runAnalyticsQuery } from "./api";
 import { useAnalyticsThreadStore } from "./threadStore";
-import type { AnalyticsExampleItem, AnalyticsHistoryItem } from "./types";
+import type { AnalyticsExampleItem } from "./types";
 
 // 主区是一条**对话线程**（表单已消失）：提问与回答在 store 里累积，主区只负责呈现。
 // 上一轮因此留在页面上，「追问」才在界面上成立——`session_id` 把它接到后端的短期记忆上。
 const draft = ref("");
 const examples = ref<AnalyticsExampleItem[]>([]);
-const selectedHistoryId = ref<number | null>(null);
+
+// 历史查询挂在顶栏的抽屉里（05）：入口是壳层顶栏右侧的一个按钮，抽屉自己取数取页。
+const historyOpen = ref(false);
 
 // 这一段页面生命周期里刚落地的轮次：只有它的解读逐字上屏。刷新或切模块回来时读到的是
 // 一整条线程，那些轮次的解读直接是全文——20 轮一起重新逐字播放不是逐字感，是把页面拖住。
@@ -31,27 +33,6 @@ const thread = useAnalyticsThreadStore();
  */
 const asking = computed(() =>
   thread.messages.some((message) => message.role === "assistant" && message.status === "pending"),
-);
-
-// 历史查询是留痕表里的一页（ADR-0024）：只增的列表，靠 page/page_size 逐页取。
-// 取数仍由这个页面做——栏只接收 props、上抛选中项与翻页，见下面的 useInspector。
-const {
-  items: history,
-  total: historyTotal,
-  page: historyPage,
-  pageSize: historyPageSize,
-  loading: historyLoading,
-  errorMessage: historyError,
-  goTo: goToHistoryPage,
-  reset: resetHistory,
-} = usePagination<AnalyticsHistoryItem>((query) => listAnalyticsHistory(query));
-
-// 栏里只说一句「加载失败」：它是窄栏，放不下服务端的原文，也没必要重复。
-const historyFailed = computed(() => historyError.value !== "");
-
-// 选中的那条记录：翻页或新一轮历史把它带出这一页时，详情自然收起，不留一份孤立副本。
-const selectedRecord = computed(
-  () => history.value.find((entry) => entry.id === selectedHistoryId.value) ?? null,
 );
 
 async function loadExamples(): Promise<void> {
@@ -84,10 +65,7 @@ async function ask(text: string): Promise<void> {
     });
     thread.settleRound(roundId, response);
     typingRoundId.value = roundId;
-    // 主区已经有新的结果了，先前点开的那条历史记录就该收起；这一轮的留痕是最新的一条，
-    // 因此回到第一页取——停在原来的页上，刚问完的这一条不会出现。
-    selectedHistoryId.value = null;
-    await resetHistory();
+    // 这一轮的留痕不在这里刷新：抽屉每次打开都从第一页重取，问完再打开它自然是最新的。
   } catch (error) {
     // 业务码一并留下：五种失败各自成文案是呈现层的事（见 04），线程只负责别把它丢了。
     thread.failRound(roundId, {
@@ -123,29 +101,31 @@ async function clearThread(): Promise<void> {
   thread.discardContext();
 }
 
-// 历史查询常驻壳层右侧栏：数据仍由这个页面拉取，栏只接收 props、上抛选中项与翻页。
-// 05 会把这件事搬进顶栏的抽屉，右栏随之塌成两栏。
-useInspector(() => ({
-  component: AnalyticsHistoryPanel,
-  props: {
-    history: history.value,
-    selectedId: selectedHistoryId.value,
-    failed: historyFailed.value,
-    total: historyTotal.value,
-    page: historyPage.value,
-    pageSize: historyPageSize.value,
-    loading: historyLoading.value,
-    onSelect: (id: number) => {
-      selectedHistoryId.value = id;
-    },
-    "onUpdate:page": (page: number) => {
-      void goToHistoryPage(page);
-    },
+// 历史查询的入口挂在壳层顶栏右侧（`AppShell` 的 `topbar-right`，由壳转发页面级操作）：
+// 搬进抽屉之后这一页不再注入检查器，AppShell 据此自动塌成两栏（三栏与否只有一个来源）。
+const historyButton = actionButton({
+  label: "历史查询",
+  name: "open-history",
+  onClick: () => {
+    historyOpen.value = true;
   },
-}));
+});
+useTopbarActions(() => ({ component: historyButton }));
 
-onMounted(async () => {
-  await Promise.all([resetHistory(), loadExamples()]);
+/**
+ * 「再问一次」把问题送回输入框，**不自动发送**。
+ *
+ * 它不是在原上下文里接着问：留痕那条记录当年所属的会话标识随那次登录结束，Redis 的记忆
+ * 键（员工 + 会话标识）也就散了。所以这一下是「拿这句话在当前线程里重问一次」，问不问、
+ * 要不要先改几个字，都由员工自己决定。
+ */
+function reuseQuestion(question: string): void {
+  draft.value = question;
+  historyOpen.value = false;
+}
+
+onMounted(() => {
+  void loadExamples();
 });
 </script>
 
@@ -164,9 +144,6 @@ onMounted(async () => {
       </template>
     </PageHeader>
 
-    <!-- 历史查询的详情位：05 会把整件事搬进顶栏的抽屉，这里先留在对话面板上方。 -->
-    <AnalyticsHistoryDetail v-if="selectedRecord" :record="selectedRecord" />
-
     <div class="analytics__panel">
       <EmptyConversation v-if="thread.isEmpty" :examples="examples" @ask="ask" />
       <ConversationThread
@@ -178,6 +155,11 @@ onMounted(async () => {
 
       <MessageComposer v-model="draft" :busy="asking" @submit="ask" />
     </div>
+
+    <!-- 抽屉挂在这里只是「由这一页提供」：它 append-to-body，位置与主区布局无关。
+         开合走 v-model：人从抽屉那侧关掉（关闭按钮 / Esc / 点遮罩）时，这里也要跟上，
+         否则顶栏那个入口会以为它还是开着的。 -->
+    <AnalyticsHistoryDrawer v-model="historyOpen" @reuse="reuseQuestion" />
   </div>
 </template>
 

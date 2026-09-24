@@ -55,7 +55,7 @@ afterEach(() => {
 });
 
 describe("第三栏的注入与塌陷", () => {
-  it("画像 / 投顾 / 风控 / 工单 / 数据分析注入检查器，知识库与落地页不注入", async () => {
+  it("画像 / 投顾 / 风控 / 工单注入检查器，知识库、落地页与数据分析不注入", async () => {
     role = ADVISOR;
     const app = await mountApp();
 
@@ -81,10 +81,10 @@ describe("第三栏的注入与塌陷", () => {
     await goTo("/knowledge");
     expect(hasInspector(app)).toBe(false);
 
-    // 历史查询现在常驻第三栏，所以数据分析也注入检查器。
+    // 历史查询搬进顶栏的抽屉之后，数据分析页不再注入检查器：右栏没有别的东西要放，
+    // 第三栏因此塌掉（05）。它自己的两栏形态另有一条用例（analyticsHistoryDrawer.spec.ts）。
     await goTo("/data-analysis");
-    expect(hasInspector(app)).toBe(true);
-    expect(app.get('[data-testid="history-empty"]').text()).toContain("还没有历史查询");
+    expect(hasInspector(app)).toBe(false);
   });
 
   it("离开注入检查器的页面后第三栏收回", async () => {
@@ -92,9 +92,6 @@ describe("第三栏的注入与塌陷", () => {
     const app = await mountApp();
 
     await goTo("/profile");
-    expect(hasInspector(app)).toBe(true);
-
-    await goTo("/data-analysis");
     expect(hasInspector(app)).toBe(true);
 
     await goTo("/knowledge");

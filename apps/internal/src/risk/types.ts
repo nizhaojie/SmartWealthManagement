@@ -156,4 +156,109 @@ export type RiskRule = {
   alert_level: AlertLevel;
   weight: number;
   enabled: boolean;
+  /**
+   * 软删标记（ADR-0027）：有值表示这条规则已被删除，行还在库里、留痕还指着它。
+   *
+   * 「显示已删除」打开后才见得到这样的行，界面上置灰只读——能删就能删错，只是没有恢复
+   * 入口：可逆的「让它不生效」由 `enabled` 承担。
+   */
+  deleted_at: string | null;
+};
+
+// ---------------- 规则编辑器要的下拉项（GET /schema） ----------------
+//
+// 这一组类型是「前端能配出什么」的**契约副本**：真正的清单在后端的注册表里，前端只
+// 照着渲染。两张清单互抄时漂移的表现是「下拉里能选、一提交被拒」——不会有断言失败，
+// 只会有人反复试，所以选项一律来自这一份载荷，不在组件里硬编码。
+
+/** 阈值的物理值域：这个字段的阈值允许落在哪，`text` 可以直接展示。 */
+export type RuleValueRange = {
+  min: string | null;
+  max: string | null;
+  min_inclusive: boolean;
+  max_inclusive: boolean;
+  text: string;
+};
+
+/** 一个可判定字段：标签、说明、允许的算子（字段 × 算子矩阵的那一行）与阈值值域。 */
+export type RuleFieldSpec = {
+  key: string;
+  label: string;
+  description: string;
+  allowed_operators: string[];
+  value_range: RuleValueRange | null;
+};
+
+/**
+ * 算子的作用域：单笔 / 时间窗 / 自然日。它是「要不要填窗长」的唯一依据——时间窗算子
+ * 必须有 `window_hours`，其余算子提交时置 NULL。
+ */
+export type RuleOperatorScope = "single" | "window" | "daily";
+
+/** 一个算子：标签、符号与它自己的阈值键（`gte` 一个、`between` 两个）。 */
+export type RuleOperatorSpec = {
+  key: string;
+  label: string;
+  symbol: string;
+  scope: RuleOperatorScope;
+  threshold_keys: string[];
+};
+
+export type RiskRuleSchema = {
+  categories: string[];
+  fields: RuleFieldSpec[];
+  operators: RuleOperatorSpec[];
+};
+
+/** 五个留痕类型（`fin_risk_rule_change.change_type`）：三个写入口各记自己那一条。 */
+export const RULE_CHANGE_TYPES = ["规则新建", "规则修改", "规则删除", "阈值调整", "启停变更"] as const;
+export type RiskRuleChangeType = (typeof RULE_CHANGE_TYPES)[number];
+
+/**
+ * 一条规则变更留痕。
+ *
+ * `old_value` / `new_value` 装的是**整份快照**（新建与删除是「无 → 有」「有 → 无」的
+ * 一对镜像），所以一条记录单独就能回答「当时是什么样」，不必再去读那行。
+ */
+export type RiskRuleChange = {
+  id: number;
+  rule_code: string;
+  change_type: RiskRuleChangeType;
+  old_value: Record<string, unknown>;
+  new_value: Record<string, unknown>;
+  changed_by: number;
+  changed_by_name: string;
+  reason: string;
+  changed_at: string;
+};
+
+/** 创建一条规则的请求体：全部可填参数 + 必填理由，编号由系统分配。 */
+export type RiskRuleCreateInput = {
+  rule_name: string;
+  category: string;
+  description: string;
+  field: string;
+  operator: string;
+  threshold: Record<string, string>;
+  window_hours: number | null;
+  alert_level: AlertLevel;
+  /** 规则权重：空值表示「用默认的 1.00」；界面上的区间由数字框与后端各挡一次。 */
+  weight: number | null;
+  enabled: boolean;
+  reason: string;
+};
+
+/**
+ * 修改一条规则的基本信息：名称 / 规则分类 / 描述 / 预警等级 / 规则权重 + 必填理由。
+ *
+ * 判定形状、阈值与启停**不在这份请求体里**：带了任一个后端一律 400（ADR-0026）——
+ * 改判定形状就是换了一条规则，阈值与启停各有专门入口、各自单独留痕。
+ */
+export type RiskRuleUpdateInput = {
+  rule_name: string;
+  category: string;
+  description: string;
+  alert_level: AlertLevel;
+  weight: number | null;
+  reason: string;
 };

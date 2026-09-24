@@ -30,7 +30,11 @@ export type HttpClient = {
   patch<T>(path: string, body?: unknown): Promise<T>;
   post<T>(path: string, body?: unknown): Promise<T>;
   postForm<T>(path: string, form: FormData): Promise<T>;
-  delete<T>(path: string): Promise<T>;
+  /**
+   * `body` 可选：删除有时要带一段署名（有的接口要求删除时附一条非空理由）。
+   * 理由放进请求体而不是查询串——查询串会进访问日志，也不该有长度与转义的额外约束。
+   */
+  delete<T>(path: string, body?: unknown): Promise<T>;
 };
 
 export type HttpClientOptions = {
@@ -132,8 +136,8 @@ export function createHttpClient(options: HttpClientOptions): HttpClient {
     postForm<T>(path: string, form: FormData): Promise<T> {
       return send<T>("POST", path, form, true);
     },
-    delete<T>(path: string): Promise<T> {
-      return send<T>("DELETE", path, undefined, true);
+    delete<T>(path: string, body?: unknown): Promise<T> {
+      return send<T>("DELETE", path, body, true);
     },
   };
 }

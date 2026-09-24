@@ -12,6 +12,10 @@ import type {
   FocusType,
   RiskFocus,
   RiskRule,
+  RiskRuleChange,
+  RiskRuleCreateInput,
+  RiskRuleSchema,
+  RiskRuleUpdateInput,
 } from "./types";
 
 /**
@@ -75,17 +79,70 @@ export function listRiskFocus(
   return http.get<Paginated<RiskFocus>>(`/api/internal/risk-focus${search}`);
 }
 
-export function listRiskRules(query: PageQuery): Promise<Paginated<RiskRule>> {
-  const search = queryString({ page: query.page, page_size: query.page_size });
+export function listRiskRules(
+  query: PageQuery,
+  includeDeleted = false,
+): Promise<Paginated<RiskRule>> {
+  // `include_deleted` 是**服务端**参数：前端拿到当前页再过滤，会让「共 N 条」与实际行数
+  // 对不上（ADR-0024）——总数与当前页必须由同一条查询派生。
+  const search = queryString({
+    page: query.page,
+    page_size: query.page_size,
+    include_deleted: includeDeleted ? "true" : undefined,
+  });
   return http.get<Paginated<RiskRule>>(`/api/internal/risk-rules${search}`);
 }
 
-export function setRiskRuleEnabled(ruleId: number, enabled: boolean): Promise<RiskRule> {
-  return http.patch<RiskRule>(`/api/internal/risk-rules/${ruleId}/enabled`, {
-    enabled,
-    // 启停不强制理由（阈值调整才强制）：这里没有要解释的口径变化，只记谁改的。
-    reason: "",
-  });
+/**
+ * 规则编辑器要的下拉项与允许组合。
+ *
+ * 选项一律来自这里，组件里不再留一份字段 / 算子清单：前端禁掉的选项与后端拒掉的组合
+ * 一旦漂移，表现是「下拉里能选、一提交被拒」，而那张清单在后端注册表里。
+ */
+export function getRiskRuleSchema(): Promise<RiskRuleSchema> {
+  return http.get<RiskRuleSchema>("/api/internal/risk-rules/schema");
+}
+
+/** 创建一条规则：编号由系统分配，校验（名录 / 搭配 / 值域）都由后端说了算。 */
+export function createRiskRule(input: RiskRuleCreateInput): Promise<RiskRule> {
+  return http.post<RiskRule>("/api/internal/risk-rules", input);
+}
+
+/**
+ * 修改基本信息（名称 / 规则分类 / 描述 / 预警等级 / 规则权重）；判定形状、阈值与启停各有入口。
+ */
+export function updateRiskRule(ruleId: number, input: RiskRuleUpdateInput): Promise<RiskRule> {
+  return http.patch<RiskRule>(`/api/internal/risk-rules/${ruleId}`, input);
+}
+
+/**
+ * 软删一条规则。删除是终态，不提供恢复；理由是必填的，后端逐条再挡一次。
+ *
+ * 理由走请求体：`DELETE` 带体是刻意的，放进查询串会进访问日志。
+ */
+export function deleteRiskRule(ruleId: number, reason: string): Promise<RiskRule> {
+  return http.delete<RiskRule>(`/api/internal/risk-rules/${ruleId}`, { reason });
+}
+
+/**
+ * 一条规则的变更留痕，随时可读——包括已删除的规则：删除这件事本身也要可查。
+ */
+export function listRiskRuleChanges(ruleId: number): Promise<RiskRuleChange[]> {
+  return http.get<RiskRuleChange[]>(`/api/internal/risk-rules/${ruleId}/changes`);
+}
+
+/**
+ * 启停一条规则。
+ *
+ * 理由必填：五个写入口共用同一个留痕形状，有一个可以不署名，下一个人就会把它当漏写补上。
+ * 代价是列表里的开关从「一下点开」变成「点一下先弹理由」。
+ */
+export function setRiskRuleEnabled(
+  ruleId: number,
+  enabled: boolean,
+  reason: string,
+): Promise<RiskRule> {
+  return http.patch<RiskRule>(`/api/internal/risk-rules/${ruleId}/enabled`, { enabled, reason });
 }
 
 /** 阈值调整必须带理由：后端要求非空，且阈值形状要与算子匹配。 */

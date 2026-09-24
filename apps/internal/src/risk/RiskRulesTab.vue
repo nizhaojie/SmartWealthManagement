@@ -1,15 +1,37 @@
 <script setup lang="ts">
-// 规则管理：启停与阈值调整都只放开给风控专员，其他角色看到的是只读表格。
+// 规则管理：查看、新建、编辑、删除、启停与调阈值都只放开给风控专员，其他角色看到的是只读表格。
 //
 // 列表分页由 `usePagination` 接管（ADR-0024）。规则按编号升序，是唯一一个排序键
 // 本来就稳定（编号唯一）的列表，所以这里没有排序控件。
-import { computed, onMounted, ref } from "vue";
+//
+// 写入侧的界线（ADR-0026）：可改的是**组合**（在给定的字段、算子与值域里挑），不可改的是
+// **表达**。因此表单里的可选项与允许搭配全部来自 `GET /schema`，组件里不留第二份清单；
+// 判定形状（字段 / 算子 / 时间窗）连编辑都不给——要换判定方式只能删除后重建。
+import { computed, onMounted, reactive, ref, watch } from "vue";
 import { PaginationBar, PanelCard, usePagination } from "@wealth/shared";
-import { ElMessage } from "element-plus";
-import { errorMessage } from "../format";
+import { ElMessage, ElMessageBox } from "element-plus";
+import { errorMessage, formatDateTime, formatValue } from "../format";
 import { useAuthStore } from "../stores/auth";
-import { listRiskRules, setRiskRuleEnabled, setRiskRuleThreshold } from "./api";
-import type { RiskRule } from "./types";
+import {
+  createRiskRule,
+  deleteRiskRule,
+  getRiskRuleSchema,
+  listRiskRuleChanges,
+  listRiskRules,
+  setRiskRuleEnabled,
+  setRiskRuleThreshold,
+  updateRiskRule,
+} from "./api";
+import { ALERT_LEVELS, type AlertLevel, type RiskRule, type RiskRuleChange, type RiskRuleSchema } from "./types";
+import {
+  fieldSpec,
+  operatorChoices,
+  thresholdKeyLabel,
+  thresholdKeys,
+  thresholdPayload,
+  usesWindowHours,
+  valueRangeHint,
+} from "./ruleEditor";
 import { canManageRiskRules, type TabSummary } from "./riskView";
 import { useTabSummary } from "./useTabSummary";
 
@@ -18,8 +40,15 @@ const emit = defineEmits<{ summary: [value: TabSummary] }>();
 const auth = useAuthStore();
 const canManage = computed(() => canManageRiskRules(auth.currentEmployee?.employee_role));
 
+// 「显示已删除」默认关：默认视图就是「现在还算数的规则」。它是**服务端**参数
+// （`include_deleted`）——前端过滤会让「共 N 条」与实际行数对不上（ADR-0024）。
+const includeDeleted = ref(false);
+
+const schema = ref<RiskRuleSchema | null>(null);
+const schemaError = ref("");
+
 const editing = ref<RiskRule | null>(null);
-const dialogOpen = ref(false);
+const thresholdOpen = ref(false);
 const thresholdDraft = ref<Record<string, string>>({});
 const thresholdReason = ref("");
 const thresholdError = ref("");
@@ -40,24 +69,77 @@ const {
   refresh,
   goTo,
   reset,
-} = usePagination<RiskRule>((query) => listRiskRules(query), {
+} = usePagination<RiskRule>((query) => listRiskRules(query, includeDeleted.value), {
   failureMessage: "规则列表加载失败",
 });
 
-const enabledCount = computed(() => rules.value.filter((rule) => rule.enabled).length);
+// 已删除的规则不参与匹配，它的 `enabled` 只是一个留在库里的旧值：数「本页几条启用」
+// 时不算它，否则「显示已删除」一开，这个数字会虚高。
+const enabledCount = computed(
+  () => rules.value.filter((rule) => rule.enabled && !rule.deleted_at).length,
+);
+
+function isDeleted(rule: RiskRule): boolean {
+  // 取不到这个字段就当作没删：判成「已删」会让一行规则无声地失去全部写入口。
+  return Boolean(rule.deleted_at);
+}
 
 function replaceRule(next: RiskRule): void {
   rules.value = rules.value.map((rule) => (rule.id === next.id ? next : rule));
 }
 
-async function toggleRule(rule: RiskRule, value: string | number | boolean): Promise<void> {
+watch(includeDeleted, () => {
+  // 筛选条件变了就回第一页：停在第 3 页会看到「筛选后为空」，那不是筛选的结果。
+  void reset();
+});
+
+// ---------------- 理由：三个写入口共用的一个范式 ----------------
+
+/**
+ * 收一条必填理由，取消返回 null。
+ *
+ * `inputValidator` 是这里的关键：返回一句话就让弹框**不关**、把话显示在输入框下面。
+ * 先关再校验会让「理由为空」变成一次消失的对话框，人只知道自己点了删除。
+ * 理由放在提示框里而不是自建表单，是因为它只有一段自由文本、没有别的字段（Q16）。
+ */
+async function askReason(title: string, message: string, placeholder: string): Promise<string | null> {
+  try {
+    const result = await ElMessageBox.prompt(message, title, {
+      confirmButtonText: "提交",
+      cancelButtonText: "取消",
+      inputPlaceholder: placeholder,
+      inputValidator: (value: string) => (value.trim() ? true : "理由不能为空"),
+    });
+    const reason = String(result.value).trim();
+    // 校验器已经挡住了空理由，这里再挡一次是为了不把「一条空理由能不能提交」交给浮层组件
+    // 去保证：它一旦放行，写接口收到的是空字符串，而五个入口都要求理由非空。
+    return reason === "" ? null : reason;
+  } catch {
+    // 取消不是失败：什么都不做，也不留错误文案。
+    return null;
+  }
+}
+
+async function toggleRule(rule: RiskRule): Promise<boolean> {
+  const next = !rule.enabled;
+  const reason = await askReason(
+    `${next ? "启用" : "停用"}规则 ${rule.rule_code}`,
+    `确定${next ? "启用" : "停用"}「${rule.rule_name}」？`,
+    "写清这次启停的理由",
+  );
+  if (reason === null) return false;
+
   actionError.value = "";
   try {
-    replaceRule(await setRiskRuleEnabled(rule.id, Boolean(value)));
+    replaceRule(await setRiskRuleEnabled(rule.id, next, reason));
+    return true;
   } catch (error) {
     actionError.value = errorMessage(error, "启停变更失败");
-    // 变更失败时以服务端为准重取当前这一页，别让开关停在一个假的档位上。
+    // 返回 false 让开关弹回原档位（`before-change` 的语义），行上的状态一个字都不用改。
+    // 重取当前这一页是另一件事：写操作被拒可能就是因为这一页旧了（比如这条规则已被别人
+    // 删掉，已删除的规则不再接受写操作），不重取的话那一行会一直挂着一个改不动的开关。
     await refresh();
+    return false;
   }
 }
 
@@ -66,7 +148,7 @@ function openThreshold(rule: RiskRule): void {
   thresholdDraft.value = { ...rule.threshold };
   thresholdReason.value = "";
   thresholdError.value = "";
-  dialogOpen.value = true;
+  thresholdOpen.value = true;
 }
 
 async function submitThreshold(): Promise<void> {
@@ -80,7 +162,7 @@ async function submitThreshold(): Promise<void> {
   thresholdError.value = "";
   try {
     replaceRule(await setRiskRuleThreshold(rule.id, { ...thresholdDraft.value }, thresholdReason.value.trim()));
-    dialogOpen.value = false;
+    thresholdOpen.value = false;
     ElMessage.success("阈值已更新");
   } catch (error) {
     thresholdError.value = errorMessage(error, "阈值更新失败");
@@ -89,16 +171,210 @@ async function submitThreshold(): Promise<void> {
   }
 }
 
+async function removeRule(rule: RiskRule): Promise<void> {
+  const reason = await askReason(
+    `删除规则 ${rule.rule_code}`,
+    `删除「${rule.rule_name}」？删除是终态，没有恢复入口（要让它不生效请用启停）。`,
+    "写清删除的理由",
+  );
+  if (reason === null) return;
+
+  actionError.value = "";
+  try {
+    await deleteRiskRule(rule.id, reason);
+    ElMessage.success("规则已删除");
+    // 重取当前这一页，不回到第一页：删掉的未必是这一页唯一一条。
+    await refresh();
+  } catch (error) {
+    actionError.value = errorMessage(error, "删除失败");
+  }
+}
+
+// ---------------- 变更记录 ----------------
+
+const changesOpen = ref(false);
+const changesRule = ref<RiskRule | null>(null);
+const changes = ref<RiskRuleChange[]>([]);
+const changesLoading = ref(false);
+const changesError = ref("");
+
+/**
+ * 变更记录：这个接口此前没有前端入口，而「规则被谁在什么时候因为什么改过」正是规则
+ * 可写的另一半。已删除的规则照样打得开——删除这件事本身也要可查（ADR-0027）。
+ */
+async function openChanges(rule: RiskRule): Promise<void> {
+  changesRule.value = rule;
+  changes.value = [];
+  changesError.value = "";
+  changesOpen.value = true;
+  changesLoading.value = true;
+  try {
+    changes.value = await listRiskRuleChanges(rule.id);
+  } catch (error) {
+    changesError.value = errorMessage(error, "变更记录加载失败");
+  } finally {
+    changesLoading.value = false;
+  }
+}
+
+// ---------------- 新建 / 编辑：同一个对话框 ----------------
+
+type EditorMode = "create" | "edit";
+
+const editorOpen = ref(false);
+const editorMode = ref<EditorMode>("create");
+const editorRule = ref<RiskRule | null>(null);
+const editorError = ref("");
+
+const draft = reactive({
+  rule_name: "",
+  category: "",
+  description: "",
+  alert_level: "" as AlertLevel | "",
+  // 规则权重与窗长是数字框：空值(null)分别表示「用默认的 1.00」与「还没填」。
+  weight: 1 as number | null,
+  field: "",
+  operator: "",
+  threshold: {} as Record<string, string>,
+  window_hours: null as number | null,
+  reason: "",
+});
+
+// 判定形状在编辑态只读：改它等于换一条规则，历史预警与留痕都会顶着旧编号解释旧口径
+// （ADR-0026）。阈值也在这四个控件里——它有单独的入口，理由也单独留痕。
+const isCreating = computed(() => editorMode.value === "create");
+const shapeReadOnly = computed(() => !isCreating.value);
+const editorTitle = computed(() =>
+  isCreating.value ? "新建规则" : `编辑规则：${editorRule.value?.rule_code ?? ""}`,
+);
+const operatorChoicesForField = computed(() => operatorChoices(schema.value, draft.field));
+const draftThresholdKeys = computed(() => thresholdKeys(schema.value, draft.operator));
+const showWindowHours = computed(() => usesWindowHours(schema.value, draft.operator));
+const fieldHint = computed(() => fieldSpec(schema.value, draft.field)?.description ?? "");
+const rangeHint = computed(() => valueRangeHint(schema.value, draft.field));
+
+// 换字段之后原来的算子可能不再被允许（比如从「交易金额」换到「产品标识」，`gte` 就不在
+// 允许清单里了）。放着一个允许清单外的算子不提，只会在提交时被后端顶回来。
+watch(
+  () => draft.field,
+  () => {
+    if (!operatorChoicesForField.value.some((operator) => operator.key === draft.operator)) {
+      draft.operator = "";
+    }
+  },
+);
+
+async function loadSchema(): Promise<void> {
+  schemaError.value = "";
+  try {
+    schema.value = (await getRiskRuleSchema()) ?? null;
+  } catch (error) {
+    schemaError.value = errorMessage(error, "规则编辑器选项加载失败");
+  }
+}
+
+/** 打开对话框前把草稿整份铺好：新建是一份空草稿，编辑是这条规则当前的样子。 */
+function fillDraft(rule: RiskRule | null): void {
+  editorRule.value = rule;
+  editorError.value = "";
+  draft.rule_name = rule?.rule_name ?? "";
+  draft.category = rule?.category ?? "";
+  draft.description = rule?.description ?? "";
+  draft.alert_level = rule?.alert_level ?? "";
+  // 新建时的规则权重默认 1.00，跟后端的默认值是同一个数。
+  draft.weight = rule ? rule.weight : 1;
+  draft.field = rule?.field ?? "";
+  // 算子写在字段之后：上面那个 watcher 在下一个 tick 才跑，那时它已经是一个允许的算子了。
+  draft.operator = rule?.operator ?? "";
+  draft.threshold = { ...(rule?.threshold ?? {}) };
+  draft.window_hours = rule?.window_hours ?? null;
+  draft.reason = "";
+}
+
+function openCreate(): void {
+  editorMode.value = "create";
+  fillDraft(null);
+  editorOpen.value = true;
+}
+
+function openEditor(rule: RiskRule): void {
+  editorMode.value = "edit";
+  fillDraft(rule);
+  editorOpen.value = true;
+}
+
+async function submitEditor(): Promise<void> {
+  editorError.value = "";
+  const reason = draft.reason.trim();
+  if (!reason) {
+    editorError.value = isCreating.value ? "创建理由不能为空" : "修改理由不能为空";
+    return;
+  }
+  // 数字框已经挡住了「非数字」与「小于 1」；挡不住的是「还没填」——那会落到 pydantic 的
+  // `int | None` 上换回一句「参数错误」，而这里说得出是哪个控件少了东西。判断用真假而不是
+  // `=== null`：数字框被清空时给回来的是 `undefined`。
+  if (showWindowHours.value && !draft.window_hours) {
+    editorError.value = "时间窗必须是正整数小时";
+    return;
+  }
+
+  saving.value = true;
+  try {
+    if (isCreating.value) {
+      await createRiskRule({
+        rule_name: draft.rule_name.trim(),
+        category: draft.category,
+        description: draft.description.trim(),
+        field: draft.field,
+        operator: draft.operator,
+        threshold: thresholdPayload(schema.value, draft.operator, draft.threshold),
+        window_hours: showWindowHours.value ? (draft.window_hours ?? null) : null,
+        alert_level: draft.alert_level as AlertLevel,
+        weight: draft.weight,
+        enabled: true,
+        reason,
+      });
+      editorOpen.value = false;
+      // 这句话是必须的：不回算历史交易（Q18），专员点完新建在预警列表里什么都看不到。
+      ElMessage.success("规则已创建：新规则从下一笔交易起生效，历史交易不会被重新判定");
+      // 新规则的编号是「曾经的最大值 + 1」，按编号升序排在最后一页——重取当前页不会
+      // 把我刚建的那条挪到眼前，能立刻看见的是右侧摘要里的总条数。不回算的理由同上。
+      await refresh();
+    } else {
+      const rule = editorRule.value;
+      if (!rule) return;
+      replaceRule(
+        await updateRiskRule(rule.id, {
+          rule_name: draft.rule_name.trim(),
+          category: draft.category,
+          description: draft.description.trim(),
+          alert_level: draft.alert_level as AlertLevel,
+          weight: draft.weight,
+          reason,
+        }),
+      );
+      editorOpen.value = false;
+      ElMessage.success("规则已更新");
+    }
+  } catch (error) {
+    editorError.value = errorMessage(error, isCreating.value ? "创建失败" : "保存失败");
+  } finally {
+    saving.value = false;
+  }
+}
+
 onMounted(() => {
   void reset();
+  // 编辑器要的下拉项只有写操作才用得上：非风控专员进去也是只读表格，不必打这个请求。
+  if (canManage.value) void loadSchema();
 });
 
 useTabSummary(
   (value) => emit("summary", value),
   () => ({
     // 「共 N 条」是过滤后的总数，不是本页条数；启用条数只数得到本页，因此说清是「本页」，
-    // 否则分页一开，这个数字会随翻页变。
-    headline: `共 ${total.value} 条规则 · 本页 ${enabledCount.value} 条启用`,
+    // 否则分页一开，这个数字会随翻页变。「含已删除」要说出来：那个总数里混着已经不算数的行。
+    headline: `共 ${total.value} 条规则${includeDeleted.value ? "（含已删除）" : ""} · 本页 ${enabledCount.value} 条启用`,
     count: total.value,
   }),
 );
@@ -107,46 +383,82 @@ useTabSummary(
 <template>
   <div class="rules">
     <PanelCard title="规则管理">
+      <div class="rules__toolbar">
+        <el-checkbox v-model="includeDeleted" name="include-deleted" data-testid="include-deleted">
+          显示已删除
+        </el-checkbox>
+        <el-button
+          type="primary"
+          name="create-rule"
+          data-testid="create-rule"
+          :disabled="!canManage || !schema"
+          @click="openCreate"
+        >
+          新建规则
+        </el-button>
+      </div>
+
       <p
-        v-if="ruleError || actionError"
+        v-if="ruleError || actionError || schemaError"
         class="rules__error"
         role="alert"
         data-testid="rule-error"
       >
-        {{ ruleError || actionError }}
+        {{ ruleError || actionError || schemaError }}
       </p>
       <p v-if="!loading && !rules.length && !ruleError" class="rules__empty">还没有风控规则。</p>
       <p v-else-if="!canManage" class="rules__hint" data-testid="rule-read-only">
         当前角色只能查看规则；启停与阈值调整由风控专员完成。
       </p>
 
-      <el-table v-if="rules.length" :data="rules" data-testid="rules-table">
-        <el-table-column label="编号" prop="rule_code" width="140" />
-        <el-table-column label="规则" prop="rule_name" min-width="160" />
-        <el-table-column label="判定字段" prop="field_label" width="130" />
-        <el-table-column label="算子" prop="operator_label" width="110" />
-        <el-table-column label="阈值" prop="threshold_text" min-width="140" />
-        <el-table-column label="启停" width="100">
+      <el-table
+        v-if="rules.length"
+        :data="rules"
+        :row-class-name="({ row }: { row: RiskRule }) => (isDeleted(row) ? 'rules__row--deleted' : '')"
+        data-testid="rules-table"
+      >
+        <el-table-column label="编号" min-width="110">
           <template #default="{ row }">
-            <el-switch
-              :model-value="row.enabled"
-              :disabled="!canManage"
-              data-testid="rule-enabled"
-              @change="toggleRule(row, $event)"
-            />
+            <span>{{ row.rule_code }}</span>
+            <el-tag v-if="isDeleted(row)" type="info" size="small" class="rules__deleted-tag">
+              已删除
+            </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="110">
+        <el-table-column label="规则" prop="rule_name" min-width="140" />
+        <el-table-column label="判定字段" prop="field_label" min-width="110" />
+        <el-table-column label="算子" prop="operator_label" min-width="100" />
+        <el-table-column label="阈值" prop="threshold_text" min-width="120" />
+        <el-table-column label="启停" min-width="80">
           <template #default="{ row }">
-            <el-button
-              size="small"
-              name="edit-threshold"
-              data-testid="edit-threshold"
+            <!-- 已删除的行不留启停控件：删除是终态，撤销它没有入口（要停用请用启停）。 -->
+            <el-switch
+              v-if="!isDeleted(row)"
+              :model-value="row.enabled"
               :disabled="!canManage"
-              @click="openThreshold(row)"
-            >
-              调整阈值
+              :before-change="() => toggleRule(row)"
+              data-testid="rule-enabled"
+            />
+            <span v-else class="rules__hint">—</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" min-width="310">
+          <template #default="{ row }">
+            <el-button size="small" data-testid="view-changes" @click="openChanges(row)">
+              查看变更记录
             </el-button>
+            <template v-if="canManage && !isDeleted(row)">
+              <el-button size="small" data-testid="edit-rule" @click="openEditor(row)">编辑</el-button>
+              <el-button
+                size="small"
+                name="edit-threshold"
+                data-testid="edit-threshold"
+                @click="openThreshold(row)"
+              >
+                调整阈值
+              </el-button>
+              <el-button size="small" data-testid="delete-rule" @click="removeRule(row)">删除</el-button>
+            </template>
           </template>
         </el-table-column>
       </el-table>
@@ -162,7 +474,158 @@ useTabSummary(
       />
     </PanelCard>
 
-    <el-dialog v-model="dialogOpen" :title="editing ? `调整阈值：${editing.rule_name}` : '调整阈值'" width="440px">
+    <el-dialog v-model="editorOpen" :title="editorTitle" width="560px">
+      <div class="editor" data-testid="rule-editor">
+        <label v-if="editorMode === 'edit'" class="editor__field">
+          <span class="editor__label">规则编号</span>
+          <el-input :model-value="editorRule?.rule_code ?? ''" disabled data-testid="editor-code" />
+        </label>
+
+        <label class="editor__field">
+          <span class="editor__label">规则名称（必填）</span>
+          <el-input v-model="draft.rule_name" name="rule-name" data-testid="editor-name" />
+        </label>
+
+        <label class="editor__field">
+          <span class="editor__label">规则分类（必填）</span>
+          <el-select
+            v-model="draft.category"
+            name="rule-category"
+            data-testid="editor-category"
+            placeholder="选择规则分类"
+          >
+            <el-option v-for="category in schema?.categories ?? []" :key="category" :label="category" :value="category" />
+          </el-select>
+        </label>
+
+        <label class="editor__field">
+          <span class="editor__label">判定字段（必填）</span>
+          <el-select
+            v-model="draft.field"
+            name="rule-field"
+            data-testid="editor-field"
+            :disabled="shapeReadOnly"
+            placeholder="选择字段"
+          >
+            <el-option v-for="field in schema?.fields ?? []" :key="field.key" :label="field.label" :value="field.key" />
+          </el-select>
+          <span v-if="fieldHint" class="editor__hint">{{ fieldHint }}</span>
+        </label>
+
+        <label class="editor__field">
+          <span class="editor__label">算子（必填）</span>
+          <el-select
+            v-model="draft.operator"
+            name="rule-operator"
+            data-testid="editor-operator"
+            :disabled="shapeReadOnly"
+            placeholder="选择算子"
+          >
+            <el-option
+              v-for="operator in operatorChoicesForField"
+              :key="operator.key"
+              :label="`${operator.label}（${operator.symbol}）`"
+              :value="operator.key"
+            />
+          </el-select>
+        </label>
+
+        <label v-if="showWindowHours" class="editor__field">
+          <span class="editor__label">时间窗（小时，必填）</span>
+          <el-input-number
+            v-model="draft.window_hours"
+            name="rule-window"
+            data-testid="editor-window"
+            :min="1"
+            :step="1"
+            :precision="0"
+            :disabled="shapeReadOnly"
+          />
+        </label>
+
+        <div class="editor__field">
+          <span class="editor__label">阈值（必填）</span>
+          <!-- 输入框的数量与键名随算子的 `threshold_keys` 走：`gte` 一个、`between` 两个。 -->
+          <div class="editor__threshold">
+            <label v-for="key in draftThresholdKeys" :key="key" class="editor__threshold-item">
+              <span class="editor__hint">{{ thresholdKeyLabel(key) }}</span>
+              <el-input
+                v-model="draft.threshold[key]"
+                :name="`rule-threshold-${key}`"
+                :data-testid="`editor-threshold-${key}`"
+                :disabled="shapeReadOnly"
+              />
+            </label>
+          </div>
+          <span v-if="rangeHint" class="editor__hint">值域：{{ rangeHint }}</span>
+        </div>
+
+        <label class="editor__field">
+          <span class="editor__label">预警等级（必填）</span>
+          <el-select v-model="draft.alert_level" name="rule-alert-level" data-testid="editor-alert-level">
+            <el-option v-for="level in ALERT_LEVELS" :key="level" :label="level" :value="level" />
+          </el-select>
+        </label>
+
+        <label class="editor__field">
+          <span class="editor__label">规则权重</span>
+          <el-input-number
+            v-model="draft.weight"
+            name="rule-weight"
+            data-testid="editor-weight"
+            :min="0.5"
+            :max="5"
+            :step="0.1"
+            :precision="2"
+          />
+          <span class="editor__hint">默认 1.00，区间 0.50 到 5.00</span>
+        </label>
+
+        <label class="editor__field">
+          <span class="editor__label">规则描述</span>
+          <el-input
+            v-model="draft.description"
+            name="rule-description"
+            data-testid="editor-description"
+            placeholder="留空则按判定形状自动生成"
+          />
+        </label>
+
+        <p v-if="shapeReadOnly" class="editor__hint" data-testid="shape-note">
+          要改判定形状请删除后重建，要改阈值请用「调整阈值」。
+        </p>
+
+        <label class="editor__field">
+          <span class="editor__label">
+            {{ isCreating ? "创建理由（必填）" : "修改理由（必填）" }}
+          </span>
+          <el-input
+            v-model="draft.reason"
+            name="rule-reason"
+            type="textarea"
+            :rows="3"
+            data-testid="editor-reason"
+          />
+        </label>
+
+        <p v-if="editorError" class="rules__error" role="alert" data-testid="editor-error">
+          {{ editorError }}
+        </p>
+      </div>
+
+      <template #footer>
+        <el-button @click="editorOpen = false">取消</el-button>
+        <el-button type="primary" data-testid="save-rule" :loading="saving" @click="submitEditor">
+          保存
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog
+      v-model="thresholdOpen"
+      :title="editing ? `调整阈值：${editing.rule_name}` : '调整阈值'"
+      width="440px"
+    >
       <label v-for="(_, key) in thresholdDraft" :key="key" class="threshold__field">
         <span class="threshold__label">{{ key }}</span>
         <el-input v-model="thresholdDraft[key]" :name="`threshold-${key}`" data-testid="threshold-input" />
@@ -184,7 +647,7 @@ useTabSummary(
       </p>
 
       <template #footer>
-        <el-button @click="dialogOpen = false">取消</el-button>
+        <el-button @click="thresholdOpen = false">取消</el-button>
         <el-button
           type="primary"
           data-testid="save-threshold"
@@ -195,6 +658,39 @@ useTabSummary(
         </el-button>
       </template>
     </el-dialog>
+
+    <el-dialog
+      v-model="changesOpen"
+      :title="changesRule ? `变更记录：${changesRule.rule_code}` : '变更记录'"
+      width="720px"
+    >
+      <p v-if="changesError" class="rules__error" role="alert" data-testid="changes-error">
+        {{ changesError }}
+      </p>
+      <p v-else-if="!changesLoading && !changes.length" class="rules__hint" data-testid="changes-empty">
+        这条规则还没有变更记录。
+      </p>
+
+      <el-table v-if="changes.length" :data="changes" data-testid="rule-changes">
+        <el-table-column label="时间" min-width="150">
+          <template #default="{ row }">{{ formatDateTime(row.changed_at) }}</template>
+        </el-table-column>
+        <el-table-column label="变更类型" prop="change_type" min-width="90" />
+        <el-table-column label="操作人" prop="changed_by_name" min-width="90" />
+        <el-table-column label="变更内容" min-width="240">
+          <template #default="{ row }">
+            <span data-testid="change-diff">
+              {{ formatValue(row.old_value) }} → {{ formatValue(row.new_value) }}
+            </span>
+          </template>
+        </el-table-column>
+        <el-table-column label="理由" prop="reason" min-width="140" />
+      </el-table>
+
+      <template #footer>
+        <el-button data-testid="close-changes" @click="changesOpen = false">关闭</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -203,6 +699,14 @@ useTabSummary(
   display: flex;
   flex-direction: column;
   gap: var(--wm-space-4);
+}
+
+.rules__toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--wm-space-3);
+  margin-bottom: var(--wm-space-3);
 }
 
 .rules__error {
@@ -217,6 +721,50 @@ useTabSummary(
   color: var(--wm-text-muted);
   font-size: 0.85rem;
   line-height: 1.7;
+}
+
+.rules__deleted-tag {
+  margin-left: var(--wm-space-2);
+}
+
+/* 已删除的行置灰只读：它还在列表里是为了可查，不是为了还能改。 */
+.rules :deep(.rules__row--deleted) {
+  color: var(--wm-text-muted);
+}
+
+.editor {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wm-space-3);
+}
+
+.editor__field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wm-space-1);
+}
+
+.editor__label {
+  color: var(--wm-text-muted);
+  font-size: 0.8rem;
+}
+
+.editor__hint {
+  color: var(--wm-text-muted);
+  font-size: 0.78rem;
+  line-height: 1.6;
+}
+
+.editor__threshold {
+  display: flex;
+  gap: var(--wm-space-3);
+}
+
+.editor__threshold-item {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--wm-space-1);
 }
 
 .threshold__field {

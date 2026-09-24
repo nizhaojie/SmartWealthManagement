@@ -8,7 +8,7 @@
 // 写入侧的界线（ADR-0026）：可改的是**组合**（在给定的字段、算子与值域里挑），不可改的是
 // **表达**。因此表单里的可选项与允许搭配全部来自 `GET /schema`，组件里不留第二份清单；
 // 判定形状（字段 / 算子 / 时间窗）连编辑都不给——要换判定方式只能删除后重建。
-import { computed, onMounted, reactive, ref, watch } from "vue";
+import { computed, nextTick, onMounted, reactive, ref, watch } from "vue";
 import { PaginationBar, PanelCard, usePagination } from "@wealth/shared";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { errorMessage, formatDateTime, formatValue } from "../format";
@@ -41,9 +41,10 @@ const emit = defineEmits<{ summary: [value: TabSummary] }>();
 const auth = useAuthStore();
 const canManage = computed(() => canManageRiskRules(auth.currentEmployee?.employee_role));
 
-// 「显示已删除」默认关：默认视图就是「现在还算数的规则」。它是**服务端**参数
-// （`include_deleted`）——前端过滤会让「共 N 条」与实际行数对不上（ADR-0024）。
-const includeDeleted = ref(false);
+// 状态与判定字段都是服务端参数。前端过滤会让「共 N 条」与实际行数对不上（ADR-0024）。
+// 默认「全部」：未删除的已启用与已停用。已删除是同一组里的一档，不再另设勾选。
+const statusFilter = ref<"" | "已启用" | "已停用" | "已删除">("");
+const fieldFilter = ref("");
 
 const schema = ref<RiskRuleSchema | null>(null);
 const schemaError = ref("");
@@ -65,14 +66,13 @@ const {
   refresh,
   goTo,
   reset,
-} = usePagination<RiskRule>((query) => listRiskRules(query, includeDeleted.value), {
-  failureMessage: "规则列表加载失败",
-});
-
-// 已删除的规则不参与匹配，它的 `enabled` 只是一个留在库里的旧值：数「本页几条启用」
-// 时不算它，否则「显示已删除」一开，这个数字会虚高。
-const enabledCount = computed(
-  () => rules.value.filter((rule) => rule.enabled && !rule.deleted_at).length,
+} = usePagination<RiskRule>(
+  (query) =>
+    listRiskRules(query, {
+      status: statusFilter.value || undefined,
+      field: fieldFilter.value || undefined,
+    }),
+  { failureMessage: "规则列表加载失败" },
 );
 
 function isDeleted(rule: RiskRule): boolean {
@@ -84,10 +84,18 @@ function replaceRule(next: RiskRule): void {
   rules.value = rules.value.map((rule) => (rule.id === next.id ? next : rule));
 }
 
-watch(includeDeleted, () => {
+watch([statusFilter, fieldFilter], () => {
   // 筛选条件变了就回第一页：停在第 3 页会看到「筛选后为空」，那不是筛选的结果。
   void reset();
 });
+
+/** 写操作之后重取当前页；这一页因此空了，就退到仍有数据的上一页。 */
+async function refreshAfterWrite(): Promise<void> {
+  await refresh();
+  if (rules.value.length === 0 && page.value > 1) {
+    await goTo(page.value - 1);
+  }
+}
 
 // ---------------- 理由：三个写入口共用的一个范式 ----------------
 
@@ -127,7 +135,10 @@ async function toggleRule(rule: RiskRule): Promise<boolean> {
 
   actionError.value = "";
   try {
-    replaceRule(await setRiskRuleEnabled(rule.id, next, reason));
+    await setRiskRuleEnabled(rule.id, next, reason);
+    // 先让开关落定再重取。重取若发生在 `before-change` 里，行被拆掉时开关还要去改一个
+    // 已经不在的控件。停用后可能不再属于「已启用」，重取才会把它从这一档拿走。
+    void nextTick(() => refreshAfterWrite());
     return true;
   } catch (error) {
     actionError.value = errorMessage(error, "启停变更失败");
@@ -151,8 +162,8 @@ async function removeRule(rule: RiskRule): Promise<void> {
   try {
     await deleteRiskRule(rule.id, reason);
     ElMessage.success("规则已删除");
-    // 重取当前这一页，不回到第一页：删掉的未必是这一页唯一一条。
-    await refresh();
+    // 重取当前这一页，不回到第一页：删掉的未必是这一页唯一一条。这一页因此空了才退一页。
+    await refreshAfterWrite();
   } catch (error) {
     actionError.value = errorMessage(error, "删除失败");
   }
@@ -373,18 +384,27 @@ async function submitEditor(): Promise<void> {
   }
 }
 
+const fieldLabel = computed(
+  () => schema.value?.fields.find((field) => field.key === fieldFilter.value)?.label ?? "",
+);
+
+function rulesHeadline(): string {
+  const count = `共 ${total.value} 条`;
+  const statusText = statusFilter.value ? `${count}${statusFilter.value}规则` : `${count}规则`;
+  return fieldLabel.value ? `${statusText} · 判定字段：${fieldLabel.value}` : statusText;
+}
+
 onMounted(() => {
   void reset();
-  // 编辑器要的下拉项只有写操作才用得上：非风控专员进去也是只读表格，不必打这个请求。
-  if (canManage.value) void loadSchema();
+  // 判定字段的选项来自字段名录。只读角色也要筛，所以不限风控专员。
+  void loadSchema();
 });
 
 useTabSummary(
   (value) => emit("summary", value),
   () => ({
-    // 「共 N 条」是过滤后的总数，不是本页条数；启用条数只数得到本页，因此说清是「本页」，
-    // 否则分页一开，这个数字会随翻页变。「含已删除」要说出来：那个总数里混着已经不算数的行。
-    headline: `共 ${total.value} 条规则${includeDeleted.value ? "（含已删除）" : ""} · 本页 ${enabledCount.value} 条启用`,
+    // 「共 N 条」是筛后的总数。启用条数由「已启用」这一档表达，不再数当前页。
+    headline: rulesHeadline(),
     count: total.value,
   }),
 );
@@ -394,9 +414,27 @@ useTabSummary(
   <div class="rules">
     <PanelCard title="规则管理">
       <div class="rules__toolbar">
-        <el-checkbox v-model="includeDeleted" name="include-deleted" data-testid="include-deleted">
-          显示已删除
-        </el-checkbox>
+        <label class="rules__filter">
+          <span class="rules__filter-label">状态</span>
+          <el-select v-model="statusFilter" name="rule-status" data-testid="rule-status-filter">
+            <el-option label="全部" value="" />
+            <el-option label="已启用" value="已启用" />
+            <el-option label="已停用" value="已停用" />
+            <el-option label="已删除" value="已删除" />
+          </el-select>
+        </label>
+        <label class="rules__filter">
+          <span class="rules__filter-label">判定字段</span>
+          <el-select v-model="fieldFilter" name="rule-field" data-testid="rule-field-filter">
+            <el-option label="全部字段" value="" />
+            <el-option
+              v-for="field in schema?.fields ?? []"
+              :key="field.key"
+              :label="field.label"
+              :value="field.key"
+            />
+          </el-select>
+        </label>
         <el-button
           type="primary"
           name="create-rule"
@@ -416,7 +454,9 @@ useTabSummary(
       >
         {{ ruleError || actionError || schemaError }}
       </p>
-      <p v-if="!loading && !rules.length && !ruleError" class="rules__empty">还没有风控规则。</p>
+      <p v-if="!loading && !rules.length && !ruleError" class="rules__empty">
+        {{ statusFilter || fieldFilter ? "没有符合筛选的规则。" : "还没有风控规则。" }}
+      </p>
       <p v-else-if="!canManage" class="rules__hint" data-testid="rule-read-only">
         当前角色只能查看规则；启停与阈值调整由风控专员完成。
       </p>
@@ -674,12 +714,26 @@ useTabSummary(
   gap: var(--wm-space-4);
 }
 
+.rules__filter {
+  display: flex;
+  align-items: center;
+  gap: var(--wm-space-2);
+}
+
+.rules__filter-label {
+  color: var(--wm-text-secondary);
+  font-size: 0.85rem;
+}
+
 .rules__toolbar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: var(--wm-space-3);
   margin-bottom: var(--wm-space-3);
+}
+
+.rules__toolbar .el-button {
+  margin-left: auto;
 }
 
 .rules__error {

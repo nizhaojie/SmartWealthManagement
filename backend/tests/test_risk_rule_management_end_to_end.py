@@ -13,7 +13,7 @@ Seam 与 `test_end_to_end_customer_journey.py` 同一个口径——后端 HTTP 
    依据落到字段与值。
 2. **一次写操作一条留痕**：新建 → 改名 → 调阈值 → 停用 → 删除，五条记录按时间顺序可
    读，每条都有理由与操作人姓名。
-3. **删除是软删**：默认列表看不到，`include_deleted=true` 看得到（行上带软删标记，界面
+3. **删除是软删**：默认列表看不到，状态选「已删除」看得到（行上带软删标记，界面
    据此置灰只读），而它的变更记录仍然打得开。
 
 测试库跨运行持久，所以本文件造出来的规则、交易与预警在用例前后各清一次（`_purge_test_artifacts`）。
@@ -285,11 +285,11 @@ def _changes(client: TestClient, headers: dict[str, str], rule_id: int) -> list[
 
 
 def _listing(
-    client: TestClient, headers: dict[str, str], *, include_deleted: bool | None = None
+    client: TestClient, headers: dict[str, str], *, status: str | None = None
 ) -> dict:
     params: dict[str, Any] = {"page_size": 100}
-    if include_deleted is not None:
-        params["include_deleted"] = include_deleted
+    if status is not None:
+        params["status"] = status
     response = client.get(BASE_PATH, headers=headers, params=params)
     assert response.status_code == 200, response.text
     return response.json()["data"]
@@ -415,7 +415,7 @@ def test_five_writes_leave_five_changes_in_chronological_order(auth_client: Test
 def test_a_deleted_rule_leaves_the_listing_but_keeps_its_changes_readable(
     auth_client: TestClient,
 ):
-    """删除是软删的一半在服务端：默认看不到、`include_deleted` 看得到、留痕还打得开。
+    """删除是软删的一半在服务端：默认看不到、状态「已删除」看得到、留痕还打得开。
 
     另一半在界面上（置灰只读、只留「查看变更记录」），由 `RiskRulesTab.vue` 的组件测试
     守着。行留在库里是历史预警能继续解析规则名、留痕表的外键不作废的前提（ADR-0027）。
@@ -434,10 +434,10 @@ def test_a_deleted_rule_leaves_the_listing_but_keeps_its_changes_readable(
     assert rule_code not in {rule["rule_code"] for rule in default_page["items"]}
     assert all(rule["deleted_at"] is None for rule in default_page["items"])
 
-    with_deleted = _listing(auth_client, headers, include_deleted=True)
+    with_deleted = _listing(auth_client, headers, status="已删除")
     row = next(rule for rule in with_deleted["items"] if rule["rule_code"] == rule_code)
     assert row["deleted_at"] is not None
-    assert with_deleted["total"] == default_page["total"] + 1
+    assert with_deleted["total"] == 1
 
     # 已删除的规则照样打得开它的变更记录：删除本身也留痕、也可查。
     changes = _changes(auth_client, headers, rule_id)

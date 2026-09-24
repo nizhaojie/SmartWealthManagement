@@ -145,9 +145,9 @@ async function mountTab(role: string = RISK_OFFICER): Promise<VueWrapper> {
   return activeWrapper;
 }
 
-/** 每一次取数请求的两个参数：查询串与「要不要带已删除」。 */
-function listCalls(): [PageQuery, boolean][] {
-  return listRiskRules.mock.calls as [PageQuery, boolean][];
+/** 每一次取数请求的两个参数：分页，以及状态 / 判定字段。 */
+function listCalls(): [PageQuery, { status?: string; field?: string }][] {
+  return listRiskRules.mock.calls as [PageQuery, { status?: string; field?: string }][];
 }
 
 function lastQuery(): PageQuery {
@@ -266,8 +266,8 @@ describe("RiskRulesTab 的分页", () => {
     listRiskRules.mockResolvedValue(makePage([makeRule()], TOTAL));
     const wrapper = await mountTab();
 
-    // 默认不带已删除：这是接口上的一个服务端参数，不是本地过滤。
-    expect(listRiskRules).toHaveBeenCalledWith({ page: 1, page_size: PAGE_SIZE }, false);
+    // 默认是「全部」且不限判定字段：两个筛选都不传，由服务端按未删除的规则返回。
+    expect(listRiskRules).toHaveBeenCalledWith({ page: 1, page_size: PAGE_SIZE }, {});
     expect(wrapper.get('[data-testid="pagination-total"]').text()).toBe("共 25 条");
   });
 
@@ -327,6 +327,74 @@ describe("RiskRulesTab 的分页", () => {
 
     expect(wrapper.find('[data-testid="rules-table"]').exists()).toBe(false);
     expect(wrapper.find('[data-testid="pagination-bar"]').exists()).toBe(true);
+  });
+
+  it("筛选已启用与判定字段后，摘要只报筛后的总数", async () => {
+    listRiskRules.mockImplementation((query: PageQuery, filters: { status?: string; field?: string } = {}) =>
+      Promise.resolve(
+        makePage(
+          filters.status === "已启用" && filters.field === "amount" ? [makeRule()] : [makeRule(), makeRule({ id: 2, rule_code: "R002" })],
+          filters.status === "已启用" && filters.field === "amount" ? 12 : TOTAL,
+          query,
+        ),
+      ),
+    );
+    const wrapper = await mountTab();
+
+    await chooseSelect(wrapper, "rule-status-filter", "已启用");
+    await chooseSelect(wrapper, "rule-field-filter", "amount");
+
+    expect(listCalls().at(-1)).toEqual([
+      { page: 1, page_size: PAGE_SIZE },
+      { status: "已启用", field: "amount" },
+    ]);
+    const summaries = wrapper.emitted("summary");
+    expect(summaries!.at(-1)![0]).toMatchObject({
+      headline: "共 12 条已启用规则 · 判定字段：交易金额",
+      count: 12,
+    });
+  });
+
+  it("有筛选但没有命中时说明是筛选为空", async () => {
+    listRiskRules.mockResolvedValue(makePage([], 0));
+    const wrapper = await mountTab();
+
+    expect(wrapper.get(".rules__empty").text()).toBe("还没有风控规则。");
+
+    await chooseSelect(wrapper, "rule-status-filter", "已停用");
+
+    expect(wrapper.get(".rules__empty").text()).toBe("没有符合筛选的规则。");
+  });
+
+  it("停用后不再符合「已启用」时这一行消失，空页退回上一页", async () => {
+    let stopped = false;
+    listRiskRules.mockImplementation((query: PageQuery, filters: { status?: string } = {}) => {
+      if (filters.status === "已启用" && stopped && query.page > 1) {
+        return Promise.resolve(makePage([], 1, query));
+      }
+      if (query.page === 1) {
+        return Promise.resolve(makePage([makeRule({ rule_code: "R001" })], stopped ? 1 : 11, query));
+      }
+      return Promise.resolve(makePage([makeRule({ id: 11, rule_code: "R011" })], 11, query));
+    });
+    setRiskRuleEnabled.mockImplementation(async () => {
+      stopped = true;
+      return makeRule({ id: 11, rule_code: "R011", enabled: false });
+    });
+    prompt.mockResolvedValue({ value: "先停掉" });
+    const wrapper = await mountTab();
+
+    await chooseSelect(wrapper, "rule-status-filter", "已启用");
+    await wrapper.get(".pagination-bar .btn-next").trigger("click");
+    await flushPromises();
+    expect(wrapper.get('[data-testid="rules-table"]').text()).toContain("R011");
+
+    await rowControl(wrapper, 0, "rule-enabled").trigger("click");
+    await flushPromises();
+
+    expect(lastQuery().page).toBe(1);
+    expect(wrapper.get('[data-testid="rules-table"]').text()).toContain("R001");
+    expect(wrapper.get('[data-testid="rules-table"]').text()).not.toContain("R011");
   });
 
   it("leaves the reason on screen when the load fails", async () => {
@@ -425,6 +493,7 @@ describe("规则编辑器", () => {
 
   it("创建理由为空就不提交，写了才带着它发出去", async () => {
     const wrapper = await mountTab();
+    await chooseSelect(wrapper, "rule-status-filter", "已停用");
     await openCreate(wrapper);
     await fillCreateForm(wrapper);
 
@@ -455,6 +524,8 @@ describe("规则编辑器", () => {
     // 「不回算」是这条 slice 认下的代价：新建完预警列表里什么都不会发生，提示必须说清楚。
     expect(successSpy).toHaveBeenCalledWith(expect.stringContaining("从下一笔交易起生效"));
     expect(successSpy).toHaveBeenCalledWith(expect.stringContaining("历史交易不会被重新判定"));
+    // 新建默认已启用，当前停在「已停用」时筛选不动，人自己改筛选去找。
+    expect(listCalls().at(-1)?.[1]).toEqual({ status: "已停用" });
   });
 
   it("时间窗算子没填窗长就不提交，填了才带着它发出去", async () => {
@@ -611,15 +682,14 @@ describe("理由与已删除", () => {
     expect(setRiskRuleEnabled).toHaveBeenCalledWith(1, false, "演示需要");
   });
 
-  it("「显示已删除」是服务端参数：勾上之后重取，已删行只留变更记录", async () => {
-    // 服务端过滤：带上已删除时总数跟着变（这里的 2 与 1 就是服务端给的两种结果）。
-    listRiskRules.mockImplementation((query: PageQuery, includeDeleted: boolean) =>
+  it("状态选「已删除」是服务端参数：重取后已删行只留变更记录", async () => {
+    listRiskRules.mockImplementation((query: PageQuery, filters: { status?: string } = {}) =>
       Promise.resolve(
         makePage(
-          includeDeleted
-            ? [makeRule(), makeRule({ id: 2, rule_code: "R002", rule_name: "已删规则", deleted_at: "2026-09-24T10:00:00" })]
+          filters.status === "已删除"
+            ? [makeRule({ id: 2, rule_code: "R002", rule_name: "已删规则", deleted_at: "2026-09-24T10:00:00" })]
             : [makeRule()],
-          includeDeleted ? 2 : 1,
+          1,
           query,
         ),
       ),
@@ -628,23 +698,20 @@ describe("理由与已删除", () => {
     expect(bodyRows(wrapper)).toHaveLength(1);
     expect(wrapper.find("tr.rules__row--deleted").exists()).toBe(false);
 
-    await wrapper.get('[data-testid="include-deleted"] input').setValue(true);
-    await flushPromises();
+    await chooseSelect(wrapper, "rule-status-filter", "已删除");
 
-    expect(listCalls().at(-1)).toEqual([{ page: 1, page_size: PAGE_SIZE }, true]);
+    expect(listCalls().at(-1)).toEqual([{ page: 1, page_size: PAGE_SIZE }, { status: "已删除" }]);
     // 已删除的行置灰只读：编辑 / 调阈值 / 启停都不出现，只留一个能打开的变更记录。
-    expect(bodyRows(wrapper)).toHaveLength(2);
-    expect(bodyRows(wrapper)[1]!.classes()).toContain("rules__row--deleted");
-    expect(bodyRows(wrapper)[1]!.text()).toContain("已删除");
-    expect(rowHas(wrapper, 1, "edit-rule")).toBe(false);
-    expect(rowHas(wrapper, 1, "delete-rule")).toBe(false);
-    expect(rowHas(wrapper, 1, "rule-enabled")).toBe(false);
-    expect(rowHas(wrapper, 1, "view-changes")).toBe(true);
-    // 上面那一行（没删的）照旧。
-    expect(rowHas(wrapper, 0, "edit-rule")).toBe(true);
+    expect(bodyRows(wrapper)).toHaveLength(1);
+    expect(bodyRows(wrapper)[0]!.classes()).toContain("rules__row--deleted");
+    expect(bodyRows(wrapper)[0]!.text()).toContain("已删除");
+    expect(rowHas(wrapper, 0, "edit-rule")).toBe(false);
+    expect(rowHas(wrapper, 0, "delete-rule")).toBe(false);
+    expect(rowHas(wrapper, 0, "rule-enabled")).toBe(false);
+    expect(rowHas(wrapper, 0, "view-changes")).toBe(true);
 
     // 已删行也要能打开变更记录（删除这件事本身也可查）。
-    await rowControl(wrapper, 1, "view-changes").trigger("click");
+    await rowControl(wrapper, 0, "view-changes").trigger("click");
     await flushPromises();
     expect(listRiskRuleChanges).toHaveBeenCalledWith(2);
   });
@@ -703,7 +770,7 @@ describe("非风控专员", () => {
     expect(wrapper.get('[data-testid="rule-read-only"]').text()).toBe(
       "当前角色只能查看规则；启停与阈值调整由风控专员完成。",
     );
-    // 编辑器要的下拉项只有写操作才用得上，只读表格不必打这个请求。
-    expect(getRiskRuleSchema).not.toHaveBeenCalled();
+    // 判定字段的选项来自字段名录，只读角色也要筛，所以照样取。
+    expect(getRiskRuleSchema).toHaveBeenCalled();
   });
 });

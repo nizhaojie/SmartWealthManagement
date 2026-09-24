@@ -100,12 +100,13 @@ def _update_changes(body: RuleUpdateRequest) -> dict[str, Any]:
 
 @router.get("")
 def list_risk_rules(
-    include_deleted: bool = Query(default=False, description="是否包含已删除的规则"),
+    status: str | None = Query(default=None, description="全部 / 已启用 / 已停用 / 已删除"),
+    field: str | None = Query(default=None, description="判定字段，取字段名录中的键"),
     page: PageParams = Depends(page_params),
     db: Session = Depends(get_session),
     _auth: AuthContext = Depends(require_internal),
 ):
-    rules, total = service.list_rules(db, page=page, include_deleted=include_deleted)
+    rules, total = service.list_rules(db, page=page, status=status, field=field)
     return ok(
         paginated_response(
             [service.rule_response(rule) for rule in rules], total=total, params=page

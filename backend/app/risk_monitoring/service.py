@@ -37,7 +37,7 @@ from app.exceptions import AppError
 from app.pagination import PageParams, count_matching
 from app.risk_monitoring import validation
 from app.risk_monitoring.context import MonitoringContext, RuleHit, RuleSpec
-from app.risk_monitoring.evaluator import match_rules, rule_description
+from app.risk_monitoring.evaluator import UNKNOWN_FIELD_MESSAGE, match_rules, rule_description
 from app.risk_monitoring.fields import FIELD_REGISTRY
 from app.risk_monitoring.operators import OPERATOR_REGISTRY, format_threshold
 from app.risk_monitoring.rules import RULE_CATEGORIES
@@ -106,11 +106,25 @@ def next_rule_code(db: Session) -> str:
     return f"{RULE_CODE_PREFIX}{max(numbers, default=0) + 1:0{RULE_CODE_DIGITS}d}"
 
 
+RULE_LIST_STATUS_ALL = "全部"
+RULE_LIST_STATUS_ENABLED = "已启用"
+RULE_LIST_STATUS_DISABLED = "已停用"
+RULE_LIST_STATUS_DELETED = "已删除"
+RULE_LIST_STATUSES = (
+    RULE_LIST_STATUS_ALL,
+    RULE_LIST_STATUS_ENABLED,
+    RULE_LIST_STATUS_DISABLED,
+    RULE_LIST_STATUS_DELETED,
+)
+UNKNOWN_RULE_LIST_STATUS_MESSAGE = "未知的规则状态"
+
+
 def list_rules(
     db: Session,
     *,
     page: PageParams,
-    include_deleted: bool = False,
+    status: str | None = None,
+    field: str | None = None,
 ) -> tuple[list[RiskRule], int]:
     """规则的一页，按编号升序，外加规则总数。
 
@@ -118,13 +132,28 @@ def list_rules(
     按编号命名的配置项，编号顺序就是它该有的顺序——换成「时间倒序」只会把 R001 到
     R020 打散，且不换来任何稳定性（产品列表沿用编号升序是同一条理由）。
 
-    默认不含已删除的规则；`include_deleted=True` 时它们照常出现在列表里（要不要置灰
-    是界面的事）。过滤只写在这里：`total` 与当前页由同一条 `base` 派生（ADR-0024），
-    留给接口或前端过滤会让「共 N 条」与翻到底能看到的条数对不上。
+    `status` 四档互斥。缺省与「全部」都不含已删除：已启用是正在参与匹配，已停用是还在
+    但暂时不判定，已删除只看终态。已删除规则库里留下的 `enabled` 不是启停。
+    `field` 是判定字段的名录键，与状态取交集。
+
+    过滤只写在这里：`total` 与当前页由同一条 `base` 派生（ADR-0024），留给接口或前端
+    过滤会让「共 N 条」与翻到底能看到的条数对不上。
     """
+    if status is not None and status not in RULE_LIST_STATUSES:
+        raise AppError(400, UNKNOWN_RULE_LIST_STATUS_MESSAGE)
+    if field is not None and field not in FIELD_REGISTRY:
+        raise AppError(400, UNKNOWN_FIELD_MESSAGE)
     base = select(RiskRule)
-    if not include_deleted:
+    if status == RULE_LIST_STATUS_DELETED:
+        base = base.where(RiskRule.deleted_at.is_not(None))
+    elif status == RULE_LIST_STATUS_ENABLED:
+        base = base.where(RiskRule.deleted_at.is_(None), RiskRule.enabled.is_(True))
+    elif status == RULE_LIST_STATUS_DISABLED:
+        base = base.where(RiskRule.deleted_at.is_(None), RiskRule.enabled.is_(False))
+    else:
         base = base.where(RiskRule.deleted_at.is_(None))
+    if field is not None:
+        base = base.where(RiskRule.field == field)
     total = count_matching(db, base)
     rules = list(
         db.scalars(
@@ -594,7 +623,7 @@ def rule_response(rule: RiskRule) -> dict:
         "alert_level": rule.alert_level,
         "weight": float(rule.weight),
         "enabled": bool(rule.enabled),
-        # 软删标记：列表只有带上它，`include_deleted` 下的行才分得出哪些已经删了。
+        # 软删标记：状态选「已删除」时，行上靠它分出终态。
         "deleted_at": rule.deleted_at.isoformat() if rule.deleted_at is not None else None,
     }
 

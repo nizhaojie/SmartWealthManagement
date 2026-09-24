@@ -73,12 +73,12 @@ def _listing(
     client: TestClient,
     headers: dict[str, str],
     *,
-    include_deleted: bool | None = None,
+    status: str | None = None,
 ) -> dict[str, Any]:
-    """规则列表的一页。`include_deleted=None` 表示**不带这个参数**，走默认值。"""
+    """规则列表的一页。`status=None` 表示不带这个参数，走默认的「全部」。"""
     params: dict[str, Any] = {"page_size": 100}
-    if include_deleted is not None:
-        params["include_deleted"] = include_deleted
+    if status is not None:
+        params["status"] = status
     response = client.get("/api/internal/risk-rules", headers=headers, params=params)
     assert response.status_code == 200
     return response.json()["data"]
@@ -264,7 +264,7 @@ def _no_leftover_soft_deletes(auth_client: TestClient) -> Iterator[None]:
 
 
 def test_a_soft_deleted_rule_leaves_the_default_listing(auth_client: TestClient):
-    """软删的规则默认不出现，`include_deleted=true` 时带着软删标记回来。
+    """软删的规则默认不出现，状态选「已删除」时带着软删标记回来。
 
     过滤在服务端：分页的 `total` 与当前页由同一条查询派生（ADR-0024），谁过滤谁就得
     同时管住这两个数字，留给前端只会让「共 N 条」与翻到底能看到的条数对不上。
@@ -278,9 +278,9 @@ def test_a_soft_deleted_rule_leaves_the_default_listing(auth_client: TestClient)
     assert default_page["total"] == total_before - 1
     assert "R001" not in _codes(default_page)
 
-    with_deleted = _listing(auth_client, headers, include_deleted=True)
-    assert with_deleted["total"] == total_before
-    assert "R001" in _codes(with_deleted)
+    with_deleted = _listing(auth_client, headers, status="已删除")
+    assert with_deleted["total"] == 1
+    assert _codes(with_deleted) == {"R001"}
     deleted_row = next(rule for rule in with_deleted["items"] if rule["rule_code"] == "R001")
     assert deleted_row["deleted_at"] is not None
 

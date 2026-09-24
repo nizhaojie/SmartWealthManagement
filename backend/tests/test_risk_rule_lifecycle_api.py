@@ -178,11 +178,17 @@ def _changes(client: TestClient, headers: dict[str, str], rule_id: int) -> list[
 
 
 def _listing(
-    client: TestClient, headers: dict[str, str], *, include_deleted: bool | None = None
+    client: TestClient,
+    headers: dict[str, str],
+    *,
+    status: str | None = None,
+    field: str | None = None,
 ) -> dict:
     params: dict[str, Any] = {"page_size": 100}
-    if include_deleted is not None:
-        params["include_deleted"] = include_deleted
+    if status is not None:
+        params["status"] = status
+    if field is not None:
+        params["field"] = field
     response = client.get(BASE_PATH, headers=headers, params=params)
     assert response.status_code == 200, response.text
     return response.json()["data"]
@@ -266,6 +272,84 @@ def _alert_detail(client: TestClient, headers: dict[str, str], alert_id: int) ->
     response = client.get(f"{ALERTS_PATH}/{alert_id}", headers=headers)
     assert response.status_code == 200, response.text
     return response.json()["data"]
+
+
+def test_rule_list_status_separates_enabled_disabled_and_deleted(auth_client: TestClient):
+    """状态四档互斥：已启用正在匹配，已停用还在但不判定，已删除不进前两档，全部不含已删除。"""
+    headers = _headers(auth_client)
+    paused = _create(auth_client, headers, rule_name="暂时停用")
+    removed = _create(auth_client, headers, rule_name="已经删除")
+    disabled = auth_client.patch(
+        f"{BASE_PATH}/{paused['id']}/enabled",
+        headers=headers,
+        json={"enabled": False, "reason": "误报过多，先停掉"},
+    )
+    assert disabled.status_code == 200, disabled.text
+    deleted = _delete(auth_client, headers, removed["id"], reason="口径不再适用")
+    assert deleted.status_code == 200, deleted.text
+
+    everything = _listing(auth_client, headers, status="全部")
+    enabled = _listing(auth_client, headers, status="已启用")
+    stopped = _listing(auth_client, headers, status="已停用")
+    gone = _listing(auth_client, headers, status="已删除")
+
+    assert everything["total"] == 21
+    assert {rule["rule_code"] for rule in everything["items"]} >= {paused["rule_code"]}
+    assert removed["rule_code"] not in {rule["rule_code"] for rule in everything["items"]}
+
+    assert enabled["total"] == 20
+    enabled_codes = {rule["rule_code"] for rule in enabled["items"]}
+    assert paused["rule_code"] not in enabled_codes
+    assert removed["rule_code"] not in enabled_codes
+
+    assert stopped["total"] == 1
+    assert [rule["rule_code"] for rule in stopped["items"]] == [paused["rule_code"]]
+
+    assert gone["total"] == 1
+    assert [rule["rule_code"] for rule in gone["items"]] == [removed["rule_code"]]
+
+
+def test_rule_list_field_narrows_within_the_chosen_status(auth_client: TestClient):
+    """判定字段与状态取交集：停用的交易金额规则不会出现在申购金额下面。"""
+    headers = _headers(auth_client)
+    paused = _create(auth_client, headers, rule_name="停用的交易金额")
+    purchase = _create(
+        auth_client,
+        headers,
+        rule_name="申购金额规则",
+        field="purchase_amount",
+    )
+    disabled = auth_client.patch(
+        f"{BASE_PATH}/{paused['id']}/enabled",
+        headers=headers,
+        json={"enabled": False, "reason": "误报过多，先停掉"},
+    )
+    assert disabled.status_code == 200, disabled.text
+
+    stopped_amount = _listing(auth_client, headers, status="已停用", field="amount")
+    purchases = _listing(auth_client, headers, status="全部", field="purchase_amount")
+
+    assert [rule["rule_code"] for rule in stopped_amount["items"]] == [paused["rule_code"]]
+    assert stopped_amount["total"] == 1
+    purchase_codes = {rule["rule_code"] for rule in purchases["items"]}
+    assert purchase["rule_code"] in purchase_codes
+    assert paused["rule_code"] not in purchase_codes
+    assert purchases["total"] == 2
+
+
+def test_rule_list_rejects_an_unknown_status_or_field(auth_client: TestClient):
+    headers = _headers(auth_client)
+    unknown_status = auth_client.get(
+        BASE_PATH, headers=headers, params={"status": "生效"}
+    )
+    unknown_field = auth_client.get(
+        BASE_PATH, headers=headers, params={"field": "not-a-field"}
+    )
+
+    assert unknown_status.status_code == 400
+    assert unknown_status.json()["message"] == "未知的规则状态"
+    assert unknown_field.status_code == 400
+    assert unknown_field.json()["message"] == "未知的规则字段"
 
 
 # --- 创建 ---
@@ -625,9 +709,9 @@ def test_delete_is_a_soft_delete_that_keeps_the_row_and_its_history(auth_client:
     assert row["rule_code"] == created["rule_code"]
     assert row["rule_name"] == "改个名字"
 
-    # 列表默认过滤，`include_deleted=true` 时带着软删标记回来（过滤在服务端，ADR-0024）。
+    # 列表默认不含已删除；「已删除」这一档带着软删标记回来（过滤在服务端，ADR-0024）。
     assert created["rule_code"] not in _rule_codes(auth_client, headers)
-    with_deleted = _listing(auth_client, headers, include_deleted=True)
+    with_deleted = _listing(auth_client, headers, status="已删除")
     deleted_row = next(
         rule for rule in with_deleted["items"] if rule["rule_code"] == created["rule_code"]
     )

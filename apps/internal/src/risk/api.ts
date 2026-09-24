@@ -79,16 +79,24 @@ export function listRiskFocus(
   return http.get<Paginated<RiskFocus>>(`/api/internal/risk-focus${search}`);
 }
 
+export type RiskRuleListFilters = {
+  /** 缺省即「全部」（未删除的已启用与已停用）。已删除与启停互斥。 */
+  status?: "已启用" | "已停用" | "已删除";
+  /** 判定字段的名录键。缺省即不限字段。 */
+  field?: string;
+};
+
 export function listRiskRules(
   query: PageQuery,
-  includeDeleted = false,
+  filters: RiskRuleListFilters = {},
 ): Promise<Paginated<RiskRule>> {
-  // `include_deleted` 是**服务端**参数：前端拿到当前页再过滤，会让「共 N 条」与实际行数
+  // 状态与判定字段都是服务端参数：前端拿到当前页再过滤，会让「共 N 条」与实际行数
   // 对不上（ADR-0024）——总数与当前页必须由同一条查询派生。
   const search = queryString({
     page: query.page,
     page_size: query.page_size,
-    include_deleted: includeDeleted ? "true" : undefined,
+    status: filters.status,
+    field: filters.field,
   });
   return http.get<Paginated<RiskRule>>(`/api/internal/risk-rules${search}`);
 }

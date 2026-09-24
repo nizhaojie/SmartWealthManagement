@@ -2,7 +2,7 @@
 
 Status: ready-for-agent
 
-**后续推翻（2026-09-24，见 `issues/06-composer-and-empty-state-polish.md`）**：Q14（Ctrl+Enter 发送 / Enter 换行）、Q9 的「入口挂顶栏」、以及「空态示例问题点击直接发问」这三条已被 ticket 06 改掉——输入区改回单行回车发送（与客服侧同形），「历史查询」回到页头「清空对话」右侧，示例问题改为只填入输入框。上面的访谈清单是当时的记录，不追改。
+**后续推翻（2026-09-24，见 `issues/06-composer-and-empty-state-polish.md`）**：Q14（Ctrl+Enter 发送 / Enter 换行）、Q9 的「入口挂顶栏」、以及「空态示例问题点击直接发问」这三条已被 ticket 06 改掉——输入区改回单行回车发送（与客服侧同形），「历史查询」回到页头「清空对话」右侧，示例问题改为只填入输入框。同日又追加一次返工（仍是那份 ticket 的末尾）：数据分析页的对话面板原先从未真正铺满可用高度（页根写的是 `height: 100%`，父级 `.shell__content` 是 `height: auto`，百分比静默失效），现由壳的内容区给下限、页根 `flex: 1` 吸收；**客服侧的输入带向这一页看齐——这一条越过了本文 Out of Scope 的「客户侧任何改动」**，越过的只是样式，`apps/customer` 的对话逻辑与呈现面未动。上面的访谈清单是当时的记录，不追改。
 
 前置：`data-analysis-agent`（已实现，语义视图 + NL2SQL + 查询界面）、`frontend-rebuild`（已实现，三栏外壳与设计令牌）、`list-pagination`（已实现——右栏分页控件就是它留下的）。
 

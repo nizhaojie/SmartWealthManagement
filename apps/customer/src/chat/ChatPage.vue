@@ -297,9 +297,10 @@ async function send(): Promise<void> {
   align-items: center;
   gap: var(--wm-space-3);
   padding: var(--wm-space-3) var(--wm-space-4);
-  /* 输入带用淡灰底 + 实线顶部分隔，和上方白色消息区拉开区分度 */
-  border-top: 1px solid var(--wm-border);
-  background-color: var(--wm-bg-page);
+  /* 输入带与数据分析侧（`apps/internal` 的 MessageComposer）同形：细线顶部分隔 + 淡底，
+     输入框自身的描边留着（原先这条无描边是这页的独有形态，已取消） */
+  border-top: 1px solid var(--wm-border-hairline);
+  background-color: var(--wm-bg-subtle);
   flex-shrink: 0;
 }
 
@@ -319,11 +320,5 @@ async function send(): Promise<void> {
 
 .composer__input {
   flex: 1;
-}
-
-/* 02 的 composer 是一条无描边的输入带：去掉 EP 输入框自身的描边 */
-.composer :deep(.el-input__wrapper) {
-  box-shadow: none;
-  background-color: transparent;
 }
 </style>

@@ -168,8 +168,12 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   gap: var(--wm-space-4);
-  /* 对话页是内容区的全部：占满可用高度，滚动交给消息区 */
-  height: 100%;
+  /* 对话页是内容区的全部：占满可用高度，滚动交给消息区。
+     高度不能借 `height: 100%` 拿——页根挂在 `.shell__content` 下，那一层是 `height: auto`
+     （只跟内容一样高），百分比到它这里会静默解析成 auto，面板就退化成「跟内容一样高」。
+     改用 `flex: 1` 吸收壳的内容区给出的下限高度（`.shell__content` 的 `min-height: 100%`）。
+     客服侧的 ChatPage 是 `.app-shell__content` 的直接子级、那一层高度确定，才用得上百分比。 */
+  flex: 1;
   min-height: 0;
 }
 

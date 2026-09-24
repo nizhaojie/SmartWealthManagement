@@ -142,10 +142,16 @@ async function onLogout(): Promise<void> {
 </template>
 
 <style scoped>
+/* 内容区至少铺满 AppShell 给的可用高度。页根元素是挂在这一层下的，而这一层是
+   `height: auto`——它只跟内容一样高，于是「要占满高度」的页根（数据分析的对话面板）
+   拿不到可依的高度，`height: 100%` 在它这里静默解析成 auto，面板就退化成跟内容一样高。
+   给一个下限即可：页根改用 `flex: 1` 吸收剩余高度，也就是内容区的整块可用高度。
+   内容更高的页面照旧把它撑高（min-height 不是 height，不截断内容），外层滚动条行为不变。 */
 .shell__content {
   display: flex;
   flex-direction: column;
   gap: var(--wm-space-4);
+  min-height: 100%;
 }
 
 .shell__breadcrumb {

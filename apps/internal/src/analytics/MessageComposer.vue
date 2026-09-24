@@ -19,15 +19,13 @@ function focus(): void {
 
 async function submit(): Promise<void> {
   const question = text.value.trim();
-  // 上一轮还在途时不接这一下：输入框里的字原样留着，不静默吞掉。
+  // 上一轮还在途时不接这一下（页面那一层也拦一道）：输入框里的字原样留着，不静默吞掉。
   if (!question || props.busy) return;
   text.value = "";
   emit("submit", question);
   await nextTick();
   focus();
 }
-
-defineExpose({ focus });
 </script>
 
 <template>
@@ -43,7 +41,6 @@ defineExpose({ focus });
     />
 
     <div class="ask__row">
-      <span class="ask__hint">Ctrl + Enter 发送，Enter 换行</span>
       <el-button
         type="primary"
         native-type="submit"
@@ -72,12 +69,7 @@ defineExpose({ focus });
 .ask__row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: var(--wm-space-3);
-}
-
-.ask__hint {
-  color: var(--wm-text-muted);
-  font-size: 0.75rem;
 }
 </style>

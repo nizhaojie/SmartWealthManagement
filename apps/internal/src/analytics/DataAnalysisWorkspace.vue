@@ -19,6 +19,10 @@ const draft = ref("");
 const examples = ref<AnalyticsExampleItem[]>([]);
 const selectedHistoryId = ref<number | null>(null);
 
+// 这一段页面生命周期里刚落地的轮次：只有它的解读逐字上屏。刷新或切模块回来时读到的是
+// 一整条线程，那些轮次的解读直接是全文——20 轮一起重新逐字播放不是逐字感，是把页面拖住。
+const typingRoundId = ref<string | null>(null);
+
 const thread = useAnalyticsThreadStore();
 
 /**
@@ -65,6 +69,8 @@ async function loadExamples(): Promise<void> {
  */
 async function ask(text: string): Promise<void> {
   const question = text.trim();
+  // 空问题与「上一轮还在途」在这里再拦一道：输入区那一层的守卫是为了不吞掉已输入的字，
+  // 而空态的示例问题不经过输入区，直接走到这里。
   if (!question || asking.value) return;
 
   // 这一轮先入线程（问题 + 「正在查询」的助手位）：失败也留在线程里，它不是没问过。
@@ -77,6 +83,7 @@ async function ask(text: string): Promise<void> {
       sessionId: thread.sessionId ?? undefined,
     });
     thread.settleRound(roundId, response);
+    typingRoundId.value = roundId;
     // 主区已经有新的结果了，先前点开的那条历史记录就该收起；这一轮的留痕是最新的一条，
     // 因此回到第一页取——停在原来的页上，刚问完的这一条不会出现。
     selectedHistoryId.value = null;
@@ -166,6 +173,7 @@ onMounted(async () => {
         v-else
         :messages="thread.messages"
         :dropped-rounds="thread.droppedRounds"
+        :typing-id="typingRoundId ?? undefined"
       />
 
       <MessageComposer v-model="draft" :busy="asking" @submit="ask" />

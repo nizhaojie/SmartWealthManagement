@@ -6,7 +6,14 @@ import type { ThreadMessage } from "./threadStore";
 
 // 消息列表：一轮问答是「用户气泡在上、助手气泡在下」，累积着不覆盖。
 // 滚动只发生在这里（列表自己滚），底部输入区始终贴在面板下沿。
-const props = defineProps<{ messages: ThreadMessage[]; droppedRounds?: number }>();
+//
+// `typingId` 是「哪一轮的解读正在逐字上屏」——只有刚到的轮次会逐字播，读回的历史轮次
+// 直接是全文（见 `InterpretationText`），所以这个判断来自页面而不是这里。
+const props = defineProps<{
+  messages: ThreadMessage[];
+  droppedRounds?: number;
+  typingId?: string;
+}>();
 
 const listEl = ref<HTMLElement | null>(null);
 
@@ -24,8 +31,6 @@ watch(() => props.messages, () => void scrollToBottom());
 
 // 从别的模块切回本页时组件重新挂载：进来就落到底部，而不是停在最旧的一轮上。
 onMounted(() => void scrollToBottom());
-
-defineExpose({ scrollToBottom });
 </script>
 
 <template>
@@ -37,7 +42,13 @@ defineExpose({ scrollToBottom });
 
     <template v-for="message in messages" :key="message.id">
       <UserBubble v-if="message.role === 'user'" :question="message.question" />
-      <AssistantBubble v-else :message="message" />
+      <!-- 气泡里的内容长高了就把它带到底下：逐字上屏最新那几个字不该滑出可视区。 -->
+      <AssistantBubble
+        v-else
+        :message="message"
+        :typing="message.id === typingId"
+        @grow="scrollToBottom"
+      />
     </template>
   </div>
 </template>

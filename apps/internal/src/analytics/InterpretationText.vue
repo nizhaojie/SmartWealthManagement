@@ -7,19 +7,28 @@ import { createTypewriter } from "./typewriter";
 const TYPEWRITER_INTERVAL_MS = 30;
 
 // 伪流式只作用于解读这一段：整包到达后逐字上屏，表格与 SQL 等它播完再出现（见 04）。
-// 打字机是页面内的一次性播放器，不落任何全局状态——重挂载即重播，不跨轮共享。
-const props = defineProps<{ text: string }>();
+//
+// `typing` 说的是「这一轮是刚到的」：只有刚到的轮次才逐字播。读回的历史轮次
+// （刷新、切模块回来）是全文直出——20 轮一起重新逐字播放不是「逐字感」，是把页面拖住。
+const props = defineProps<{ text: string; typing?: boolean }>();
+const emit = defineEmits<{ grow: [] }>();
 
 const shown = ref("");
 const typewriter = createTypewriter(TYPEWRITER_INTERVAL_MS, (char) => {
   shown.value += char;
+  // 每长一个字就告诉外框一声：解读把气泡撑高时，线程得跟着往下贴。
+  emit("grow");
 });
 
 // 只播一遍：这一轮的解读是定案文本，不是增量流。text 换了就从头重播。
 watch(
-  () => props.text,
-  (text) => {
+  [() => props.text, () => props.typing],
+  ([text, typing]) => {
     typewriter.flush();
+    if (!typing) {
+      shown.value = text;
+      return;
+    }
     shown.value = "";
     typewriter.push(text);
   },

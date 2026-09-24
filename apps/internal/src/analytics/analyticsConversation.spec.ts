@@ -186,6 +186,58 @@ describe("线程", () => {
 
     expect(list.scrollTop).toBe(900);
   });
+
+  it("解读逐字把气泡撑高时，线程跟着往下贴", async () => {
+    const app = await mountWorkspace();
+    await composer(app).setValue("这个月新增了几个客户");
+    await app.get("form.ask").trigger("submit");
+    await flushPromises();
+    const list = app.get("[data-testid='conversation-thread']").element as HTMLElement;
+
+    Object.defineProperty(list, "scrollHeight", { value: 500, configurable: true });
+    await vi.advanceTimersByTimeAsync(60);
+    expect(list.scrollTop).toBe(500);
+
+    // 解读又长高了：位置跟着走，最新吐出来的那几个字不会滑出可视区。
+    Object.defineProperty(list, "scrollHeight", { value: 700, configurable: true });
+    await vi.advanceTimersByTimeAsync(60);
+    expect(list.scrollTop).toBe(700);
+  });
+});
+
+describe("读回的线程", () => {
+  /** 上一场留在线程持久层里的一轮（形状与 `threadStore` 落的完全一致）。 */
+  function storedRound(): void {
+    sessionStorage.setItem(
+      `wealth-internal-analytics-thread:${EMPLOYEE}`,
+      JSON.stringify({
+        version: 1,
+        messages: [
+          { id: "u-1", role: "user", question: "上个月各风险等级的客户分布" },
+          {
+            id: "a-1",
+            role: "assistant",
+            status: "answered",
+            result: answer("上个月各风险等级的客户分布"),
+            failure: null,
+          },
+        ],
+        droppedRounds: 0,
+        sessionId: null,
+      }),
+    );
+  }
+
+  it("历史轮次的解读是全文直出，不重新逐字播一遍", async () => {
+    storedRound();
+
+    const app = await mountWorkspace();
+
+    // 一个 tick 都不推：刷新或切模块回来时，整条线程一起重新逐字播放不是逐字感。
+    expect(app.get("[data-testid='interpretation']").text()).toBe(
+      "关于「上个月各风险等级的客户分布」的解读。",
+    );
+  });
 });
 
 describe("加载态", () => {

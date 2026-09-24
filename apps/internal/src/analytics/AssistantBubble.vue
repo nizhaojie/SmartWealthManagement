@@ -9,8 +9,10 @@ import type { AssistantMessage } from "./threadStore";
 // 会让员工把它当成信息。**不得**加阶段。
 //
 // 现在的三种形态：在途（正在查询数据…）/ 没问成（后端那句话原文）/ 已作答（解读）。
-// 已作答这一支是 04 的落点：表格、可折叠 SQL、元信息行与警示都往这里长。
-defineProps<{ message: AssistantMessage }>();
+// 已作答这一支是 04 的落点：表格、可折叠 SQL、元信息行与警示都往这里长——它们长高时
+// 同样要往上报一声 `grow`，线程才跟得上。
+defineProps<{ message: AssistantMessage; typing?: boolean }>();
+const emit = defineEmits<{ grow: [] }>();
 </script>
 
 <template>
@@ -36,7 +38,12 @@ defineProps<{ message: AssistantMessage }>();
       {{ message.failure?.message }}
     </p>
 
-    <InterpretationText v-else-if="message.result" :text="message.result.interpretation" />
+    <InterpretationText
+      v-else-if="message.result"
+      :text="message.result.interpretation"
+      :typing="typing"
+      @grow="emit('grow')"
+    />
   </article>
 </template>
 
@@ -62,12 +69,12 @@ defineProps<{ message: AssistantMessage }>();
 
 .answer__dots {
   display: inline-flex;
-  gap: 3px;
+  gap: var(--wm-space-1);
 }
 
 .answer__dots i {
-  width: 4px;
-  height: 4px;
+  width: var(--wm-space-1);
+  height: var(--wm-space-1);
   border-radius: var(--wm-radius-pill);
   background-color: var(--wm-text-muted);
 }

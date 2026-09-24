@@ -641,3 +641,47 @@ def test_identity_is_reset_before_the_connection_returns_to_pool(
         assert (
             connection.execute(text("SELECT @analytics_employee_role")).scalar() is None
         )
+
+
+# ---- 连接清理（客户段）：同一根连接上不留客户身份 ------------------------------
+#
+# 与上面那条同一条语义，后果却更直接：借到的是**别的人**的账目。清理之后客户域视图
+# 回到零行——未设置身份时一行都不返回（fail closed），这正是护栏 3 在客户域的落点。
+
+
+def test_customer_identity_is_reset_before_the_connection_returns_to_pool(
+    analytics_client: TestClient,
+):
+    settings = get_settings()
+    engine = create_engine(settings.test_database_url)
+    try:
+        with OrmSession(engine) as session:
+            base_url = execution.base_url_of(session)
+    finally:
+        engine.dispose()
+    analytics_engine = execution.engine_for(base_url, settings)
+    # 一位真实客户：这条查询确实取得到行，否则「清理后零行」在「本来就零行」上也成立，
+    # 证明不了身份真的被清掉了。
+    customer_id = min(_manager1_customer_ids())
+
+    with analytics_engine.connect() as connection:
+        connection_id = connection.execute(text("SELECT CONNECTION_ID()")).scalar_one()
+
+    result = execution.execute_query(
+        base_url,
+        "SELECT customer_id FROM va_my_holdings",
+        identity=AnalyticsIdentity.customer(customer_id=customer_id),
+        settings=settings,
+    )
+
+    assert result.rows and {int(row[0]) for row in result.rows} == {customer_id}
+    with analytics_engine.connect() as connection:
+        assert (
+            connection.execute(text("SELECT CONNECTION_ID()")).scalar_one()
+            == connection_id
+        )
+        assert connection.execute(text("SELECT @analytics_customer_id")).scalar() is None
+        for view in CUSTOMER_VIEW_NAMES:
+            assert (
+                connection.execute(text(f"SELECT COUNT(*) FROM {view}")).scalar_one() == 0
+            )

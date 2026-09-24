@@ -4,6 +4,9 @@
 这条链路串成一个能讲的故事」，以及被追问时该指到哪一条断言。护栏与不变量由
 `backend/tests/` 里的断言守着，本节最后一张表给出每个演示点对应的用例。
 
+第五幕是另一条横切 slice（`customer-nl2sql`）的收口，不属上面那条链路：客户的智能客服
+接上了 NL2SQL，用大白话查自己的账。
+
 一句话主旨：**风控那一侧一直是完整的——规则、算子、分级、预警、工单都在；缺的是输入端。**
 这个 slice 补的是「交易从哪来」：客户第一次能自己动钱，客户经理第一次能提建议，
 而这两件事都从同一个交易事件入海口进风控。
@@ -32,7 +35,8 @@ pnpm install && pnpm dev               # 后端 8000、客户端 5173、内部�
 | 风控专员 | `risk1` 周风控 | 预警列表、预警详情、工单处置 |
 | 客户 | `zhangc3` 张衡 C3 可用余额 100 万 | 第二幕：50 万转账 |
 | 客户 | `qianc5` 钱远航 C5 可用余额 500 万，持有玉衡进取 200000 份 | 第三幕：建议链路 |
-| 客户 | `wangc1` 王守成 C1 可用余额 **2000** | 第四幕：余额不足被拒绝（刻意给少的） |
+| 客户 | `wangc1` 王守成 C1 可用余额 **2000** | 第四幕：余额不足被拒绝（刻意给少的）；第五幕：C1 只筛得出 R1 |
+| 客户 | `lisic2` 李思远 C2 | 第五幕：C2 筛得出 R1/R2 两档 |
 
 **上台前必须知道的三件事：**
 
@@ -147,14 +151,36 @@ Agent 会给出该持仓的全部成交金额 `500,000.00` 元——正好是一
    > 说不清是哪一种。最后那一步成交由
    > `test_the_same_customer_can_trade_after_taking_the_assessment` 钉住。」
 
-## 七、收尾与重置
+## 七、第五幕：客户用大白话问自己的账（`customer-nl2sql`）
+
+客户端用 `wangc1` 登录 → **智能客服**。这一屏以前只会查知识库，现在同一句大白话也能查自己的
+账——查的是**客户域语义视图**，行级条件内建为「只出凭证客户本人的行」。三句问话各演一面。
+
+1. 问**「我持有哪些产品」** → 回答是一段文本，数字直接写在里面（产品代码、份额、市值），
+   **没有引用角标**。
+   > 台词：「引用是知识检索的契约——有出处才敢说。数据回答的依据是查询本身：这条答案是一条
+   > SELECT 跑出来的，跑的是锁死到本人那一行的视图，所以它不需要角标，也不许退到知识库去
+   > 凑一段泛泛之谈。」
+2. 问**「有什么适合我的风险等级的产品」** → 产品清单，**只按产品代码排序**：王守成是 C1，
+   清单里只有 R1；换 `lisic2` 李思远（C2）看得到 R1/R2 两档，顺序仍是产品代码。
+   > 台词：「这不是推荐。等级结论就是他自己可见视图里的一列，筛的是客观条件；清单只筛不排序、
+   > 按产品代码排——不评分、不按收益或费率排（护栏 4）。排序与理由要到投顾那一侧才有。」
+3. 问**「我的画像标签是什么」** → 白名单外语术：明说不在可查范围，并把能查的列出来
+   （持仓明细、交易流水、资金账户余额、风险承受等级、产品要素）。
+   > 台词：「画像标签在客户可见视图的边界外，所以它拿到的不是一段编出来的回答，而是一句
+   > 『不在我能查询的范围内』——比知识库兜底更诚实。」
+4. **零行与失败是两句话**：查不到数据是「没有查到符合条件的数据」（事实），查询失败或超时是
+   「暂时查不了，请稍后再试，或到资产页查看」并落一条降级留痕。想现场看降级那一面，把执行
+   超时调到极小再问第 1 句即可——**任何一条出口都不会回退到知识检索**。
+
+## 八、收尾与重置
 
 - 重新执行 `cd backend && python -m app.db.setup` 即可回到本节各幕的起点（余额、持仓、
   历史交易与历史预警一起复位）；重复执行两次的结果完全一致。
 - 事件总线（Redis）不可用时不影响演示的正确性：交易与预警照常落库，只是广播与订阅方
   （风险关注、SSE 推送）不生效。
 
-## 八、被追问时指到哪条断言
+## 九、被追问时指到哪条断言
 
 | 演示点 | 断言 |
 |---|---|
@@ -175,3 +201,9 @@ Agent 会给出该持仓的全部成交金额 `500,000.00` 元——正好是一
 | 五个 Agent 各自被打到真实链路上（含本 slice 的业务操作 Agent） | `tests/test_end_to_end_customer_journey.py::test_full_customer_journey_for_both_personas` |
 | 新开户客户的资金账户在开户时就有了（余额 0），下单回的是余额不足 | `tests/test_customer_onboarding.py::test_a_newly_opened_customer_has_a_funding_account_with_no_money`、`::test_a_freshly_opened_customer_is_short_of_balance_not_missing_an_account` |
 | 目标配置是一组比例：合计不是 100 一律拒绝（开户与手工修正两条路径） | `tests/test_customer_onboarding.py::test_a_target_allocation_that_does_not_total_one_hundred_is_rejected`、`::test_the_target_allocation_cannot_be_smuggled_in_through_the_tag_correction` |
+| 第五幕：客户问「我持有哪些产品」拿到本人持仓的文本（无角标、不碰知识检索） | `tests/test_customer_data_query.py::test_customer_asks_for_own_holdings_and_gets_her_own_numbers` |
+| 第五幕：产品清单只筛不排序、按产品代码排、无推荐话术（护栏 4 的客户段） | `tests/test_customer_data_query.py::test_product_screening_filters_by_own_level_and_sorts_by_product_code_only` |
+| 第五幕：白名单外得到边界话术，不是知识库兜底 | `tests/test_customer_data_query.py::test_question_outside_the_whitelist_gets_the_boundary_message`、`::test_employee_side_views_are_not_in_the_customer_candidate_set` |
+| 第五幕：零行是事实、失败是降级（并留痕），两者话术可区分 | `tests/test_customer_data_query.py::test_zero_rows_answers_the_fact_while_failure_answers_the_degradation`、`::test_failed_query_degrades_with_a_trace_and_never_falls_back` |
+| 第五幕：客户段护栏——写类与伪造身份被拒、员工域取不到行、注入改不了范围（护栏 3） | `tests/test_customer_data_query.py::test_malicious_queries_are_rejected_on_the_customer_path`、`::test_a_write_class_query_cannot_reach_the_customer_ledger`、`::test_the_employee_domain_stays_out_of_reach_from_the_customer_path`、`::test_a_forged_customer_id_cannot_widen_the_row_scope` |
+| 第五幕：归还连接前清掉客户身份，未设置身份时客户域零行 | `tests/test_analytics_query.py::test_customer_identity_is_reset_before_the_connection_returns_to_pool` |

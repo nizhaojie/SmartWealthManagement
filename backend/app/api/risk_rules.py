@@ -45,6 +45,19 @@ def list_risk_rules(
     )
 
 
+@router.get("/schema")
+def get_risk_rule_schema(
+    _auth: AuthContext = Depends(require_internal),
+):
+    """规则编辑器要的下拉项与允许组合：分类、字段（允许的算子与值域）、算子。
+
+    它与写入侧校验读的是同一份注册表（`service.rule_schema`），因此前端禁掉的选项与
+    后端拒掉的组合不会漂移。门控跟列表一致：只对内部员工开放——专员在表单上能选什么
+    由后端说了算，而这份载荷就是那句「由后端说了算」的形状。
+    """
+    return ok(service.rule_schema())
+
+
 @router.get("/{rule_id}/changes")
 def list_risk_rule_changes(
     rule_id: int,

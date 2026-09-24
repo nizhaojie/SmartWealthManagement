@@ -5,6 +5,9 @@
 留空，但谁、什么时候、从什么改成什么一定记下来。规则可创建、修改、删除之后，那三种
 动作也各记一笔——五种类型对应五件事，不是同一件事的五个名字。
 
+写入侧的判定形状校验不在这里：三档（名录 → 搭配 → 值域）都在
+`app/risk_monitoring/validation.py`，本模块的每个写入口都经过它（ADR-0026）。
+
 匹配入口 `match_enabled_rules` 只读启用的规则，求值交给纯函数——这里不做任何
 判定，也不碰模型。
 
@@ -24,16 +27,12 @@ from sqlalchemy.orm import Session
 from app.db.models import Employee, RiskRule, RiskRuleChange
 from app.exceptions import AppError
 from app.pagination import PageParams, count_matching
+from app.risk_monitoring import validation
 from app.risk_monitoring.context import MonitoringContext, RuleHit, RuleSpec
 from app.risk_monitoring.evaluator import match_rules
 from app.risk_monitoring.fields import FIELD_REGISTRY
-from app.risk_monitoring.operators import (
-    OPERATOR_REGISTRY,
-    InvalidThresholdError,
-    UnknownOperatorError,
-    format_threshold,
-    normalize_threshold,
-)
+from app.risk_monitoring.operators import OPERATOR_REGISTRY, format_threshold
+from app.risk_monitoring.rules import RULE_CATEGORIES
 
 CHANGE_TYPE_CREATE = "规则新建"
 CHANGE_TYPE_UPDATE = "规则修改"
@@ -48,7 +47,6 @@ _RULE_CODE_PATTERN = re.compile(rf"^{RULE_CODE_PREFIX}(\d+)$")
 
 RULE_NOT_FOUND_MESSAGE = "风控规则不存在"
 EMPTY_REASON_MESSAGE = "调整理由不能为空"
-INVALID_THRESHOLD_MESSAGE = "阈值与算子不匹配"
 
 
 def spec_from_model(rule: RiskRule) -> RuleSpec:
@@ -225,12 +223,15 @@ def update_rule_threshold(
     reason: str,
     now: datetime,
 ) -> RiskRule:
-    """调整一条规则的阈值。形状必须与它的算子匹配，否则拒绝——配错要当场说。"""
+    """调整一条规则的阈值。形状、搭配与值域三档校验都走写入侧入口。
+
+    阈值是这个入口唯一能改的东西，它必须落在这条规则的字段声明的值域里——否则创建时
+    被拒的「永远不命中」可以在这里补写回去（`app/risk_monitoring/validation.py`）。
+    """
     rule = get_rule(db, rule_id)
-    try:
-        normalized = normalize_threshold(rule.operator, threshold)
-    except (UnknownOperatorError, InvalidThresholdError) as exc:
-        raise AppError(400, INVALID_THRESHOLD_MESSAGE) from exc
+    normalized = validation.validate_rule_shape(
+        field=rule.field, operator=rule.operator, threshold=threshold
+    )
 
     checked_reason = _require_reason(reason)
     old_value = dict(rule.threshold or {})
@@ -298,4 +299,37 @@ def change_response(change: RiskRuleChange, *, rule_code: str, changed_by_name: 
         "changed_by_name": changed_by_name,
         "reason": change.reason,
         "changed_at": change.changed_at.isoformat(),
+    }
+
+
+def rule_schema() -> dict:
+    """规则编辑器要的下拉项与允许组合：分类、字段（含允许的算子与值域）、算子。
+
+    这份载荷与写入侧校验读的是**同一份注册表**（`fields.FIELD_REGISTRY` /
+    `operators.OPERATOR_REGISTRY` / `rules.RULE_CATEGORIES`），所以前端禁掉的选项与后端
+    拒掉的组合不会漂移。两份清单互抄时，漂移的表现是「下拉里能选、一提交被拒」——没有
+    任何断言会失败，只会有人反复试（见 `validation.py` 的开篇）。
+    """
+    return {
+        "categories": list(RULE_CATEGORIES),
+        "fields": [
+            {
+                "key": spec.key,
+                "label": spec.label,
+                "description": spec.description,
+                "allowed_operators": list(spec.allowed_operators),
+                "value_range": spec.value_range.as_payload() if spec.value_range else None,
+            }
+            for spec in FIELD_REGISTRY.values()
+        ],
+        "operators": [
+            {
+                "key": spec.key,
+                "label": spec.label,
+                "symbol": spec.symbol,
+                "scope": spec.scope,
+                "threshold_keys": list(spec.threshold_keys),
+            }
+            for spec in OPERATOR_REGISTRY.values()
+        ],
     }

@@ -1,6 +1,7 @@
 import { computed, ref } from "vue";
 import { defineStore } from "pinia";
 import { useAdvisoryQueueStore } from "../advisory/queueStore";
+import { useAnalyticsThreadStore } from "../analytics/threadStore";
 import { login as loginRequest, logout as logoutRequest } from "../auth/api";
 import { fetchCurrentEmployee, type EmployeeIdentity } from "../auth/identity";
 import { clearTokens, setTokens, tokens as storedTokens } from "../auth/tokenStore";
@@ -39,6 +40,8 @@ export const useAuthStore = defineStore("auth", () => {
     setTokens({ accessToken: result.access_token, refreshToken: result.refresh_token });
     // 会话不跨登录延续：待办计数不带上一场会话的数字进新会话。
     useAdvisoryQueueStore().reset();
+    // 同理：上一场会话的问答线程不是这一次的上下文，重新登录即清。
+    useAnalyticsThreadStore().reset();
     try {
       currentEmployee.value = await loadIdentity();
     } catch (error) {
@@ -79,6 +82,8 @@ export const useAuthStore = defineStore("auth", () => {
       useCurrentCustomerStore().clear();
       // 待办计数同理：角标不该带着上一位员工的数字进入新会话。
       useAdvisoryQueueStore().reset();
+      // 问答线程同理：它是当前会话的上下文，登出就把内存与 sessionStorage 都清掉。
+      useAnalyticsThreadStore().reset();
     }
   }
 

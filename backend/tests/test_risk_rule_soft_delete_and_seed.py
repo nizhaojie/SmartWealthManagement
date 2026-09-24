@@ -22,6 +22,7 @@ from sqlalchemy import (
     CheckConstraint,
     Select,
     create_engine,
+    delete,
     func,
     insert,
     select,
@@ -35,7 +36,7 @@ from app.db.models import Employee, RiskRule, RiskRuleChange
 from app.db.seed import seed
 from app.risk_monitoring import service
 from app.risk_monitoring.context import CustomerSnapshot, MonitoringContext, TransactionEvent
-from app.risk_monitoring.rules import RULE_CATEGORIES
+from app.risk_monitoring.rules import RISK_RULE_SEEDS, RULE_CATEGORIES
 from app.settings import get_settings
 
 SEEDED_PASSWORD = "Test@1234"
@@ -141,6 +142,48 @@ def _rule_counts() -> tuple[int, int]:
             or 0
         )
     return total, alive
+
+
+def _stored_codes() -> set[str]:
+    with _session() as session:
+        return set(session.scalars(select(RiskRule.rule_code)))
+
+
+def _hard_delete_rule(rule_code: str) -> None:
+    """硬删一行规则（连同它的留痕）——模拟「这一行曾经播种过，后来不在了」。
+
+    软删证明的是「行还在」，见 `test_a_soft_deleted_rule_leaves_the_default_listing`；
+    这里要的是**表非空但缺一条**，也就是旧语义「只补缺失的」唯一过得去的那种场景。
+    留痕先删：`fin_risk_rule_change.rule_id` 指着这一行。
+    """
+    with _session() as session:
+        rule_id = session.scalar(select(RiskRule.id).where(RiskRule.rule_code == rule_code))
+        assert rule_id is not None, f"规则 {rule_code} 应当先在库里"
+        session.execute(delete(RiskRuleChange).where(RiskRuleChange.rule_id == rule_id))
+        session.execute(delete(RiskRule).where(RiskRule.id == rule_id))
+        session.commit()
+
+
+def _restore_rule_row(rule_code: str) -> None:
+    """把硬删掉的那一行按种子定义写回，用例结束时别让测试库少一条种子规则。"""
+    spec = next(item for item in RISK_RULE_SEEDS if item.rule_code == rule_code)
+    with _session() as session:
+        session.add(
+            RiskRule(
+                rule_code=spec.rule_code,
+                rule_name=spec.rule_name,
+                category=spec.category,
+                description=spec.description,
+                field=spec.field,
+                operator=spec.operator,
+                threshold=dict(spec.threshold),
+                window_hours=spec.window_hours,
+                alert_level=spec.alert_level,
+                weight=spec.weight,
+                enabled=spec.enabled,
+            )
+        )
+        session.commit()
 
 
 def _matched_rule_codes(amount: str) -> set[str]:
@@ -278,6 +321,32 @@ def test_seeding_a_table_full_of_soft_deleted_rules_is_a_no_op(auth_client: Test
     finally:
         _restore_deleted_rules()
         seed(_test_url())
+
+
+def test_seeding_a_table_missing_a_rule_does_not_bring_it_back(auth_client: TestClient):
+    """表非空但少了一行：不补种。这是「只补缺失的」那条旧预期的反面。
+
+    种子只在**表为空**时播种（ADR-0027），因此建库之后规则集完全归风控专员：一行不在了
+    就是不在（软删如此，硬删也如此），不会在下次启动时复活。删除这个动作要有意义，靠的
+    正是这一点——写不到断言里，它就只是一个说法。
+
+    判空看的是「表里有没有行」，不是「缺哪几条」：若按后者，这里会重新插入 R001，而专员
+    删掉的规则也会跟着回来。
+    """
+    total_before, alive_before = _rule_counts()
+    _hard_delete_rule("R001")
+    assert _rule_counts() == (total_before - 1, alive_before - 1)
+
+    try:
+        # 「重启」：迁移不会重跑，重跑的是种子这一步。
+        seed(_test_url())
+
+        assert _rule_counts() == (total_before - 1, alive_before - 1)
+        assert "R001" not in _stored_codes()
+    finally:
+        _restore_rule_row("R001")
+
+    assert _rule_counts() == (total_before, alive_before)
 
 
 def test_soft_deleting_the_highest_code_does_not_free_it(auth_client: TestClient):

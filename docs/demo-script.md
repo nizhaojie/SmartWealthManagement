@@ -22,6 +22,10 @@ pnpm install && pnpm dev               # 后端 8000、客户端 5173、内部�
 `start-all.bat` 等价于上面三步。**重跑 `python -m app.db.setup` 就是恢复初始演示状态**：
 余额、持仓、历史交易与历史预警一起复位，且跑两遍结果一致。
 
+规则集是唯一的例外：种子只在 `fin_risk_rule` 为空时播一次（ADR-0027），因此演示中删掉或
+改过的规则**不会**被这一步还原。要回到初始 20 条，先清空 `fin_risk_rule_change` 与
+`fin_risk_rule`（留痕跟着一起清，就是回到起点）再重跑 setup。
+
 - 客户端 http://localhost:5173 ｜ 内部端 http://localhost:5174 ｜ Swagger http://localhost:8000/docs
 - 口令统一 `Test@1234`
 
@@ -55,9 +59,10 @@ pnpm install && pnpm dev               # 后端 8000、客户端 5173、内部�
 内部端用 `risk1` 登录 → **风控监测 → 预警列表**：列表里已经有若干条 2018–2022 年的历史预警。
 点开最早的一条，看详情页的**来源：内部补录**（旁边一句「未经适当性与余额校验」）。
 
-> 台词：「风控这一侧是完整的：20 条规则、算子、分级、预警、工单，测试也齐备。问题在于
-> 应用里没有任何一笔交易经过它——唯一的入口是一个需要员工身份的内部接口，而种子数据过去
-> 是直接写库的，绕过了规则引擎。所以『风控不起作用』不是判断不对，是没有输入。」
+> 台词：「风控这一侧是完整的：**初始 20 条**规则、算子、分级、预警、工单，测试也齐备，
+> 而且规则现在能在界面上增删改（风控监测 → 规则管理）。问题在于应用里没有任何一笔交易
+> 经过它——唯一的入口是一个需要员工身份的内部接口，而种子数据过去是直接写库的，绕过了
+> 规则引擎。所以『风控不起作用』不是判断不对，是没有输入。」
 
 ## 四、第二幕（本 slice 的验收标准）：客户直接发起一笔 50 万转账 → 预警列表出现对应预警
 
@@ -69,6 +74,8 @@ pnpm install && pnpm dev               # 后端 8000、客户端 5173、内部�
 4. **内部端**用 `risk1` 登录 → **风控监测 → 预警列表**：最上面一条「大额交易」，等级**重度**，
    命中规则 4~5 条（`R001` 单笔大额、`R003` 同日累计、`R004` 七日累计、`R005` 整数倍大额；
    非工作时间演示还会多一条 `R017`）。
+   这几个编号是**永不复用**的，所以它们永远指向同一条规则；但规则集本身可以被专员增删改，
+   这一段以「内置规则仍然健在且启用」为前提——开场前在**规则管理**页扫一眼这几条还在不在。
 5. 点「查看」进**预警详情**：
    - **来源：客户发起**（依据是关联交易没有经办员工，不是新增的字段）；
    - **命中依据**：一行一条规则，带判定字段、实测值与阈值；
@@ -177,6 +184,9 @@ Agent 会给出该持仓的全部成交金额 `500,000.00` 元——正好是一
 
 - 重新执行 `cd backend && python -m app.db.setup` 即可回到本节各幕的起点（余额、持仓、
   历史交易与历史预警一起复位）；重复执行两次的结果完全一致。
+- **规则集不在复位范围内**：种子只在建库时播一次，重跑 setup 不会把演示里删掉或改过的
+  规则还原（见「一、准备」的说明）。要回到初始 20 条，先清空 `fin_risk_rule_change` 与
+  `fin_risk_rule` 再重跑一次。
 - 事件总线（Redis）不可用时不影响演示的正确性：交易与预警照常落库，只是广播与订阅方
   （风险关注、SSE 推送）不生效。
 
@@ -207,3 +217,6 @@ Agent 会给出该持仓的全部成交金额 `500,000.00` 元——正好是一
 | 第五幕：零行是事实、失败是降级（并留痕），两者话术可区分 | `tests/test_customer_data_query.py::test_zero_rows_answers_the_fact_while_failure_answers_the_degradation`、`::test_failed_query_degrades_with_a_trace_and_never_falls_back` |
 | 第五幕：客户段护栏——写类与伪造身份被拒、员工域取不到行、注入改不了范围（护栏 3） | `tests/test_customer_data_query.py::test_malicious_queries_are_rejected_on_the_customer_path`、`::test_a_write_class_query_cannot_reach_the_customer_ledger`、`::test_the_employee_domain_stays_out_of_reach_from_the_customer_path`、`::test_a_forged_customer_id_cannot_widen_the_row_scope` |
 | 第五幕：归还连接前清掉客户身份，未设置身份时客户域零行 | `tests/test_analytics_query.py::test_customer_identity_is_reset_before_the_connection_returns_to_pool` |
+| 新建的规则只对下一笔交易生效，已有交易不回算（规则管理） | `tests/test_risk_rule_management_end_to_end.py::test_a_new_rule_judges_the_next_transaction_only` |
+| 规则的五个写入口各留一条带理由与署名的留痕；删除是软删、留痕仍可读 | `tests/test_risk_rule_management_end_to_end.py::test_five_writes_leave_five_changes_in_chronological_order`、`::test_a_deleted_rule_leaves_the_listing_but_keeps_its_changes_readable` |
+| 规则只在建库时播种一次，缺了一行也不补种 | `tests/test_risk_rule_soft_delete_and_seed.py::test_seeding_a_table_missing_a_rule_does_not_bring_it_back` |

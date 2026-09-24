@@ -52,6 +52,18 @@ CATEGORY_ODD_HOURS = "异常时段"
 CATEGORY_MISMATCH = "资产错配"
 CATEGORY_SUITABILITY = "适当性"
 
+# 分类的封闭清单：`fin_risk_rule.category` 的 CHECK 约束列的是同一份，专员在表单上
+# 只能从这里挑（`field` 与 `operator` 在 0015 已经这么立过规矩）。
+RULE_CATEGORIES: tuple[str, ...] = (
+    CATEGORY_LARGE_AMOUNT,
+    CATEGORY_FREQUENT,
+    CATEGORY_QUICK_IN_OUT,
+    CATEGORY_SPLITTING,
+    CATEGORY_ODD_HOURS,
+    CATEGORY_MISMATCH,
+    CATEGORY_SUITABILITY,
+)
+
 
 def _rule(
     *,

@@ -1,16 +1,20 @@
 """规则的读写与匹配入口。
 
-写操作只有两个：启停与阈值调整，两者都留痕——它们改变的是一批交易的判定结论，
-只看到结论看不出它是初始口径还是上周被谁调过。阈值调整要求非空理由（spec：
-「阈值可调整且调整有记录」）；启停的理由可以留空，但谁、什么时候、从什么改成
-什么一定记下来。
+写操作都留痕：它们改变的是一批交易的判定结论，只看到结论看不出它是初始口径还是上周
+被谁调过。阈值调整要求非空理由（spec：「阈值可调整且调整有记录」）；启停的理由可以
+留空，但谁、什么时候、从什么改成什么一定记下来。规则可创建、修改、删除之后，那三种
+动作也各记一笔——五种类型对应五件事，不是同一件事的五个名字。
 
 匹配入口 `match_enabled_rules` 只读启用的规则，求值交给纯函数——这里不做任何
 判定，也不碰模型。
+
+删除是**软删**（ADR-0027）：`deleted_at` 非空的行默认从列表消失、不再参与匹配，
+但行还在，变更记录与历史预警快照都还指得到它。
 """
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from decimal import Decimal
 
@@ -31,8 +35,16 @@ from app.risk_monitoring.operators import (
     normalize_threshold,
 )
 
+CHANGE_TYPE_CREATE = "规则新建"
+CHANGE_TYPE_UPDATE = "规则修改"
+CHANGE_TYPE_DELETE = "规则删除"
 CHANGE_TYPE_THRESHOLD = "阈值调整"
 CHANGE_TYPE_ENABLED = "启停变更"
+
+# 规则编号的形状：`R` + 数字，宽度不足三位时左补零（R001…R020…）。
+RULE_CODE_PREFIX = "R"
+RULE_CODE_DIGITS = 3
+_RULE_CODE_PATTERN = re.compile(rf"^{RULE_CODE_PREFIX}(\d+)$")
 
 RULE_NOT_FOUND_MESSAGE = "风控规则不存在"
 EMPTY_REASON_MESSAGE = "调整理由不能为空"
@@ -56,14 +68,45 @@ def spec_from_model(rule: RiskRule) -> RuleSpec:
     )
 
 
-def list_rules(db: Session, *, page: PageParams) -> tuple[list[RiskRule], int]:
+def next_rule_code(db: Session) -> str:
+    """下一个规则编号：**曾经出现过的最大值 + 1**，已软删的编号照样占位。
+
+    编号不复用（ADR-0027）。`fin_risk_alert.rule_codes` 是命中那一刻的快照且永不回收，
+    编号一旦被它引用就不再只是「这一行的名字」，而是一个跨表的外部标识——回收它会让
+    两条不同的规则共用一个标识，按编号回查历史预警就指向错的那一条。
+
+    因此这里的查询**不过滤 `deleted_at`**：占位的是列里出现过的全部编号，删掉的行也在
+    其中。数字在 Python 侧解析而不是交给 SQL 的 `max()`：`max()` 比的是字符串，宽度一
+    旦超过三位（R999 之后），字典序就不再等于数值序。
+    """
+    codes = db.scalars(select(RiskRule.rule_code)).all()
+    numbers = [
+        int(match.group(1))
+        for code in codes
+        if (match := _RULE_CODE_PATTERN.match(code)) is not None
+    ]
+    return f"{RULE_CODE_PREFIX}{max(numbers, default=0) + 1:0{RULE_CODE_DIGITS}d}"
+
+
+def list_rules(
+    db: Session,
+    *,
+    page: PageParams,
+    include_deleted: bool = False,
+) -> tuple[list[RiskRule], int]:
     """规则的一页，按编号升序，外加规则总数。
 
     排序键是 `rule_code`：它 `unique`，本身就是一个稳定全序，不必再补兜底列。规则是
     按编号命名的配置项，编号顺序就是它该有的顺序——换成「时间倒序」只会把 R001 到
     R020 打散，且不换来任何稳定性（产品列表沿用编号升序是同一条理由）。
+
+    默认不含已删除的规则；`include_deleted=True` 时它们照常出现在列表里（要不要置灰
+    是界面的事）。过滤只写在这里：`total` 与当前页由同一条 `base` 派生（ADR-0024），
+    留给接口或前端过滤会让「共 N 条」与翻到底能看到的条数对不上。
     """
     base = select(RiskRule)
+    if not include_deleted:
+        base = base.where(RiskRule.deleted_at.is_(None))
     total = count_matching(db, base)
     rules = list(
         db.scalars(
@@ -91,15 +134,19 @@ def list_rule_changes(db: Session, rule_id: int) -> list[RiskRuleChange]:
 
 
 def enabled_rule_specs(db: Session) -> list[RuleSpec]:
-    """库里启用的规则，按编号排序。停用的规则不参与匹配。
+    """库里启用的规则，按编号排序。停用的与已删除的规则都不参与匹配。
 
     单独拿出来是因为匹配之外还有人要看这批规则：计算历史该回溯多久要读它们的
     时间窗（见 `alerting.history_lookback_hours`）。两处读同一批规则，就不会
     出现「匹配用了 30 天窗、历史只取了 7 天」这种静默漏报。
+
+    软删在这里与停用合流：都让规则退出匹配。区别是软删的行还留着供回查，且不会再
+    回到列表里——它是「这条规则不该存在」，不是「暂时不判定」。已有预警不受影响：
+    预警是命中那一刻固化的事实记录。
     """
     rules = db.scalars(
         select(RiskRule)
-        .where(RiskRule.enabled.is_(True))
+        .where(RiskRule.enabled.is_(True), RiskRule.deleted_at.is_(None))
         .order_by(RiskRule.rule_code.asc())
     ).all()
     return [spec_from_model(rule) for rule in rules]
@@ -235,6 +282,8 @@ def rule_response(rule: RiskRule) -> dict:
         "alert_level": rule.alert_level,
         "weight": float(rule.weight),
         "enabled": bool(rule.enabled),
+        # 软删标记：列表只有带上它，`include_deleted` 下的行才分得出哪些已经删了。
+        "deleted_at": rule.deleted_at.isoformat() if rule.deleted_at is not None else None,
     }
 
 

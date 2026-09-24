@@ -431,10 +431,13 @@ class RiskRule(Base):
     可配的只有五个部分：取哪个 `field`、用哪个 `operator` 比、阈值多少、时间窗
     多长、命中算什么等级。没有「并且」「或者」，也拼不出表达式——能表达的只有
     `app.risk_monitoring.operators` 里那几种形状。新增一种判定方式必须改代码并出
-    迁移，下面三条 CHECK 守的是同一份清单。
+    迁移，下面四条 CHECK 守的是同一份清单。
 
     `alert_level` 是规则自身的预警等级，不是「命中这条规则就一定产生该等级预警」
     ——预警的等级由命中条数与该客户的历史预警记录推导。
+
+    删除是**软删**（ADR-0027）：`deleted_at` 非空表示这条规则不该存在了，行留在库里
+    供变更记录与历史预警快照回查，列表默认过滤它。「暂时不判定」由 `enabled` 承担。
     """
 
     __tablename__ = "fin_risk_rule"
@@ -464,6 +467,12 @@ class RiskRule(Base):
             "'product_id')",
             name="ck_risk_rule_field",
         ),
+        CheckConstraint(
+            "category IN ("
+            "'大额交易','频繁交易','快进快出','拆分规避','异常时段','资产错配','适当性')",
+            name="ck_risk_rule_category",
+        ),
+        Index("ix_risk_rule_deleted_at", "deleted_at"),
         {"comment": "风控规则"},
     )
 
@@ -487,20 +496,24 @@ class RiskRule(Base):
     update_time: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now(), onupdate=func.now()
     )
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime, comment="删除时间；为空表示仍在用"
+    )
 
 
 class RiskRuleChange(Base):
     """风控规则的调整记录：谁在什么时候把什么改成了什么，理由是什么。
 
     阈值是监管口径的落点，口径一变就得跟着变，所以「变了」本身必须可追溯——只看
-    到现在的阈值，看不出它是初始口径还是上周被谁调过。启停同样记一笔。
+    到现在的阈值，看不出它是初始口径还是上周被谁调过。启停同样记一笔；规则可新建、
+    可修改、可删除之后，那三种动作也各记一笔：一次写操作一条记录。
     """
 
     __tablename__ = "fin_risk_rule_change"
     __table_args__ = (
         Index("ix_risk_rule_change_rule_id", "rule_id"),
         CheckConstraint(
-            "change_type IN ('阈值调整','启停变更')",
+            "change_type IN ('规则新建','规则修改','规则删除','阈值调整','启停变更')",
             name="ck_risk_rule_change_type",
         ),
         {"comment": "风控规则调整记录"},

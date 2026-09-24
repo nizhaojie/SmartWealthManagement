@@ -739,16 +739,20 @@ def _discard_previous_replay(session: Session, transaction_no: str) -> None:
 
 
 def _seed_risk_rules(session: Session) -> None:
-    """写入 20 条风控规则；只补缺失的，不回改已经存在的。
+    """写入 20 条风控规则——**只在表为空时播种**（ADR-0027）。
 
-    规则一旦入库就归风控专员管：改阈值、改启停都在界面上做并留痕。seed 若去对齐
-    既有记录，就会在谁都没留痕的情况下把专员调过的口径改回代码里的默认值——比不改
-    更糟。代码里的定义只对首次建库生效。
+    规则一旦入库就完全归风控专员：改阈值、改启停、删除都在界面上做并留痕。原来的
+    「只补缺失的，不回改已经存在的」让删除失去意义——专员删掉的规则会在下次启动时
+    复活；改成「表为空才播种」之后，代码里的定义只决定规则集的起点。代价认下：以后
+    想往这 20 条里加一条，不会自动补进既有库，需要一条迁移或手工插入。
+
+    判空用的是 `count(*)` 而**不是** `count(*) where deleted_at is null`：20 条全被
+    软删后表的行还在，按后者判断会把表判为空、重新插入 R001–R020 撞上
+    `uk_risk_rule_code`——表现是服务起不来。
     """
-    existing = {rule.rule_code for rule in session.scalars(select(RiskRule)).all()}
+    if session.scalar(select(func.count()).select_from(RiskRule)):
+        return
     for spec in RISK_RULE_SEEDS:
-        if spec.rule_code in existing:
-            continue
         session.add(
             RiskRule(
                 rule_code=spec.rule_code,

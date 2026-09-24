@@ -30,7 +30,7 @@ from app.risk_monitoring.fields import (
     FIELD_REGISTRY,
 )
 from app.risk_monitoring.operators import OPERATOR_KEYS
-from app.risk_monitoring.rules import RISK_RULE_SEEDS, rule_seeds_by_code
+from app.risk_monitoring.rules import RULE_CATEGORIES, RISK_RULE_SEEDS, rule_seeds_by_code
 
 BASE = datetime(2026, 9, 10, 10, 0, 0)
 
@@ -336,6 +336,7 @@ def test_every_rule_references_a_known_field_and_operator():
     for spec in RISK_RULE_SEEDS:
         assert spec.field in FIELD_KEYS, spec.rule_code
         assert spec.operator in OPERATOR_KEYS, spec.rule_code
+        assert spec.category in RULE_CATEGORIES, spec.rule_code
         assert spec.alert_level in {"轻度", "中度", "重度"}, spec.rule_code
         assert spec.weight > 0, spec.rule_code
 
@@ -348,13 +349,14 @@ def _check_constraint_values(name: str) -> set[str]:
 
 
 def test_operator_and_field_sets_are_closed_by_database_constraints():
-    """算子与字段的封闭性不能只写在代码里。
+    """算子、字段与分类的封闭性不能只写在代码里。
 
-    库里那两条 CHECK 约束列的是同一份清单，所以想加一种判定方式必须改代码并出
-    迁移——规则数据自己变不出新的形状。
+    库里那三条 CHECK 约束列的是同一份清单，所以想加一种判定方式必须改代码并出
+    迁移——规则数据自己变不出新的形状；分类同理，专员只能在给定的七个里挑。
     """
     assert _check_constraint_values("ck_risk_rule_operator") == set(OPERATOR_KEYS)
     assert _check_constraint_values("ck_risk_rule_field") == set(FIELD_KEYS)
+    assert _check_constraint_values("ck_risk_rule_category") == set(RULE_CATEGORIES)
 
     # 时间窗算子没有窗长就无从回溯，这条也由库守着。
     window_constraint = _check_constraint_values("ck_risk_rule_window_hours")

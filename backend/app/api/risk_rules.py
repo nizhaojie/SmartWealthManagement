@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -32,11 +32,12 @@ class ThresholdUpdateRequest(BaseModel):
 
 @router.get("")
 def list_risk_rules(
+    include_deleted: bool = Query(default=False, description="是否包含已删除的规则"),
     page: PageParams = Depends(page_params),
     db: Session = Depends(get_session),
     _auth: AuthContext = Depends(require_internal),
 ):
-    rules, total = service.list_rules(db, page=page)
+    rules, total = service.list_rules(db, page=page, include_deleted=include_deleted)
     return ok(
         paginated_response(
             [service.rule_response(rule) for rule in rules], total=total, params=page

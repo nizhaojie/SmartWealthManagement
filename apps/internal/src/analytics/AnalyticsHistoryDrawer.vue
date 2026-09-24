@@ -25,10 +25,11 @@ const emit = defineEmits<{
 }>();
 
 /**
- * 三条关闭路径都在 `beforeClose` 收口，这是 `el-drawer` 唯一可靠的通知点：
- * 这个版本从抽屉那一侧关上时既不派发 `close`，也不派发 `update:modelValue`
- * （两者都挂在 leave 过渡的钩子上，而 `v-show` 这一路并没有走过渡），因此 `v-model`
- * 自己同步不回来。这里显式把模型置回 false，再放行关闭。
+ * 三条关闭路径（关闭按钮 / Esc / 点遮罩）都在 `beforeClose` 收口，这是 `el-drawer` 上每次
+ * 关闭都会经过的那个钩子。只监听 `close` 不够：这个版本从抽屉那一侧关上时一个事件都不派发
+ * （`close` 与 `update:modelValue` 都挂在 leave 过渡的钩子上，而 `v-show` 这一路并没有走过渡
+ * ——关闭按钮按下去，遮罩是立刻 `display: none` 的，事件一个也没有），父组件的 `open` 会一直
+ * 停在 true：关一次之后顶栏那个入口就点不开了。因此在这里显式把模型置回 false，再放行关闭。
  */
 function handleClose(done: () => void): void {
   open.value = false;
@@ -41,7 +42,7 @@ const {
   page,
   pageSize,
   loading,
-  errorMessage: failureReason,
+  errorMessage: historyError,
   goTo,
   reset,
 } = usePagination<AnalyticsHistoryItem>((query) => listAnalyticsHistory(query));
@@ -81,12 +82,12 @@ function rowsLabel(entry: AnalyticsHistoryItem): string {
     <div class="history" data-testid="history-drawer">
       <p v-if="loading" class="history__hint">正在加载历史查询…</p>
       <p
-        v-else-if="failureReason"
+        v-else-if="historyError"
         class="history__error"
         role="alert"
         data-testid="history-error"
       >
-        {{ failureReason }}
+        {{ historyError }}
       </p>
       <p
         v-else-if="history.length === 0 && total === 0"
@@ -100,7 +101,12 @@ function rowsLabel(entry: AnalyticsHistoryItem): string {
         这一页没有历史查询，翻回前面几页看看。
       </p>
       <ul v-else class="history__list">
-        <li v-for="entry in history" :key="entry.id" class="history__item" :data-testid="`history-item-${entry.id}`">
+        <li
+          v-for="entry in history"
+          :key="entry.id"
+          class="history__item"
+          :data-testid="`history-item-${entry.id}`"
+        >
           <p class="history__question">{{ entry.question }}</p>
           <p class="history__meta">
             <span>{{ entry.status }}</span>

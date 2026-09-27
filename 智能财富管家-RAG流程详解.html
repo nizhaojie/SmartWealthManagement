@@ -1,0 +1,793 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>智能财富管家系统 · RAG 流程详解（答辩展示）</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@600;700;900&family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --paper:#F7F4EE;
+  --paper-2:#FFFFFF;
+  --ink:#1D2433;
+  --ink-soft:#4A5164;
+  --ink-faint:#8A8FA0;
+  --hairline:#DDD6C7;
+  --navy:#22365E;
+  --gold:#A8842C;
+  --gold-soft:#F0E6CC;
+  --vector:#2E6FBA;
+  --vector-bg:#E7EFFA;
+  --keyword:#2F7D5B;
+  --keyword-bg:#E5F2EB;
+  --graph:#6D4FA1;
+  --graph-bg:#EEE8F7;
+  --perm:#B4372F;
+  --perm-bg:#F9E9E7;
+  --model:#0F6E8C;
+  --model-bg:#E3F1F5;
+  --radius:10px;
+  --shadow:0 1px 2px rgba(29,36,51,.05),0 8px 24px rgba(29,36,51,.06);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{
+  background:var(--paper);
+  color:var(--ink);
+  font-family:"Noto Sans SC","Microsoft YaHei",system-ui,sans-serif;
+  font-size:15.5px;line-height:1.75;
+}
+::selection{background:var(--gold-soft)}
+code,.mono{
+  font-family:"Cascadia Code","JetBrains Mono",Consolas,"Courier New",monospace;
+  font-size:.86em;
+  background:rgba(34,54,94,.07);
+  padding:.08em .38em;border-radius:4px;
+  color:var(--navy);word-break:break-all;
+}
+h1,h2,h3,.serif{font-family:"Noto Serif SC","Source Han Serif SC","STSong","SimSun",serif}
+
+/* ---------- 顶栏与视角切换 ---------- */
+.topbar{
+  position:sticky;top:0;z-index:50;
+  background:rgba(247,244,238,.92);backdrop-filter:blur(10px);
+  border-bottom:1px solid var(--hairline);
+  display:flex;align-items:center;gap:18px;flex-wrap:wrap;
+  padding:10px 28px;
+}
+.topbar .brand{font-family:"Noto Serif SC",serif;font-weight:900;font-size:17px;letter-spacing:.02em}
+.topbar .brand small{display:block;font-family:"Noto Sans SC",sans-serif;font-weight:400;font-size:11px;color:var(--ink-faint);letter-spacing:.14em}
+.lens-switch{margin-left:auto;display:flex;align-items:center;gap:8px;font-size:13px;color:var(--ink-soft)}
+.lens-switch .lens-label{letter-spacing:.05em}
+.lens-btns{display:flex;border:1px solid var(--hairline);border-radius:999px;overflow:hidden;background:var(--paper-2)}
+.lens-btns button{
+  border:0;background:transparent;padding:6px 16px;font-size:13px;cursor:pointer;
+  color:var(--ink-soft);font-family:inherit;transition:all .2s;
+}
+.lens-btns button.active{background:var(--navy);color:#fff}
+.lens-btns button[data-lens="perm"].active{background:var(--perm)}
+
+/* ---------- 布局 ---------- */
+.layout{display:grid;grid-template-columns:230px minmax(0,1fr);max-width:1440px;margin:0 auto}
+.sidenav{
+  position:sticky;top:57px;align-self:start;height:calc(100vh - 57px);
+  padding:28px 18px;border-right:1px solid var(--hairline);overflow:auto;
+}
+.sidenav a{
+  display:block;padding:7px 12px;margin-bottom:2px;border-radius:7px;
+  color:var(--ink-soft);text-decoration:none;font-size:13.5px;
+  border-left:2px solid transparent;transition:all .15s;
+}
+.sidenav a:hover{background:rgba(34,54,94,.06);color:var(--ink)}
+.sidenav a .nav-num{color:var(--gold);font-family:"Noto Serif SC",serif;font-weight:700;margin-right:7px}
+main{padding:0 44px 90px;min-width:0}
+section{padding-top:46px}
+.sec-head{display:flex;align-items:baseline;gap:16px;border-bottom:2px solid var(--ink);padding-bottom:12px;margin-bottom:8px}
+.sec-num{font-family:"Noto Serif SC",serif;font-weight:900;font-size:15px;color:var(--gold);letter-spacing:.1em;white-space:nowrap}
+.sec-head h2{font-size:27px;font-weight:900;letter-spacing:.01em}
+.sec-sub{color:var(--ink-soft);font-size:14px;margin:10px 0 26px;max-width:880px}
+
+/* ---------- Hero ---------- */
+.hero{padding:64px 0 30px;border-bottom:1px solid var(--hairline)}
+.hero .eyebrow{font-size:12.5px;letter-spacing:.32em;color:var(--gold);font-weight:700;margin-bottom:18px}
+.hero h1{font-size:clamp(30px,4.2vw,48px);font-weight:900;line-height:1.28;letter-spacing:.01em}
+.hero h1 em{font-style:normal;color:var(--navy);border-bottom:5px solid var(--gold-soft);box-shadow:inset 0 -2px 0 var(--gold)}
+.hero .lede{margin-top:20px;max-width:860px;color:var(--ink-soft);font-size:16px}
+.hero-stats{display:flex;flex-wrap:wrap;gap:14px;margin-top:34px}
+.stat{
+  background:var(--paper-2);border:1px solid var(--hairline);border-radius:var(--radius);
+  padding:14px 22px;min-width:130px;box-shadow:var(--shadow);
+}
+.stat b{display:block;font-family:"Noto Serif SC",serif;font-size:30px;font-weight:900;color:var(--navy);line-height:1.2}
+.stat span{font-size:12.5px;color:var(--ink-faint);letter-spacing:.06em}
+
+/* ---------- 通用卡片与表格 ---------- */
+.card{
+  background:var(--paper-2);border:1px solid var(--hairline);border-radius:var(--radius);
+  padding:20px 24px;box-shadow:var(--shadow);margin-bottom:16px;
+}
+.card h3{font-size:17px;font-weight:700;margin-bottom:8px}
+.grid-2{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px}
+.grid-3{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px}
+table{width:100%;border-collapse:collapse;background:var(--paper-2);border-radius:var(--radius);overflow:hidden;box-shadow:var(--shadow);font-size:14px;margin-bottom:16px}
+th{background:var(--navy);color:#fff;text-align:left;padding:10px 14px;font-weight:500;font-size:13px;letter-spacing:.04em}
+td{padding:10px 14px;border-top:1px solid var(--hairline);vertical-align:top}
+tr:nth-child(even) td{background:rgba(34,54,94,.025)}
+
+/* ---------- 标记：权限 / 组件 ---------- */
+.tag{
+  display:inline-flex;align-items:center;gap:5px;
+  font-size:12px;font-weight:700;padding:2px 10px;border-radius:999px;
+  letter-spacing:.03em;white-space:nowrap;vertical-align:1px;
+}
+.tag::before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor}
+.tag-perm{background:var(--perm-bg);color:var(--perm)}
+.tag-vector{background:var(--vector-bg);color:var(--vector)}
+.tag-keyword{background:var(--keyword-bg);color:var(--keyword)}
+.tag-graph{background:var(--graph-bg);color:var(--graph)}
+.tag-model{background:var(--model-bg);color:var(--model)}
+.tag-navy{background:rgba(34,54,94,.09);color:var(--navy)}
+
+/* ---------- 流程图 ---------- */
+.flow{position:relative;margin:22px 0 8px}
+.fnode{
+  position:relative;background:var(--paper-2);border:1px solid var(--hairline);
+  border-radius:var(--radius);padding:16px 20px 16px 62px;box-shadow:var(--shadow);
+  margin-bottom:34px;transition:opacity .3s,filter .3s;
+}
+.fnode::after{
+  content:"";position:absolute;left:31px;bottom:-34px;height:34px;width:2px;
+  background:linear-gradient(var(--hairline),var(--ink-faint));
+}
+.fnode:last-child::after{display:none}
+.fnode::before{
+  content:"";position:absolute;left:26px;bottom:-22px;width:12px;height:12px;
+  border-right:2px solid var(--ink-faint);border-bottom:2px solid var(--ink-faint);
+  transform:rotate(45deg) translateX(-2px);
+}
+.fnode:last-child::before{display:none}
+.fnum{
+  position:absolute;left:16px;top:16px;width:32px;height:32px;border-radius:50%;
+  background:var(--navy);color:#fff;display:flex;align-items:center;justify-content:center;
+  font-family:"Noto Serif SC",serif;font-weight:900;font-size:15px;
+}
+.fnode h4{font-size:16px;font-weight:700;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.fnode h4 .loc{font-weight:400;font-size:12px;color:var(--ink-faint)}
+.fnode p{margin-top:6px;color:var(--ink-soft);font-size:14px}
+.fnode .gates{margin-top:10px;display:flex;flex-wrap:wrap;gap:6px}
+.fnode ul{margin:8px 0 0 18px;color:var(--ink-soft);font-size:14px}
+.fnode ul li{margin-bottom:3px}
+.fnode.accent-vector{border-left:4px solid var(--vector)}
+.fnode.accent-keyword{border-left:4px solid var(--keyword)}
+.fnode.accent-graph{border-left:4px solid var(--graph)}
+.fnode.accent-perm{border-left:4px solid var(--perm)}
+.fnode.accent-model{border-left:4px solid var(--model)}
+.fnode.accent-gold{border-left:4px solid var(--gold)}
+
+/* 视角切换：淡化无关节点 */
+body[data-lens="perm"] .fnode:not([data-tags*="perm"]){opacity:.28;filter:saturate(.4)}
+body[data-lens="perm"] .fnode[data-tags*="perm"]{border-color:var(--perm);box-shadow:0 0 0 3px var(--perm-bg),var(--shadow)}
+body[data-lens="perm"] .card[data-tags]:not([data-tags*="perm"]){opacity:.35}
+.lens-hint{display:none;margin:6px 0 20px;font-size:13px;padding:9px 16px;border-radius:8px}
+body[data-lens="perm"] .lens-hint-perm{display:block}
+.lens-hint-perm{background:var(--perm-bg);color:var(--perm)}
+
+/* 并行双臂 */
+.arms{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:14px 0}
+@media(max-width:760px){.arms{grid-template-columns:1fr}}
+.arm{border-radius:var(--radius);padding:14px 18px;border:1px solid var(--hairline);background:var(--paper-2)}
+.arm h5{font-size:14px;display:flex;align-items:center;gap:8px;margin-bottom:6px}
+.arm p,.arm li{font-size:13.5px;color:var(--ink-soft)}
+.arm ul{margin-left:16px}
+.arm-vector{border-top:4px solid var(--vector)}
+.arm-keyword{border-top:4px solid var(--keyword)}
+.merge-note{
+  text-align:center;font-size:13px;color:var(--ink-faint);margin:4px 0 0;
+}
+.merge-note b{color:var(--navy)}
+
+/* 公式条 */
+.formula{
+  font-family:"Cascadia Code",Consolas,monospace;font-size:14px;
+  background:var(--ink);color:#EDE6D6;border-radius:8px;padding:12px 18px;margin:12px 0;
+  overflow-x:auto;white-space:nowrap;
+}
+.formula .hl{color:#E8C36A}
+
+/* 分支路由 */
+.branches{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin:14px 0}
+.branch{
+  border:1px solid var(--hairline);border-radius:8px;padding:12px 16px;background:var(--paper-2);
+  font-size:13.5px;color:var(--ink-soft);
+}
+.branch b{display:block;color:var(--ink);font-size:14px;margin-bottom:3px}
+
+/* 节点内的补充说明块 */
+.note{
+  margin:14px 0 4px;padding:14px 18px;
+  background:rgba(34,54,94,.035);border:1px solid var(--hairline);
+  border-left:3px solid var(--gold);border-radius:8px;
+}
+.note h5{font-size:13.5px;font-weight:700;color:var(--navy);margin-bottom:8px}
+.note table{box-shadow:none;margin-bottom:10px;font-size:13px}
+.note table th{padding:7px 12px;font-size:12px}
+.note table td{padding:8px 12px}
+.note ul{margin:0 0 0 18px;color:var(--ink-soft);font-size:13.5px}
+.note ul li{margin-bottom:4px}
+.note .src{margin-top:8px}
+
+/* 编号权限清单 */
+.perm-list{counter-reset:perm;display:flex;flex-direction:column;gap:10px}
+.perm-item{
+  counter-increment:perm;display:grid;grid-template-columns:46px 1fr;gap:14px;
+  background:var(--paper-2);border:1px solid var(--hairline);border-radius:var(--radius);
+  padding:14px 18px;box-shadow:var(--shadow);transition:opacity .3s;
+}
+.perm-item::before{
+  content:"P" counter(perm,decimal-leading-zero);
+  font-family:"Noto Serif SC",serif;font-weight:900;color:var(--perm);font-size:15px;padding-top:2px;
+}
+.perm-item b{font-size:14.5px}
+.perm-item p{font-size:13.5px;color:var(--ink-soft);margin-top:2px}
+.perm-group{
+  font-family:"Noto Serif SC",serif;font-weight:700;color:var(--navy);font-size:15px;
+  margin:22px 0 10px;display:flex;align-items:center;gap:10px;
+}
+.perm-group::after{content:"";flex:1;height:1px;background:var(--hairline)}
+
+/* 脚注/出处 */
+.src{font-size:12.5px;color:var(--ink-faint);margin-top:8px}
+.src code{background:transparent;padding:0;color:var(--ink-faint)}
+footer{border-top:1px solid var(--hairline);margin-top:60px;padding:26px 0 10px;color:var(--ink-faint);font-size:13px}
+
+/* 入场动画 */
+.reveal{opacity:0;transform:translateY(14px);transition:opacity .5s ease,transform .5s ease}
+.reveal.in{opacity:1;transform:none}
+@media(prefers-reduced-motion:reduce){
+  html{scroll-behavior:auto}
+  .reveal{opacity:1;transform:none;transition:none}
+  *{transition:none!important}
+}
+@media(max-width:980px){
+  .layout{grid-template-columns:1fr}
+  .sidenav{display:none}
+  main{padding:0 20px 70px}
+}
+@media print{
+  .topbar,.sidenav{display:none}
+  .layout{grid-template-columns:1fr}
+  body{background:#fff}
+  .reveal{opacity:1;transform:none}
+}
+</style>
+</head>
+<body data-lens="all">
+
+<header class="topbar">
+  <div class="brand">智能财富管家系统<small>RAG PIPELINE · DEFENSE DOSSIER</small></div>
+  <div class="lens-switch">
+    <span class="lens-label">视角</span>
+    <div class="lens-btns" role="group" aria-label="视角切换">
+      <button data-lens="all" class="active">全流程</button>
+      <button data-lens="perm">只看权限校验</button>
+    </div>
+  </div>
+</header>
+
+<div class="layout">
+<nav class="sidenav" aria-label="目录">
+  <a href="#overview"><span class="nav-num">〇</span>全景总览</a>
+  <a href="#ingest"><span class="nav-num">一</span>原始数据入库</a>
+  <a href="#retrieve"><span class="nav-num">二</span>一次 RAG 检索</a>
+  <a href="#after"><span class="nav-num">三</span>检索之后：两个 Agent</a>
+  <a href="#analytics"><span class="nav-num">四</span>数据分析 Agent</a>
+  <a href="#permission"><span class="nav-num">五</span>权限校验总表</a>
+  <a href="#source"><span class="nav-num">六</span>代码出处索引</a>
+</nav>
+
+<main>
+
+<!-- ================= HERO ================= -->
+<div class="hero">
+  <div class="eyebrow">答辩展示 · RAG 专题</div>
+  <h1>从原始文档到带引用的回答：<br><em>检索增强生成（RAG）</em>在本系统中的完整旅程</h1>
+  <p class="lede">
+    本系统有两个 Agent 用到检索增强生成：<b>智能客服 Agent</b> 走完整的知识库 RAG 链路
+    （向量 + BM25 混合召回 → RRF 融合 → LLM 重排 → GraphRAG 图谱增强 → 受限生成）；
+    <b>数据分析 Agent</b> 在 NL2SQL 链路里检索语义视图定义与示例注入提示词，再生成受限查询。
+    两条链路全程埋着 <b>20 道权限校验</b>，本文件逐一记录。
+  </p>
+  <div class="hero-stats">
+    <div class="stat"><b>2</b><span>个 Agent 使用 RAG</span></div>
+    <div class="stat"><b>4</b><span>类存储协同（Milvus / MySQL / MinIO / Neo4j）</span></div>
+    <div class="stat"><b>20</b><span>道权限校验</span></div>
+  </div>
+</div>
+
+<!-- ================= 〇 全景总览 ================= -->
+<section id="overview">
+  <div class="sec-head"><span class="sec-num">SECTION 00</span><h2>全景总览</h2></div>
+  <p class="sec-sub">同一份知识内容在三处落地、各有分工；检索时向量库与关系库并行召回，图谱做增强。身份域（客户 / 内部员工）在入口即隔离，是全部权限校验的地基。</p>
+
+  <div class="grid-3">
+    <div class="card">
+      <h3><span class="tag tag-navy">存储分工</span></h3>
+      <ul style="margin:6px 0 0 18px;color:var(--ink-soft);font-size:14px">
+        <li><b>MinIO</b>：原始文档字节（删除时归档而非物理删除）</li>
+        <li><b>Milvus</b>：1024 维向量，COSINE 度量，Strong 一致性</li>
+        <li><b>MySQL</b>：文档元数据 + 分块镜像 <code>fin_knowledge_chunk</code>（BM25 语料）</li>
+        <li><b>Neo4j</b>：知识图谱，MySQL 的只读投影（GraphRAG 增强）</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3><span class="tag tag-navy">两个 Agent</span></h3>
+      <ul style="margin:6px 0 0 18px;color:var(--ink-soft);font-size:14px">
+        <li><b>智能客服 Agent</b>（客户域）：知识库 RAG，产出带强制引用的事实性内容</li>
+        <li><b>数据分析 Agent</b>（内部域）：检索语义视图与示例 → NL2SQL → 受限执行 → 解读</li>
+        <li>客服的「数据查询」分支复用数据分析链路（客户身份 + 客户口径）</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3><span class="tag tag-navy">设计不变式</span></h3>
+      <ul style="margin:6px 0 0 18px;color:var(--ink-soft);font-size:14px">
+        <li>检索不到依据<b>不作答</b>，给人工客服热线</li>
+        <li>重排与融合只决定先后，<b>不改变</b>「有没有依据」的合规结论</li>
+        <li>图谱是增强不是依赖：没有图谱段落时检索按相似度结果继续（问题不含实体是正常结果，不是异常）</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="lens-hint lens-hint-perm">当前视角：<b>只看权限校验</b>。流程图中所有权限关卡已高亮（红色描边），其余节点淡化。点击顶栏「全流程」恢复。</div>
+</section>
+
+<!-- ================= 一 入库 ================= -->
+<section id="ingest">
+  <div class="sec-head"><span class="sec-num">SECTION 01</span><h2>原始数据入库</h2></div>
+  <p class="sec-sub">员工在内部工作台上传知识文档，走一条四阶段状态机流水线：<code>processing → active / failed</code>，阶段记录到 <code>parse / chunk / embed / store</code>，任何一阶段失败都落失败原因。</p>
+
+  <div class="flow">
+
+    <div class="fnode accent-perm" data-tags="perm">
+      <span class="fnum">1</span>
+      <h4>上传入口与身份校验 <span class="loc">POST /api/internal/knowledge/documents</span></h4>
+      <p>仅内部员工可上传。依次经过：Bearer token 提取 → JWT 验签（HS256，校验 audience 必须等于 <code>internal-app</code>、类型必须为 access、未过期）→ Redis 会话白名单（<code>auth:session:{sid}</code>，登出即删）。</p>
+      <div class="gates">
+        <span class="tag tag-perm">P04 仅内部员工身份域</span>
+        <span class="tag tag-perm">P02 跨域凭证 403</span>
+        <span class="tag tag-perm">P03 会话白名单</span>
+        <span class="tag tag-perm">P07 回放模式拒绝写操作</span>
+      </div>
+      <p class="src">出处：<code>app/api/knowledge.py</code>、<code>app/auth/dependencies.py</code>、<code>app/auth/tokens.py</code></p>
+    </div>
+
+    <div class="fnode accent-perm" data-tags="perm">
+      <span class="fnum">2</span>
+      <h4>格式与类型校验，建档 <span class="loc">create_pending_document</span></h4>
+      <p>文件格式白名单 <b>txt / md / docx</b>，不支持则拒绝（业务码 1006）。知识类型为 <b>FAQ / 产品 / 政策</b>；政策法规默认有效期 1 年、产品说明默认半年，FAQ 不设期限。先落一条 <code>processing</code> 状态的元数据，实际解析交给后台任务异步执行。</p>
+      <div class="gates"><span class="tag tag-perm">P08 格式白名单</span></div>
+      <p class="src">出处：<code>app/knowledge/service.py</code>、<code>app/knowledge/parsers.py</code></p>
+    </div>
+
+    <div class="fnode accent-gold" data-tags="">
+      <span class="fnum">3</span>
+      <h4>parse · 解析成语义节 <span class="loc">stage = parse</span></h4>
+      <ul>
+        <li><b>txt</b>：按 Tab 嗅探「问题⇥答案」问答对，<b>一组问答自成一节</b>——不会与相邻问答或普通段落混进同一个分块，也不会被从中间跨组切断；单组问答本身超过 512 token 时仍会被滑窗切成多块（切点只落在这一组内部）。其余行累积成普通节</li>
+        <li><b>md / docx</b>：按标题层级切节，每节携带 <code>heading_path</code>（标题路径），供引用定位</li>
+      </ul>
+      <p class="src">出处：<code>app/knowledge/parsers.py</code></p>
+    </div>
+
+    <div class="fnode accent-gold" data-tags="">
+      <span class="fnum">4</span>
+      <h4>chunk · 滑动窗口分块 <span class="loc">stage = chunk</span></h4>
+      <p>按 token 滑窗切分：<b>块长 512 token、重叠 64 token</b>（token = ASCII 字母数字串，或单个非空白且非字母数字的字符；<b>一个汉字算一个 token</b>，因此 512 token 大致相当于 512 个汉字）。每个分块继承所在节的标题路径。</p>
+      <p class="src">出处：<code>app/knowledge/service.py</code>（<code>CHUNK_SIZE=512, CHUNK_OVERLAP=64</code>）·<code>app/knowledge/tokenizer.py</code>（分词与切分实现）</p>
+    </div>
+
+    <div class="fnode accent-model" data-tags="">
+      <span class="fnum">5</span>
+      <h4>embed · 向量化 <span class="loc">stage = embed</span></h4>
+      <p>OpenAI 兼容接口（DashScope <code>text-embedding-v3</code>，<b>1024 维</b>），单次请求最多 10 条、按批发送；无 key 时走确定性 fake embedding（SHA-256 bigram 哈希），保证测试与回放离线可复现。</p>
+      <p class="src">出处：<code>app/knowledge/embeddings.py</code></p>
+    </div>
+
+    <div class="fnode accent-gold" data-tags="">
+      <span class="fnum">6</span>
+      <h4>store · 三处落地，失败整体回滚 <span class="loc">stage = store</span></h4>
+      <ul>
+        <li><b>MinIO</b>：原始文档字节 → <code>knowledge/{knowledge_id}/{filename}</code>（bucket <code>wealth-knowledge</code>）</li>
+        <li><b>Milvus</b>：向量 + 分块正文写入集合 <code>knowledge_chunks</code>（COSINE / Strong）</li>
+        <li><b>MySQL</b>：分块镜像 <code>fin_knowledge_chunk</code> 覆盖式写入——它跟着 Milvus 一起成功或一起失败</li>
+      </ul>
+      <p>任一写入失败：删除已上传的 MinIO 对象、按 knowledge_id 删 Milvus 向量、清空镜像行，状态置 <code>failed</code> 并记录失败阶段与原因。全部成功才置 <code>active</code>。</p>
+      <p class="src">出处：<code>app/knowledge/service.py::_run_ingestion_pipeline</code>、<code>object_store.py</code>、<code>vector_store.py</code></p>
+    </div>
+
+    <div class="fnode accent-perm" data-tags="perm">
+      <span class="fnum">7</span>
+      <h4>下架（删除） <span class="loc">DELETE /documents/{id}</span></h4>
+      <p>同样要求内部员工身份。Milvus 向量物理删除；MinIO 原文打 <code>archived</code> 标签<b>归档而非物理删除</b>；元数据置 <code>expired</code>，从默认列表消失。已下架文档的命中块在检索侧会被状态过滤挡掉（见 P09）。</p>
+      <div class="gates"><span class="tag tag-perm">P04 仅内部员工</span><span class="tag tag-perm">P07 回放模式拒绝</span></div>
+      <p class="src">出处：<code>app/knowledge/service.py::delete_document</code></p>
+    </div>
+
+  </div>
+</section>
+
+<!-- ================= 二 检索 ================= -->
+<section id="retrieve">
+  <div class="sec-head"><span class="sec-num">SECTION 02</span><h2>一次 RAG 检索：智能客服 Agent 的完整链路</h2></div>
+  <p class="sec-sub">客户提问进入 LangGraph 运行时（共 8 个节点）：<code>classify</code> 之后，检索类意图走 <code>retrieve → graph_augment → generate / fallback</code>，闲聊 / 转人工 / 数据查询分别走 <code>chitchat</code> / <code>handoff</code> / <code>data_query</code>。检索类意图（产品咨询 / 政策解读 / FAQ）才进入知识检索。</p>
+
+  <div class="flow">
+
+    <div class="fnode accent-perm" data-tags="perm">
+      <span class="fnum">1</span>
+      <h4>对话入口与客户身份校验 <span class="loc">POST /api/customer/chat/messages · /stream</span></h4>
+      <p>仅持牌客户可对话。JWT audience 必须等于 <code>customer-app</code>——内部员工的凭证在客户域一律无效，反之亦然（两个身份域：不同的表、不同的 token 受众、不同的前端）。会话标识 <code>sid</code> 取自凭证，短期记忆按它隔离。</p>
+      <div class="gates">
+        <span class="tag tag-perm">P05 仅客户身份域</span>
+        <span class="tag tag-perm">P01 双身份域隔离</span>
+        <span class="tag tag-perm">P02 跨域 403</span>
+        <span class="tag tag-perm">P03 会话白名单</span>
+      </div>
+      <p class="src">出处：<code>app/api/chat.py</code>、<code>app/auth/dependencies.py</code></p>
+    </div>
+
+    <div class="fnode" data-tags="">
+      <span class="fnum">2</span>
+      <h4>classify · 意图分类 <span class="loc">agent/intent.py</span></h4>
+      <p><b>关键词确定性判断，不经过模型</b>。判定顺序：转人工 → 数据查询（「我持有 / 我的持仓」等第一人称短语，刻意收窄防误判）→ 政策 → 产品 → 闲聊 → 默认 FAQ。金融关键词优先于闲聊词，避免「你好，请问费率…」被误判为闲聊。</p>
+      <div class="branches">
+        <div class="branch"><b>闲聊</b>chitchat 节点，无引用</div>
+        <div class="branch"><b>转人工</b>handoff 话术</div>
+        <div class="branch"><b>数据查询</b>复用数据分析链路（见第四节）</div>
+        <div class="branch"><b>产品 / 政策 / FAQ</b>进入知识检索 ↓</div>
+      </div>
+    </div>
+
+    <div class="fnode accent-vector" data-tags="">
+      <span class="fnum">3</span>
+      <h4>retrieve · 混合召回：向量臂 ∥ 关键词臂 <span class="loc">knowledge/service.py::search_chunks</span></h4>
+      <p>两臂<b>并行</b>发起，各出 <code>hybrid_recall_top_k = 20</code> 条候选：</p>
+      <div class="arms">
+        <div class="arm arm-vector">
+          <h5><span class="tag tag-vector">向量臂</span>Milvus 语义召回</h5>
+          <ul>
+            <li>问题经同一 embedding 服务向量化，COSINE 检索 top 20</li>
+            <li>跑在独立线程，<b>2 秒墙钟预算</b>（从提交那一刻起算）</li>
+            <li>命中后回查 MySQL 元数据：<b>仅 status = active 的文档可返回</b>（P09），顺带取标题与来源文件名</li>
+          </ul>
+        </div>
+        <div class="arm arm-keyword">
+          <h5><span class="tag tag-keyword">关键词臂</span>BM25 字面召回</h5>
+          <ul>
+            <li>jieba 精确模式分词（查询侧与文档侧同一分词器），跑在 MySQL 分块镜像上</li>
+            <li>df / avgdl 在<b>全语料</b>（所有 active 分块）上统计，类型只过滤结果、不切小语料</li>
+            <li>与查询零词重叠的块（BM25 = 0）不进候选</li>
+            <li>中文财务问句里「T+1」「七日年化」「R1–R5」等字面信号主要靠它命中</li>
+          </ul>
+        </div>
+      </div>
+      <p class="merge-note">两臂位次交给 <b>RRF 融合</b> ↓</p>
+      <div class="gates">
+        <span class="tag tag-perm">P09 仅 active 文档可命中</span>
+      </div>
+    </div>
+
+    <div class="fnode" data-tags="">
+      <span class="fnum">4</span>
+      <h4>RRF 融合 <span class="loc">knowledge/hybrid.py::rrf_fuse</span></h4>
+      <p>选 RRF 而不是配权重，因为余弦（0~1）与 BM25（随语料漂移的无界分）之间没有稳定的归一化关系——RRF 只用位次，天然跨量纲：</p>
+      <div class="formula">rrf_score(chunk) = Σ<sub>臂</sub> 1 / (<span class="hl">rrf_k = 60</span> + rank<sub>臂</sub>)，rank 从 1 起</div>
+      <ul>
+        <li>去重身份是 <code>(knowledge_id, chunk_index)</code>；两路都命中的块合并为一条，<code>source = "hybrid"</code>，证据分取两路较大值</li>
+        <li><code>score</code> 写归一化 RRF（本次候选最高记 1.0），只服务排序，跨查询不可比</li>
+        <li>两臂还分着的时候算好各臂最高原始分带出（<code>RetrievedChunks.evidence</code>）——事后无法从融合结果反推</li>
+      </ul>
+    </div>
+
+    <div class="fnode accent-model" data-tags="">
+      <span class="fnum">5</span>
+      <h4>LLM 重排（增强步骤） <span class="loc">knowledge/rerank.py::rerank_chunks</span></h4>
+      <p>把整池候选交给一次模型调用重排序：专用提示词只要求输出 JSON 排序，不做判断、不生成文本。可配独立的 <code>rerank_llm_*</code> 小模型；<b>单次调用、5 秒超时、不重试、不切备用配置</b>——重排是排序增强，不该把 2 秒的检索拖成 30 秒以上。</p>
+      <ul>
+        <li>关闭 / fake / 回放时恒等保序、不发调用（按配置本来就不调用）</li>
+        <li><b>达标块保底组装</b>：已达标的块保底占位、未达标块按重排序补足名额（知识候选最终取 <code>retrieval_top_k = 5</code> 条；图谱增强会在此之后另追加图谱段落，总数不设上限）。重排不得把达标块挤出上下文——否则一次增强环节就改写了「有没有依据」的合规结论</li>
+      </ul>
+    </div>
+
+    <div class="fnode accent-graph" data-tags="perm">
+      <span class="fnum">6</span>
+      <h4>graph_augment · GraphRAG 图谱增强 <span class="loc">knowledge_graph/graphrag.py</span></h4>
+      <p><b>图谱是什么</b>：把 MySQL 里的业务数据「抄」成一张关系网——客户 <code>—持有→</code> 产品，产品 <code>—投向→</code> 行业，产品 <code>—适合→</code> 风险等级，产品 <code>—管理→</code> 基金经理。它是<b>只读投影</b>（单向、全量重建），只用来查、不回写。</p>
+      <p><b>为什么客服要用它</b>：知识库文档只能回答「说明书上怎么写的」（某产品是混合型、风险等级 R3）；但「这位客户的持仓集中在哪些行业」这类需要跨好几张业务表连起来的事实，文档里没有。图谱把这类事实查出来，写成句子补进上下文。</p>
+      <p><b>这一步做三件事：</b></p>
+      <ul>
+        <li><b>① 认人认物（实体识别）</b>：拿问句去比对图里节点的名字——客户姓名、产品名、基金经理、行业名，命中即算识别到；风险等级 C1–C5 是五个值的封闭词表，用正则直接认。因为比对来源就是图节点本身，识别出的名字天然对应图中真实节点，不需要额外校验。<b>客户侧提问只认登录客户本人</b>：别人的姓名即使与图中节点同名也不算命中，别人的持仓因此进不了上下文（P10）。</li>
+        <li><b>② 顺着关系查（多跳查询）</b>：从识别到的实体出发，用<b>六个固定查询</b>取事实——某客户持有哪些产品、某客户持仓的行业占比、某产品投向哪些行业、适合某个风险等级的产品、两位客户共同持有哪些产品、某位基金经理管理哪些产品。参数只有实体标识，语句写死、不拼接（P11）。</li>
+        <li><b>③ 把事实写成句子掺进候选</b>：每条查出来的事实拼成一句自然语言，例如「产品「稳健增利」底层资产中「医药」行业占比约 32%。」这就是「图谱段落」——它是查出来的确定事实，不是相似度算出来的，所以分数固定 1.0；在引用列表里标识成「知识图谱 + 查询工具」，不指向任何文档。</li>
+      </ul>
+      <p><b>怎么和知识片段排到一起</b>：两类候选先各自按权重打分，再合并成一张清单、从高到低排给模型看——知识片段得 <code>0.6 × 它的排序分</code>，图谱段落得 <code>0.4 × 1.0</code>。所以图谱段落大致落在中游：排在最相关的那些知识片段之后，但多数普通片段之前；图谱段落之间按内容去重（不同查询可能得到同一条事实）。</p>
+      <div class="formula">知识片段：<span class="hl">0.6</span> × 排序分　|　图谱段落：<span class="hl">0.4</span> × 1.0　→ 合并排序</div>
+      <p class="src">注：「排序分」是候选在 RRF / 重排之后的位次分，不是原始余弦——原始分只在证据分闸门里用。</p>
+      <p>图谱是<b>增强不是依赖</b>：3 秒软超时；没查到图谱段落时，就按原来那批知识片段继续，<b>分数一个都不打折</b>（不会乘 0.6）。问句里认不出任何实体是正常结果，不是异常。</p>
+      <p class="src">一句话边界：实体识别是「问句里出现图中已有的名字」这种直接匹配，不是语义理解——所以「我持有的产品都投了什么行业」里没有任何名字，这一步就没有段落；说成「王守成持有…」，或问句里带上产品名 / 基金经理名 / C1–C5，才会命中。</p>
+
+      <div class="note">
+        <h5>走一遍例子：客户问「王守成持有的产品都投了哪些行业？」</h5>
+        <ul>
+          <li><b>① 认人</b>：问句里出现「王守成」，与图中的客户节点同名 → 识别到这位客户（若是客户本人提问，则只认他本人）。</li>
+          <li><b>② 查事实</b>：先顺着「持有」关系查出他持有的产品，再顺着「投向」关系查出这些产品对应哪些行业、各占多少。</li>
+          <li><b>③ 写成句子</b>：得到几条图谱段落，例如「王守成持有产品「稳健增利」（混合类，风险等级R3），份额…，市值…元。」「王守成的持仓中「医药」行业占比约 32%，市值合计…元。」</li>
+          <li><b>④ 掺进候选并排序</b>：这几条按 <code>0.4</code> 分进榜；知识库片段按 <code>0.6 × 排序分</code> 进榜；两类合起来从高到低排成一张清单。</li>
+          <li><b>⑤ 生成回答</b>：模型拿这张清单作答，每句论断带 <code>[N]</code>；角标要么指向知识文档，要么指向「知识图谱」。</li>
+        </ul>
+      </div>
+
+      <div class="gates">
+        <span class="tag tag-perm">P10 客户实体只认本人</span>
+        <span class="tag tag-perm">P11 固定 Cypher 防注入</span>
+      </div>
+      <p class="src">出处：<code>app/knowledge_graph/entities.py</code>（实体识别）· <code>tools.py</code>（六个查询）· <code>graphrag.py</code>（段落拼装）· <code>app/agent/fusion.py::fuse_and_rank</code>（融合排序）</p>
+    </div>
+
+    <div class="fnode accent-perm" data-tags="perm">
+      <span class="fnum">7</span>
+      <h4>证据分闸门：该不该作答 <span class="loc">agent/graph.py::route_after_retrieve</span></h4>
+      <p>「有没有依据」是合规结论，由<b>分臂证据</b>判定，与排序无关——RRF 与重排只决定先后，不能让一次增强环节的抖动改写合规结论：</p>
+      <div class="formula">有依据 ⟺ 向量臂最高余弦 ≥ <span class="hl">0.57</span> &nbsp;或&nbsp; 关键词臂最高 BM25 ≥ <span class="hl">13.0</span> &nbsp;或&nbsp; 存在图谱段落</div>
+      <ul>
+        <li>两条阈值量纲不同（余弦 / BM25），由 golden 集校准产出（2026-09 校准：无关负例最高余弦 0.46、语义正例最低 0.68；负例 BM25 最高 10.63、正例最低 15.52）</li>
+        <li>比的是<b>融合前</b>各臂原始分，不做权重缩放——图谱一参与，相似度分就被乘上 0.6，拿综合分判兜底会凭空抬高门槛</li>
+        <li>不达标 → <b>fallback 不作答</b>：「不想给您一个没有出处的答案」+ 人工客服热线</li>
+      </ul>
+      <div class="gates"><span class="tag tag-perm">P12 无依据不作答（合规闸门）</span></div>
+    </div>
+
+  </div>
+</section>
+
+<!-- ================= 三 检索之后 ================= -->
+<section id="after">
+  <div class="sec-head"><span class="sec-num">SECTION 03</span><h2>检索出结果之后：两个 Agent 分别怎么做</h2></div>
+  <p class="sec-sub">检索只是上半场。客服 Agent 把候选上下文变成「带强制引用、可审计」的回答；数据分析 Agent 把检索到的视图定义变成「受限、可执行」的 SQL。本节先讲客服 Agent 的下半场，数据分析 Agent 在第四节整节展开。</p>
+
+  <h3 style="font-size:19px;margin:18px 0 12px">3.1 智能客服 Agent：从候选分块到带引用的回答</h3>
+  <div class="flow">
+
+    <div class="fnode accent-model" data-tags="perm">
+      <span class="fnum">8</span>
+      <h4>generate · 受限生成 + 强制引用 <span class="loc">llm/provider.py::generate_grounded_answer</span></h4>
+      <p>系统提示词钉死三条：<b>只能依据检索片段</b>（不得使用片段外知识）、<b>不得做产品推荐或收益预测</b>、每句论断必须用 <code>[N]</code> 标注依据片段序号，严格 JSON 输出 <code>{answer, citations}</code>。提示词 = 系统约束 + 会话历史（Redis 短期记忆，30 分钟滑动过期、2000 token 预算）+ 带编号片段 + 问题。</p>
+      <div class="gates">
+        <span class="tag tag-perm">P13 只能依据片段 · 禁止推荐与预测</span>
+      </div>
+    </div>
+
+    <div class="fnode accent-perm" data-tags="perm">
+      <span class="fnum">9</span>
+      <h4>引用对齐：正文角标是权威 <span class="loc">agent/citations.py::reconcile_answer</span></h4>
+      <ul>
+        <li>正文里出现、且映射到有效分块的 <code>[N]</code> → 生成结构化引用（文档标识 + 段落位置 + 标题路径）</li>
+        <li>正文里越界 / 无对应分块的角标 → <b>从正文剔除</b>：模型编出一个不存在的引用，不能让它蒙混过关变成「看似有依据」</li>
+        <li>正文一个角标都没有 → 退回模型自报的 citations 列表（退化输出兜底）</li>
+        <li>角标按回答内出现位次重排：只引了一段的回答显示 <code>[1]</code> 而不是 <code>[3]</code></li>
+      </ul>
+      <div class="gates"><span class="tag tag-perm">P14 剔除编造 / 悬空引用</span></div>
+    </div>
+
+    <div class="fnode accent-gold" data-tags="">
+      <span class="fnum">10</span>
+      <h4>回合收尾：记忆、留痕、风险协作 <span class="loc">agent/graph.py::run_customer_service_turn</span></h4>
+      <ul>
+        <li><b>短期记忆写回</b>：本轮问答追加进 Redis 列表（写不进去也不影响本轮的答案）</li>
+        <li><b>审计级留痕</b> <code>ConversationArchive</code>（永久）：使用者、Agent、问题、最终答案、引用、内容分类——合规举证</li>
+        <li><b>调试级留痕</b> <code>AgentDebugTrace</code>（保留 30 天）：完整提示词、检索片段、token 与耗时</li>
+        <li><b>高风险意图识别</b>（关键词确定性，不过模型）：察觉转账限额规避、可疑资金流转等意图 → 事件总线广播 <code>risk_intent_detected</code>（载荷只带结论不带原文）→ 风控监测订阅方写一条风险关注——协作是增强，不改变本轮回答</li>
+        <li>SSE 流式：先把整轮跑完，再把定案回答逐字转成传输帧——<b>推流过程不做任何决策</b></li>
+      </ul>
+    </div>
+  </div>
+
+  <h3 style="font-size:19px;margin:26px 0 12px">3.2 数据分析 Agent：检索之后做什么（摘要）</h3>
+  <div class="card">
+    <p style="color:var(--ink-soft);font-size:14.5px">它的「检索」检出的是<b>语义视图定义与 few-shot 示例</b>（不是知识分块）。检索之后：视图定义注入提示词 → 模型生成单条 SELECT → 代码校验（第二道防线）→ 受限账号 + 行级身份执行 → 结果解读 → 审计留痕。完整链路见下节。客服 Agent 的「数据查询」分支<b>复用同一条链路</b>：执行身份锁死为凭证客户本人，解读改为面向客户的事实陈述；有结果时随回答附结构化结果表，剩下的文本只讲口径与行数。失败 / 越界 / 零行三种出口各自有话术（且不带结果表——空表会把「没有数据」与「查询挂了」抹平），<b>绝不回退到知识检索拿泛泛之谈冒充数据答案</b>。</p>
+  </div>
+</section>
+
+<!-- ================= 四 数据分析 Agent ================= -->
+<section id="analytics">
+  <div class="sec-head"><span class="sec-num">SECTION 04</span><h2>数据分析 Agent：NL2SQL 里的检索增强</h2></div>
+  <p class="sec-sub">入口 <code>POST /api/internal/analytics/query</code>（内部员工）。链路：<code>select_views → generate_query → validate_query → execute_query → interpret_result</code>。风控监测 Agent 与客服的数据查询分支都复用这条链路，各自只换视图范围与身份。</p>
+
+  <div class="flow">
+
+    <div class="fnode accent-perm" data-tags="perm">
+      <span class="fnum">1</span>
+      <h4>入口与员工身份 <span class="loc">api/analytics.py</span></h4>
+      <p>内部身份域 JWT + 会话白名单之外，还要<b>员工确实存在</b>（<code>current_employee</code> 查库）。任何内部员工都可提问；能查到哪些行不取决于问题文本，而取决于视图内建的行级权限与登录身份。</p>
+      <div class="gates"><span class="tag tag-perm">P06 员工身份核验</span></div>
+    </div>
+
+    <div class="fnode accent-vector" data-tags="perm">
+      <span class="fnum">2</span>
+      <h4>select_views · 检索相关视图与示例 <span class="loc">analytics/catalog.py</span></h4>
+      <p>按问题关键词（含历史问题，支撑「那上个季度呢」这类追问）从视图目录检出相关视图，同时检索同域的「问题 → 查询」示例。视图的列清单不手维护，从 <code>information_schema</code> 实时内省，保证注入的定义与迁移创建的视图不漂移。</p>
+      <ul>
+        <li>目录分两域：<b>员工侧 5 张</b>（客户概况 / 持仓分布 / 交易统计 / 产品要素 / 预警统计）、<b>客户域 4 张</b>（我的持仓 / 流水 / 资金账户 / 风评结论）</li>
+        <li>每个 Agent 在自己的配置里声明看得到哪一域（<code>view_names</code>），<b>两域互不可见</b>；唯一的例外是产品要素——它无行级过滤且是已披露信息，客服的候选集里也声明了它（客服共 5 张），不声明的话客户拿自己的风险等级筛产品就走不通。示例同样按域收窄，员工侧看不到「怎么查客户自己的账」的样例</li>
+        <li>一个都匹配不上 → 「超出可查范围」，模型看不到也生成不出别的域的查询</li>
+      </ul>
+      <div class="gates"><span class="tag tag-perm">P15 视图候选集按 Agent 收窄</span></div>
+    </div>
+
+    <div class="fnode accent-model" data-tags="">
+      <span class="fnum">3</span>
+      <h4>generate_query · 生成 SQL <span class="loc">analytics/llm.py</span></h4>
+      <p>提示词注入：视图定义（场景口径 + 列清单）+ 同域示例 + 历史。硬性规则写进系统提示词：只输出一条 SELECT、只能查给定视图、不得注释 / 分号 / SET / 变量。客户口径额外两条：视图已锁定本人数据、<b>不要再按客户标识筛选</b>；涉及产品只允许按风险等级筛选（Cn 筛 R1–Rn）、<b>只按产品代码排序</b>——按收益排序就是在替客户比较产品，那是投顾助手的产物。</p>
+    </div>
+
+    <div class="fnode accent-perm" data-tags="perm">
+      <span class="fnum">4</span>
+      <h4>validate_query · 安全校验（第二道防线） <span class="loc">analytics/validation.py</span></h4>
+      <p>字符串字面量与反引号标识符先抹掉再扫描，然后逐条拒绝：注释（<code>--</code> <code>#</code> <code>/*</code>）、多语句（<code>;</code>）、会话变量（<code>@</code>——行级权限的提权面）、非 SELECT 首词、写类 / DDL / 权限关键词（INSERT、UPDATE、DELETE、CREATE、DROP、SET、GRANT、INTO 等 24 个）。刻意不做完整 SQL 解析：<b>宁可误拒一条合法查询，不可放过一条拼接</b>。</p>
+      <div class="gates"><span class="tag tag-perm">P17 SQL 校验防线</span></div>
+    </div>
+
+    <div class="fnode accent-perm" data-tags="perm">
+      <span class="fnum">5</span>
+      <h4>execute_query · 受限执行（第一道防线是结构性的） <span class="loc">analytics/execution.py</span></h4>
+      <ul>
+        <li>受限账号 <code>wealth_analytics</code> <b>只对这组语义视图有 SELECT</b>，对基础表无任何权限——访问视图外对象在 MySQL 层即被拒绝</li>
+        <li>执行前在同一连接上写入身份：员工 <code>SET @analytics_employee_id / @analytics_employee_role</code>，客户 <code>SET @analytics_customer_id</code>；<b>行级权限内建在视图定义里</b>——员工侧理财顾问 / 风控专员全量、客户经理只见名下客户，客户域锁死为凭证客户本人；身份未设置时视图返回零行（fail closed）</li>
+        <li><code>max_execution_time</code> 5 秒；结果上限 200 行，超出截断并置标记</li>
+        <li>归还连接池前重置两域身份；清理失败则<b>作废该连接</b>——不让下一个借用者继承上一个人的行级范围</li>
+      </ul>
+      <div class="gates">
+        <span class="tag tag-perm">P16 受限账号只对视图有 SELECT</span>
+        <span class="tag tag-perm">P18 行级权限 fail closed</span>
+        <span class="tag tag-perm">P19 连接身份归还前重置</span>
+      </div>
+
+      <div class="note">
+        <h5>员工在这条链路上能看到名下客户的什么、看不到什么</h5>
+        <p style="font-size:13.5px;color:var(--ink-soft);margin-bottom:8px">客户范围分两种：<b>客户经理</b>只有自己名下的客户，<b>理财顾问 / 风控专员</b>是全部客户；三类人看到的<b>字段完全一样</b>——字段就是下面这 5 张视图里定义的列：</p>
+        <table>
+          <thead><tr><th style="width:112px">视图</th><th>能看到的字段</th></tr></thead>
+          <tbody>
+            <tr><td>客户概况</td><td>客户编号 · <b>姓名（实名）</b> · 客户分层（普通 / 金卡 / 白金 / 钻石 / 私行）· 风险等级（C1–C5）· 资产规模 · 持仓数量 · 开户时间</td></tr>
+            <tr><td>持仓分布</td><td>客户编号 · 产品代码 / 名称 / 类型 · 产品风险等级 · 份额 · 成本金额 · 当前市值 · 盈亏金额 · 盈亏比例 · 持仓状态</td></tr>
+            <tr><td>交易统计</td><td>交易流水号 · 客户编号 · 产品代码 / 名称 / 类型 · 交易类型 · 金额 · 份额 · 净值 · 费用 · 交易状态 · 交易时间</td></tr>
+            <tr><td>预警统计</td><td>预警编号 · 客户编号 · 预警类型 · 预警等级（轻度 / 中度 / 重度）· 预警状态（未处理 / 已排除 / 已升级）· 触发时间</td></tr>
+            <tr><td>产品要素</td><td>产品代码 / 名称 / 类型 · 风险等级 · 预期收益 · 起投金额 · 期限 · 费率 · 基金经理 · 产品状态（无客户维度，因此这张没有行级过滤）</td></tr>
+          </tbody>
+        </table>
+        <p style="font-size:13.5px;font-weight:700;color:var(--navy);margin-bottom:6px">看不到的：</p>
+        <ul>
+          <li><b>敏感身份字段</b>：身份证号 · 手机号 · 银行卡号 · 密码散列——结构性不进视图，不是靠权限挡，而是这些列在视图里根本不存在，任何问法都问不出。</li>
+          <li><b>预警的自由文本</b>：触发详情与处置结论两列（可能夹带任意内容）；只能看到类型、等级、状态、时间。</li>
+          <li><b>客户域的四张视图</b>（我的持仓 / 我的流水 / 我的资金账户 / 我的风评结论）：那是客户侧的数据，员工身份看不到另一域。</li>
+          <li><b>基础表的原始数据</b>：执行账号对 <code>sys_customer</code>、<code>fin_holdings</code> 这类基础表<b>没有任何 SELECT 权限</b>；视图没定义的列，也问不出来。</li>
+          <li><b>别人名下的客户</b>（客户经理）：行级过滤直接命中不了行，结果是<b>零行</b>——不是「无权限」报错，也不是「查不到这位客户」。</li>
+        </ul>
+        <p class="src">一句话记：<b>范围</b>由归属关系决定（<code>sys_customer.manager_id</code>），<b>字段</b>由视图定义决定，两者都是代码、模型改不了。姓名列在迁移 <code>0034</code> 改为实名（ADR-0029）——脱敏会让「按姓名查人」恒零行，进而被解读成「该客户无持仓」；敏感字段的边界没有放宽。</p>
+      </div>
+    </div>
+
+    <div class="fnode accent-model" data-tags="perm">
+      <span class="fnum">6</span>
+      <h4>interpret_result · 解读与留痕 <span class="loc">analytics/interpretation.py · service.py</span></h4>
+      <ul>
+        <li><b>员工侧</b>由模型解读：必须说明数据口径、不得编造结果中不存在的数字；低基数列的完整计数由代码算好放进提示词，模型不得凭样例重新计数</li>
+        <li><b>客户侧不交给模型</b>——模型会把口径说明里的字段名写成具体数字。客户侧文本由结果集直接生成，只说<b>行数、截断与口径</b>；逐行数据由随回答一起送达的<b>结构化结果表</b>承载（中文列标签、剔除客户标识列、SQL 不给客户）——表格与文本都不过模型，表格是数据的唯一出处（P20，ADR-0028）</li>
+        <li>解读这一步若失败，用带口径的模板文本兜底，不让一次成功的查询整体失败</li>
+        <li><b>审计留痕</b> <code>AnalyticsQueryAudit</code>：成功与被拒绝的尝试都记——事后可追溯谁试图查了什么</li>
+        <li>内容分类默认事实性内容；命中报告类问法<b>提升为投顾内容</b>，进入必须审核的口径</li>
+      </ul>
+      <div class="gates"><span class="tag tag-perm">P20 客户侧解读不过模型</span></div>
+    </div>
+
+  </div>
+</section>
+
+<!-- ================= 五 权限总表 ================= -->
+<section id="permission">
+  <div class="sec-head"><span class="sec-num">SECTION 05</span><h2>权限校验总表（20 道）</h2></div>
+  <p class="sec-sub">按三层归组：身份与入口、知识检索链、数据查询链。编号与流程图中的红色标记一一对应。</p>
+
+  <div class="perm-group">A · 身份与入口层</div>
+  <div class="perm-list">
+    <div class="perm-item" data-tags="perm"><div><b>双身份域隔离</b><p>客户与内部员工是不同的表、不同的 token 受众（<code>customer-app</code> / <code>internal-app</code>）、不同的前端应用；不存在「同一个人既是客户又是员工」的账号。</p></div></div>
+    <div class="perm-item" data-tags="perm"><div><b>JWT 验签三件套</b><p>HS256 签名 + audience 校验 + 类型（access / refresh）与过期校验；audience 不匹配是 403「身份域不匹配」，其余无效是 401。</p></div></div>
+    <div class="perm-item" data-tags="perm"><div><b>Redis 会话白名单</b><p>凭证里的 <code>sid</code> 必须在 <code>auth:session:{sid}</code> 白名单内；登出即删，令牌未过期也失效。</p></div></div>
+    <div class="perm-item" data-tags="perm"><div><b>知识库管理仅内部员工</b><p>上传 / 列表 / 删除 / 检索试验全部挂在 <code>/api/internal/knowledge/*</code>，要求内部身份域。</p></div></div>
+    <div class="perm-item" data-tags="perm"><div><b>客服对话仅持牌客户</b><p><code>/api/customer/chat/*</code> 要求客户身份域；会话标识取自凭证，短期记忆按会话隔离、不跨登录延续。</p></div></div>
+    <div class="perm-item" data-tags="perm"><div><b>员工存在性核验</b><p>数据分析等内部接口在身份域之上再查一次员工表，员工不存在即 401。</p></div></div>
+    <div class="perm-item" data-tags="perm"><div><b>回放模式关闭写操作</b><p>演示回放（demo_replay）下知识库写操作与图谱重建明确拒绝，不发起任何外部调用。</p></div></div>
+  </div>
+
+  <div class="perm-group">B · 知识检索链（智能客服 Agent）</div>
+  <div class="perm-list">
+    <div class="perm-item" data-tags="perm"><div><b>入库格式白名单</b><p>仅 txt / md / docx；知识类型封闭集合 FAQ / 产品 / 政策，政策与产品带默认有效期。</p></div></div>
+    <div class="perm-item" data-tags="perm"><div><b>命中块回查文档状态</b><p>向量臂命中后回查 MySQL 元数据，仅 <code>active</code> 文档的分块可进入候选——已下架 / 处理中的文档即使向量还在也不会返回。</p></div></div>
+    <div class="perm-item" data-tags="perm"><div><b>GraphRAG 客户实体只认本人</b><p>客户侧提问把 <code>only_customer_id</code> 锁为登录客户：别人姓名解析不出实体，别人的持仓与行业敞口进不了上下文。</p></div></div>
+    <div class="perm-item" data-tags="perm"><div><b>图谱工具固定 Cypher</b><p>六个查询工具的语句固定、参数是实体标识，Agent 不拼 Cypher；非法标识在发出查询前即 400。</p></div></div>
+    <div class="perm-item" data-tags="perm"><div><b>证据分闸门：无依据不作答</b><p>向量臂余弦 ≥ 0.57 或关键词臂 BM25 ≥ 13.0 或有图谱段落，三者任一达标才允许生成；否则兜底话术 + 人工热线。重排与融合无权改写这个结论。</p></div></div>
+    <div class="perm-item" data-tags="perm"><div><b>受限生成三禁令</b><p>只能依据检索片段、不得片段外知识、不得产品推荐或收益预测；每句论断强制 <code>[N]</code> 引用。</p></div></div>
+    <div class="perm-item" data-tags="perm"><div><b>引用双向对齐</b><p>正文角标为权威：越界 / 悬空角标剔除，模型自报引用只作退化兜底；角标按回答内位次重排。</p></div></div>
+  </div>
+
+  <div class="perm-group">C · 数据查询链（数据分析 Agent / 客服数据分支）</div>
+  <div class="perm-list">
+    <div class="perm-item" data-tags="perm"><div><b>视图候选集按 Agent 收窄</b><p>语义视图分员工 / 客户两域，各 Agent 显式声明自己那一域，两域互不可见；示例问题同样按域收窄。</p></div></div>
+    <div class="perm-item" data-tags="perm"><div><b>受限执行账号</b><p><code>wealth_analytics</code> 只对 9 张语义视图有 SELECT，对基础表无任何权限——安全性由结构保证，这是第一道防线。</p></div></div>
+    <div class="perm-item" data-tags="perm"><div><b>SQL 校验第二道防线</b><p>只允许单条 SELECT：禁注释、禁多语句、禁会话变量（提权面）、禁写类 / DDL / 权限关键词；fail-safe 宁可误伤。</p></div></div>
+    <div class="perm-item" data-tags="perm"><div><b>行级权限内建视图，fail closed</b><p>员工侧按角色与归属关系（理财顾问 / 风控专员全量，客户经理只见名下客户）；客户域锁死凭证客户本人；身份未设置返回零行。<b>可查字段清单见第四节节点 5。</b></p></div></div>
+    <div class="perm-item" data-tags="perm"><div><b>连接身份的生命周期管理</b><p>身份在执行查询的同一连接上设置，归还连接池前重置两域变量；清理失败直接作废连接，防止身份继承。</p></div></div>
+    <div class="perm-item" data-tags="perm"><div><b>客户侧解读不交给模型</b><p>客户侧文本只给行数 / 截断 / 口径，逐行数据由结构化结果表承载，两者都由结果集直接生成，杜绝模型把口径字段名编造为具体数字；员工侧解读也被喂好计数、禁止重算。</p></div></div>
+  </div>
+</section>
+
+<!-- ================= 六 出处 ================= -->
+<section id="source">
+  <div class="sec-head"><span class="sec-num">SECTION 06</span><h2>代码出处索引</h2></div>
+  <table>
+    <thead><tr><th>环节</th><th>代码位置</th></tr></thead>
+    <tbody>
+      <tr><td>入库编排（四阶段状态机）</td><td><code>backend/app/knowledge/service.py</code>（ingest_document / _run_ingestion_pipeline）</td></tr>
+      <tr><td>解析 / 分块 / 向量化</td><td><code>knowledge/parsers.py</code> · <code>knowledge/tokenizer.py</code> · <code>knowledge/embeddings.py</code></td></tr>
+      <tr><td>对象存储 / 向量库</td><td><code>knowledge/object_store.py</code>（MinIO）· <code>knowledge/vector_store.py</code>（Milvus）</td></tr>
+      <tr><td>混合召回与 RRF</td><td><code>knowledge/service.py::search_chunks</code> · <code>knowledge/hybrid.py</code></td></tr>
+      <tr><td>LLM 重排与保底组装</td><td><code>knowledge/rerank.py</code>（ADR-0022）</td></tr>
+      <tr><td>GraphRAG 增强</td><td><code>knowledge_graph/graphrag.py</code> · <code>entities.py</code> · <code>tools.py</code> · <code>agent/fusion.py</code></td></tr>
+      <tr><td>客服 Agent 运行时图</td><td><code>agent/graph.py</code>（8 个节点：classify · retrieve · graph_augment · generate · fallback · chitchat · handoff · data_query）</td></tr>
+      <tr><td>意图分类 / 引用对齐 / 记忆</td><td><code>agent/intent.py</code> · <code>agent/citations.py</code> · <code>agent/memory.py</code></td></tr>
+      <tr><td>受限生成与模型调用链</td><td><code>llm/provider.py</code>（GROUNDED_SYSTEM_PROMPT / chat_completion）</td></tr>
+      <tr><td>数据分析链路</td><td><code>analytics/graph.py</code> · <code>catalog.py</code> · <code>llm.py</code> · <code>validation.py</code> · <code>execution.py</code> · <code>interpretation.py</code></td></tr>
+      <tr><td>受限账号与行级身份</td><td><code>db/analytics_account.py</code>（账号、GRANT SELECT 与连接上写身份）；视图迁移 <code>migrations/versions/0008</code>（员工侧；姓名列后由 <code>0034</code> 改为实名）与 <code>0030</code>（客户域）</td></tr>
+      <tr><td>身份校验</td><td><code>auth/dependencies.py</code> · <code>auth/tokens.py</code> · <code>auth/session_store.py</code></td></tr>
+      <tr><td>会话归档与调试留痕</td><td><code>agent/archive.py</code> · <code>agent/debug_trace.py</code></td></tr>
+      <tr><td>架构决定</td><td><code>docs/adr/0002</code>（Neo4j 投影）· <code>0004</code>（双身份域）· <code>0007</code>（一套运行时、每个 Agent 一份配置，原文为四份）· <code>0017</code>（第五份配置：业务操作 Agent）· <code>0008</code>（回放）· <code>0010</code>（语义视图）· <code>0014</code>（关键词臂镜像分块）· <code>0022</code>（混合召回 + RRF + 重排）· <code>0025</code>（客户域数据查询）· <code>0028</code>（客户侧数据回答携带结果表）</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<footer>
+  <p>智能财富管家系统 · RAG 流程详解 —— 本文件由代码阅读归纳而成，术语以 <code>CONTEXT.md</code> 为准，架构决定以 <code>docs/adr/</code> 为准。生成于 2026-09-24，2026-09-27 按代码复核更新：客户侧结果表（ADR-0028）、视图两域例外、客服运行时图 8 个节点、token 定义与分块常量出处、问答对与滑窗的关系、重排与图谱段落的上下文口径、受限账号授权与迁移 0034 归属；并按答辩口径移除降级路径的展示——视角只保留「全流程」与「只看权限校验」。供答辩展示使用。</p>
+</footer>
+
+</main>
+</div>
+
+<script>
+(function(){
+  var buttons = document.querySelectorAll('.lens-btns button');
+  buttons.forEach(function(btn){
+    btn.addEventListener('click', function(){
+      document.body.dataset.lens = btn.dataset.lens;
+      buttons.forEach(function(b){ b.classList.toggle('active', b === btn); });
+    });
+  });
+
+  if (!('IntersectionObserver' in window) ||
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    return;
+  }
+  var targets = document.querySelectorAll('.fnode, .card, .perm-item, .stat');
+  targets.forEach(function(el){ el.classList.add('reveal'); });
+  var io = new IntersectionObserver(function(entries){
+    entries.forEach(function(entry){
+      if (entry.isIntersecting) {
+        entry.target.classList.add('in');
+        io.unobserve(entry.target);
+      }
+    });
+  }, { threshold: 0.08 });
+  targets.forEach(function(el){ io.observe(el); });
+})();
+</script>
+</body>
+</html>

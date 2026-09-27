@@ -6,12 +6,14 @@
 复述口径。
 
 解读按使用者口径分两套（ADR-0025）：员工侧是内部研判，客户侧是**面向本人的
-事实陈述**。两者差在说话对象与边界上——客户那一套把数字直接写进文本，不许出现
-投资建议、收益预测与产品推荐（只筛不排序的产品清单才轮得到客服说，见 ADR-0005）。
+事实陈述**。两者差在说话对象与边界上——客户那一套不许出现投资建议、收益预测与
+产品推荐（只筛不排序的产品清单才轮得到客服说，见 ADR-0005）。
 
 客户侧不把解读交给模型。模型会把视图说明里的字段名写成具体数字（例如没查到的
 风险承受等级和有效期），也会只看见一部分行就给全体计数。客户看到的句子由结果集
-直接生成：行数、低基数列的完整计数、每一行的原值，都来自查询结果本身。
+直接生成，且自 ADR-0028 起只留**行数、截断与口径**：逐行数据与低基数列计数都从
+文本里去掉，它们由随回答一起送达的结果表承载——表格是数据的唯一出处，文本负责
+回答「这些数字是怎么来的」。逐行与计数的两个函数因此仍留给员工侧与模型路径。
 """
 
 from collections import Counter
@@ -65,7 +67,9 @@ def generate_interpretation(
     # 用与 fake provider 相同的带口径模板。
     if settings.demo_replay:
         preset = replay_library.analytics_preset(question)
-        if preset is not None:
+        # 预置解读是员工口吻，且会写出内部视图名（「语义视图 va_product_element」）——
+        # 客户侧不采信它，一律走确定性模板（ADR-0028）；预置 SQL 照旧使用。
+        if preset is not None and audience == Audience.EMPLOYEE:
             return preset.interpretation
         return _fake_interpret(question, views, result, audience=audience)
     if audience == Audience.CUSTOMER or settings.resolved_llm_provider == "fake":
@@ -133,17 +137,18 @@ def _row_lines(result: QueryResult, *, limit: int | None = None) -> str:
 
 
 def _fake_customer_interpret(views: list[ViewSpec], result: QueryResult) -> str:
-    """客户口径的确定性解读：数字直接写进文本，不加任何评价。
+    """客户口径的确定性解读：只说行数、截断与口径。
 
     客户侧无论 provider 都走这里。模型解读会把口径说明里的字段名写成具体数字，
     也会只看见一部分行就给全体计数；这两件事都违反「不得编造结果中不存在的数字」。
+
+    逐行数据不在这里念：客户侧的结果表随回答一起送达（ADR-0028），表格是数据的
+    唯一出处，文本只回答「这些数字是怎么来的」。`_row_lines` 与 `_column_counts`
+    因此只服务员工侧与模型路径，不在这条出口上调用。
     """
     truncated_note = "（结果超出行数上限，已截断）" if result.truncated else ""
-    counts = _column_counts(result)
-    count_sentence = f"{counts}。" if counts else ""
-    rows = _row_lines(result)
     return (
-        f"为您查到 {len(result.rows)} 行数据{truncated_note}。{count_sentence}{rows}。"
+        f"为您查到 {len(result.rows)} 行数据{truncated_note}，已列在下表。"
         f"数据口径：{_basis_text(views)}"
     )
 

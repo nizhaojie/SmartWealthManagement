@@ -108,6 +108,10 @@ def test_stream_returns_event_stream_and_ends_with_full_fallback_answer(chat_cli
     assert streamed_answer == last_data["answer"]
     assert last_data["citations"] == []
     assert "人工客服" in last_data["answer"] or "95588" in last_data["answer"]
+    # done 帧是整个 ChatResponse 的 model_dump()：结果表这个字段在场（有行的数据查询
+    # 才填它，其余分支与出口都是 None），字段本身不进事件名——客户侧 parseFrame 把
+    # 无名事件当 delta 用，新事件名会在答案尾部追加 undefined（ADR-0028）。
+    assert last_data["data_answer"] is None
 
 
 def test_stream_ends_with_structured_citations_matching_uploaded_document(chat_client):

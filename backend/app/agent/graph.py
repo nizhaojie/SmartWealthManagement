@@ -15,9 +15,11 @@ from app.agent.config import CUSTOMER_SERVICE_CONFIG, CUSTOMER_SERVICE_VIEW_NAME
 from app.agent.fusion import fuse_and_rank
 from app.agent.intent import RETRIEVAL_INTENTS, Intent, classify_intent
 from app.agent.risk_intent import detect_risk_intent
+from app.agent.schemas import DataAnswerColumn, DataAnswerResponse
 from app.analytics import catalog
 from app.analytics.audience import Audience
 from app.analytics.errors import OUT_OF_SCOPE_CODE, QUERY_TIMEOUT_CODE
+from app.analytics.execution import QueryResult
 from app.analytics.graph import AnalyticsState
 from app.analytics.service import run_restricted_query
 from app.db.analytics_account import AnalyticsIdentity
@@ -98,6 +100,50 @@ class DataQueryTurn:
     # （30 天），不写进工具调用：数据查询是一类分支而不是一个工具（ADR-0025），
     # 记成工具调用会让「这个 Agent 有什么工具」与它实际做的事对不上。
     material: dict
+    # 面向客户的结构化结果（ADR-0028）：只有「有行」这条出口才带它。SQL 与
+    # `customer_id` 不进这里——它是客户契约，不是留痕材料的另一种排布。
+    data_answer: DataAnswerResponse | None = None
+
+
+# 不进客户契约的列（ADR-0028）。它是行级范围机制的内部标识：裁剪发生在后端这一步，
+# 不靠前端隐藏列——前端隐藏是「看不见但已经送达」，那正是这条纪律要避免的形态。
+_CUSTOMER_HIDDEN_COLUMNS = frozenset({"customer_id"})
+
+
+def customer_data_answer(
+    views: list[catalog.ViewSpec], result: QueryResult
+) -> DataAnswerResponse:
+    """把一次「有行」的查询整理成面向客户的结果表（ADR-0028）。
+
+    - 表头取视图目录里的中文标签，缺标签回落列名（不丢列）；
+    - `customer_id` 在这一步剔除，`views` 给中文名而不是 `va_*` 视图名；
+    - SQL 从不进这里：它只进 30 天调试级留痕。
+
+    它只被「有行」那条出口调用：零行、失败/超时、白名单外都不该长出一张空表。
+    """
+    labels: dict[str, str] = {}
+    for view in views:
+        for column, label in view.column_labels.items():
+            labels.setdefault(column, label)
+    kept = [
+        index
+        for index, column in enumerate(result.columns)
+        if column not in _CUSTOMER_HIDDEN_COLUMNS
+    ]
+    return DataAnswerResponse(
+        columns=[
+            DataAnswerColumn(
+                key=result.columns[index],
+                label=labels.get(result.columns[index], result.columns[index]),
+            )
+            for index in kept
+        ],
+        rows=[[row[index] for index in kept] for row in result.rows],
+        row_count=len(result.rows),
+        truncated=result.truncated,
+        # 视图的中文名：客户不认 `va_my_holdings`，而视图目录里本来就有它的中文名。
+        views=[view.label or view.name for view in views],
+    )
 
 
 def answer_customer_data_question(
@@ -135,7 +181,11 @@ def answer_customer_data_question(
         return DataQueryTurn(answer=DATA_QUERY_FAILURE_MESSAGE, material=material)
     if not final_state["result"].rows:
         return DataQueryTurn(answer=DATA_QUERY_EMPTY_MESSAGE, material=material)
-    return DataQueryTurn(answer=final_state["interpretation"], material=material)
+    return DataQueryTurn(
+        answer=final_state["interpretation"],
+        material=material,
+        data_answer=customer_data_answer(final_state["views"], final_state["result"]),
+    )
 
 
 def _data_query_material(final_state: AnalyticsState) -> dict:
@@ -224,6 +274,9 @@ class AgentState(TypedDict, total=False):
     # 数据查询分支这一轮的查询材料（生成的查询、命中的视图、行数）。它同样不是
     # 提示词，但属于「这一轮到底发生了什么」，随调试级留痕落库。
     data_query: dict
+    # 数据查询分支「有行」时的客户侧结果表（ADR-0028）。它与 data_query 的去向正好
+    # 相反：材料只落 30 天留痕，结果表只送达客户。
+    data_answer: DataAnswerResponse | None
 
 
 @dataclass
@@ -236,6 +289,8 @@ class ChatTurnResult:
     # 本轮是否走过任一降级路径（模型兜底、向量超时转关键词、缓存不可用……）。
     # 由降级留痕反查得出，而不是在各处手工累加——那样迟早会漏掉一处。
     degraded: bool = False
+    # 有行的数据查询才带结果表（ADR-0028），其余分支与出口都是 None。
+    data_answer: DataAnswerResponse | None = None
 
 
 def build_retrieval_evidence(
@@ -431,6 +486,7 @@ def _build_graph(db: Session, settings: Settings, driver: Driver, graph_namespac
             "answer": turn.answer,
             "citations": [],
             "data_query": turn.material,
+            "data_answer": turn.data_answer,
         }
 
     graph.add_node("classify", classify_node)
@@ -653,4 +709,5 @@ def run_customer_service_turn(
         content_classification=content_classification,
         trace_id=trace_id,
         degraded=degradation.happened(db, trace_id=trace_id),
+        data_answer=final_state.get("data_answer"),
     )

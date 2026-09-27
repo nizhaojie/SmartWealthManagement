@@ -1,4 +1,4 @@
-"""语义视图目录：每个视图的场景说明、口径与关键词（ADR-0010、ADR-0025）。
+"""语义视图目录：每个视图的场景说明、口径、关键词与中文列标签（ADR-0010、ADR-0025、ADR-0028）。
 
 按问题关键词只注入相关视图的定义，不注入全部——否则提示词随视图增多
 而膨胀。视图的列清单不在此处手维护，而是从 information_schema 内省得到，
@@ -10,8 +10,8 @@
 （``app.agent.config.AgentConfig.view_names``），两域因此互不可见。
 """
 
-from collections.abc import Collection
-from dataclasses import dataclass
+from collections.abc import Collection, Mapping
+from dataclasses import dataclass, field
 
 from sqlalchemy import bindparam, text
 from sqlalchemy.orm import Session
@@ -28,6 +28,11 @@ class ViewSpec:
     # （ADR-0025）。留空的视图不进那张清单——员工侧视图不进客户候选集，也就
     # 没有对客户报菜名的场合。
     label: str = ""
+    # 列的中文表头：客户侧的结果表用它（ADR-0028），键是视图里的列名。没写标签的
+    # 列在运行时回落列名——宁可表头出现英文 snake_case，也不悄悄吞掉一列数据；
+    # 「列面 == 标签键集合」由集成测试盯着（`test_semantic_views.py`），迁移加了列
+    # 而这里没补标签时红在 CI 里，而不是红在客户眼前。
+    column_labels: Mapping[str, str] = field(default_factory=dict)
 
 
 # 员工侧：行级范围由角色与归属关系决定，敏感字段已脱敏（迁移 0008）。
@@ -55,6 +60,20 @@ EMPLOYEE_VIEW_CATALOG: tuple[ViewSpec, ...] = (
         summary="产品要素：产品主数据，不含客户数据，无行级过滤。",
         keywords=("产品要素", "费率", "起投", "期限", "基金经理", "业绩基准", "风险等级"),
         label="产品要素",
+        # 它是两域共有的那一张视图，因此也在客户候选集里：客户问「有什么适合我的
+        # 风险等级的产品」拿到的清单就是它，表头同样是客户看得见的东西。
+        column_labels={
+            "product_code": "产品代码",
+            "product_name": "产品名称",
+            "product_type": "产品类型",
+            "risk_level": "风险等级",
+            "expected_return": "预期年化收益率",
+            "min_amount": "起投金额",
+            "term_days": "期限天数",
+            "fee_rate": "费率",
+            "fund_manager": "基金经理",
+            "product_status": "产品状态",
+        },
     ),
     ViewSpec(
         name="va_risk_alert_stat",
@@ -75,6 +94,18 @@ CUSTOMER_VIEW_CATALOG: tuple[ViewSpec, ...] = (
         ),
         keywords=("持仓", "持有", "我的产品", "买了什么", "市值", "盈亏", "份额"),
         label="持仓明细",
+        column_labels={
+            "customer_id": "客户编号",
+            "product_code": "产品代码",
+            "product_name": "产品名称",
+            "product_type": "产品类型",
+            "product_risk_level": "产品风险等级",
+            "shares": "持有份额",
+            "cost_amount": "成本金额",
+            "market_value": "当前市值",
+            "profit_loss": "盈亏金额",
+            "profit_ratio": "盈亏比例",
+        },
     ),
     ViewSpec(
         name="va_my_transactions",
@@ -98,6 +129,21 @@ CUSTOMER_VIEW_CATALOG: tuple[ViewSpec, ...] = (
             "扣款",
         ),
         label="交易流水",
+        column_labels={
+            "customer_id": "客户编号",
+            "transaction_no": "交易编号",
+            "transaction_type": "交易类型",
+            "product_code": "产品代码",
+            "product_name": "产品名称",
+            "amount": "金额",
+            "shares": "份额",
+            "nav": "单位净值",
+            "fee": "手续费",
+            "status": "状态",
+            "traded_at": "交易时间",
+            "payee_name": "收款人",
+            "payee_account": "收款账号",
+        },
     ),
     ViewSpec(
         name="va_my_funding_account",
@@ -107,6 +153,10 @@ CUSTOMER_VIEW_CATALOG: tuple[ViewSpec, ...] = (
         ),
         keywords=("余额", "资金账户", "可用余额", "账户余额", "多少钱"),
         label="资金账户余额",
+        column_labels={
+            "customer_id": "客户编号",
+            "available_balance": "可用余额",
+        },
     ),
     ViewSpec(
         name="va_my_risk_assessment",
@@ -116,6 +166,11 @@ CUSTOMER_VIEW_CATALOG: tuple[ViewSpec, ...] = (
         ),
         keywords=("风险等级", "风险承受", "风评", "测评", "风险测评"),
         label="风险承受等级",
+        column_labels={
+            "customer_id": "客户编号",
+            "risk_level": "风险等级",
+            "valid_until": "有效期至",
+        },
     ),
 )
 

@@ -62,6 +62,8 @@ def _run_turn(
         content_classification=result.content_classification,
         trace_id=result.trace_id,
         degraded=result.degraded,
+        # 信封式响应与 SSE 的 done 帧序列化的是同一个对象，两条路径的形状因此一致。
+        data_answer=result.data_answer,
     )
 
 

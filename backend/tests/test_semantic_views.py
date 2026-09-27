@@ -15,6 +15,8 @@ from sqlalchemy import bindparam, create_engine, text
 from sqlalchemy.engine import Connection
 from sqlalchemy.exc import OperationalError, ProgrammingError
 
+from app.agent.config import CUSTOMER_SERVICE_VIEW_NAMES
+from app.analytics.catalog import VIEW_CATALOG
 from app.auth.roles import ACCOUNT_MANAGER, ADVISOR, RISK_OFFICER
 from app.db.analytics_account import (
     ANALYTICS_VIEW_NAMES,
@@ -543,3 +545,32 @@ def test_risk_conclusion_view_holds_only_the_conclusion(
         text("SELECT risk_level, valid_until FROM va_my_risk_assessment")
     ).one()
     assert tuple(actual) == tuple(expected)
+
+
+# ---- 列标签与视图列面一致（ADR-0028）--------------------------------------------
+#
+# 客户侧的结果表拿 `catalog.ViewSpec.column_labels` 当表头，缺标签的列在运行时回落
+# 英文列名。这条断言把漂移挡在 CI 里：迁移给客户可见视图加了列，而目录没补中文表头，
+# 客户就会在表头里读到 snake_case——那正是 ADR-0028 要避免的形态；反过来，标签键多于
+# 实际列说明目录在描述一张不存在的表。**客户候选集里的每一张视图都算**：产品要素不是
+# 客户域视图，但它在候选集里，客户问产品清单时它的表头同样可见。
+
+
+def test_every_customer_facing_column_has_a_chinese_label(
+    analytics_ready: str, app_connection: Connection
+):
+    specs = {spec.name: spec for spec in VIEW_CATALOG}
+    assert set(CUSTOMER_SERVICE_VIEW_NAMES) <= set(specs), "客户候选集里出现了目录外的视图"
+    for name in CUSTOMER_SERVICE_VIEW_NAMES:
+        spec = specs[name]
+        assert set(spec.column_labels) == _view_columns(app_connection, name), (
+            f"{name} 的列面与 column_labels 不一致：迁移加了列就要在 catalog 里补表头"
+        )
+        for column, label in spec.column_labels.items():
+            assert not any(
+                character.isascii() and character.isalpha() for character in label
+            ), f"{name}.{column} 的表头不是中文：{label}"
+        # 视图自己的中文名：结果表的 `views` 用它，没有它就只能回落 `va_*`（客户不认）。
+        assert spec.label and not any(
+            character.isascii() and character.isalpha() for character in spec.label
+        ), f"{name} 没有中文视图名"

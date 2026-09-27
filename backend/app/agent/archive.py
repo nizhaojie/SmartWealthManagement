@@ -1,8 +1,10 @@
 """会话归档：会话结束后留下的只读留痕（不是三层记忆里的任何一层，见 ADR-0012）。
 
 每一轮问答在结束时即刻落库，而**不是**等会话断开再批量写——进程中途退出也不会
-丢掉已经发生过的对话。落库前脱敏：身份证号、手机号、银行卡号按形态识别，真实姓名
-按当前客户的名字替换。工具调用记录、引用文档与内容分类一并留下。
+丢掉已经发生过的对话。**文本**（提问与回答）落库前脱敏：身份证号、手机号、银行卡号
+按形态识别，真实姓名按当前客户的名字替换。工具调用记录、引用文档与内容分类一并
+留下；数据查询那一轮还多留一份客户看到的结果表（ADR-0028），回看因此能重绘出与
+实时同一张表——它**不走**脱敏，理由见 `record_turn`。
 
 归档只用于回溯与举证，不参与上下文组装：短期记忆过期后，这句话不会再回到上下文里，
 但它仍然可以在归档中按会话标识或客户标识查到。
@@ -18,6 +20,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.agent.citations import Citation
+from app.agent.schemas import DataAnswerResponse
 from app.customer_scope import is_under_management, restrict_to_own_customers
 from app.db.models import ConversationArchive, Customer, Employee
 from app.exceptions import AppError
@@ -81,7 +84,15 @@ def record_turn(
     citations: list[Citation],
     tool_calls: list[dict],
     content_classification: str,
+    answer_data: DataAnswerResponse | None = None,
 ) -> None:
+    """这一轮问答的审计级留痕：一行提问、一行回答。
+
+    ``answer_data`` 是客户这一轮看到的结果表（ADR-0028），只写在 assistant 行上——
+    提问那一行从来不长出数据。它**不过** ``mask_pii``：三条正则认的是自然语言文本里
+    的 PII 形态，而结果表的字段面是视图定义的封闭列集合、值就是客户可见视图里的值；
+    对账号再打一次码只会让回看与实时不是同一张表。
+    """
     customer = db.get(Customer, user_id)
     real_name = customer.real_name if customer else None
 
@@ -106,6 +117,8 @@ def record_turn(
             tool_calls=tool_calls or None,
             citations=[asdict(citation) for citation in citations] or None,
             content_classification=content_classification,
+            # 与响应里的形状逐字段相同（客户看到的与回看到的必须是同一张表）。
+            answer_data=answer_data.model_dump(mode="json") if answer_data else None,
         )
     )
     db.commit()
@@ -319,7 +332,12 @@ def get_customer_session(db: Session, *, session_id: str, user_id: int) -> dict:
 
     直接按 session_id + user_id 过滤：别人的会话即使知道 session_id 也查不到，
     与「不存在」同等待遇（404），不暴露存在性。详情只给 role / content / citations /
-    时间——tool_calls 与 content_classification 是内部/合规字段，不进客户可见视图。
+    时间 / ``data``——tool_calls 与 content_classification 是内部/合规字段，不进客户
+    可见视图。
+
+    ``data`` 是那一轮客户看到的结果表（ADR-0028）：它是**显式**加进客户可见视图的
+    一项（要送达客户得显式加一次，ADR-0016 的手法），无表时为 ``null``。内部端的
+    ``_serialize_message`` 不加它——客户经理视角要看数据另有授权面更宽的视图。
     """
     rows = list(
         db.scalars(
@@ -344,6 +362,7 @@ def get_customer_session(db: Session, *, session_id: str, user_id: int) -> dict:
                 "content": row.content,
                 "citations": row.citations or [],
                 "created_at": row.create_time.isoformat(),
+                "data": row.answer_data,
             }
             for row in rows
         ],

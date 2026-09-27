@@ -3,7 +3,7 @@
 数据来自 `conversation_archive`（审计级留痕），与内部端 `conversations.py` 共用同一张
 表，但走客户身份域（`require_customer`）。列表分页（ADR-0024），排除当前会话——当前
 会话在对话页可见，历史只收「已结束的登录会话」；详情只给 role / content / citations /
-时间，不暴露 tool_calls 与 content_classification，`messages` 不分页。
+时间 / `data`，不暴露 tool_calls 与 content_classification，`messages` 不分页。
 """
 
 from fastapi import APIRouter, Depends

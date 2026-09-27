@@ -1006,6 +1006,11 @@ class ConversationArchive(Base):
     content: Mapped[str] = mapped_column(MEDIUMTEXT, comment="对话内容")
     tool_calls: Mapped[list | None] = mapped_column(JSON, comment="工具调用记录")
     citations: Mapped[list | None] = mapped_column(JSON, comment="引用文档")
+    # 客户看到的那张结果表（ADR-0028 / 0033）。只写在 assistant 行上；文本回答收敛为
+    # 「行数 + 截断 + 口径」之后，这一列是回看时唯一能重绘出原表的地方。
+    answer_data: Mapped[dict | None] = mapped_column(
+        JSON, comment="这一轮的结构化数据结果（客户契约）"
+    )
     content_classification: Mapped[str | None] = mapped_column(String(32), comment="内容分类")
     create_time: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 

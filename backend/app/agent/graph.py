@@ -673,6 +673,9 @@ def run_customer_service_turn(
         citations=citations,
         tool_calls=tool_calls,
         content_classification=content_classification,
+        # 这一轮客户看到的结果表（ADR-0028）：实时与回看必须是同一张表。其余分支
+        # 拿到的是 None，归档里那一行也就没有表。
+        answer_data=final_state.get("data_answer"),
     )
 
     # 调试级留痕与审计级留痕同回合各写各的：审计级永久保存，这一条到期会被清理。

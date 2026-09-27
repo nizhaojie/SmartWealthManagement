@@ -9,6 +9,9 @@ Seam：后端 HTTP 层（``POST /api/customer/chat/messages``），模型走 fak
 越界的两条线（员工侧的视图不在候选集里、另一位客户的行查不到），以及结果表本身
 的形态（中文表头、无 `customer_id`、不发 `va_*`）。执行账号的行级范围另有
 ``test_semantic_views.py`` 专测，这里测的是客户从对话里实际看得到什么。
+
+另有一节盯住归档（ADR-0028 决定 4）：历史回看拿到的必须是**同一张表**，且内部端的
+会话详情不长出这个字段。
 """
 
 import json
@@ -22,6 +25,7 @@ from sqlalchemy.orm import Session as OrmSession
 
 import app.agent.graph as agent_graph
 from app import degradation
+from app.agent.archive import mask_pii
 from app.analytics import llm as analytics_llm
 from app.analytics.errors import QUERY_REJECTED_CODE, QUERY_TIMEOUT_CODE
 from app.db.analytics_account import setup_analytics_account
@@ -40,6 +44,10 @@ FOLLOW_UP_QUESTION = "这个月转了多少"
 OUT_OF_SCOPE_QUESTION = "我的画像标签是什么"
 PRODUCT_QUESTION = "有什么适合我的风险等级的产品"
 TRUNCATION_QUESTION = "我的风险等级能买哪些产品"
+# 同一会话里的一轮知识问答：政策解读走检索分支，这一轮没有结果表。
+KNOWLEDGE_QUESTION = "赎回到账有什么规定"
+
+ADVISOR_USERNAME = "advisor1"
 
 # 随仓库发布的行数上限（`Settings.analytics_max_rows`）：超出行数上限的结果被截断，
 # 客户侧不新增专用参数（ADR-0028）。
@@ -457,6 +465,104 @@ def test_the_stream_done_frame_carries_the_same_table_as_the_envelope(
     assert done["answer"] == envelope["answer"]
     assert done["data_answer"] == envelope["data_answer"]
     assert done["data_answer"]["columns"][0]["label"] == "产品代码"
+
+
+# ---- 归档与历史回看：实时与回看是同一张表 ---------------------------------------
+
+
+def _history_detail(client: TestClient, token: str, session_id: str) -> dict:
+    response = client.get(
+        f"/api/customer/conversations/{session_id}", headers=_headers(token)
+    )
+    assert response.status_code == 200, response.text
+    return response.json()["data"]
+
+
+def test_history_replays_the_same_table_and_the_knowledge_turn_has_none(
+    chat_client: TestClient,
+):
+    """一轮数据问答之后，历史详情里的 assistant 消息带**同一张**表。
+
+    同一会话里再问一轮知识问题：那一轮没有表（字段在、值为空），因此「有表」这件事
+    跟着消息本身走，而不是跟着会话走。
+    """
+    token, session_id = _login(chat_client)
+
+    live = _chat(chat_client, token, HOLDINGS_QUESTION)
+    knowledge = _chat(chat_client, token, KNOWLEDGE_QUESTION)
+    assert knowledge["intent"] == "政策解读"
+    assert knowledge["data_answer"] is None
+
+    messages = _history_detail(chat_client, token, session_id)["messages"]
+    assert [message["role"] for message in messages] == [
+        "user",
+        "assistant",
+        "user",
+        "assistant",
+    ]
+    # 回看与实时是同一张表：逐字段相同，而不是「大致一样」。
+    assert messages[1]["data"] == live["data_answer"]
+    assert messages[1]["data"] is not None
+    assert messages[1]["content"] == live["answer"]
+    # 没有表的那一轮与提问那一行都是空值——提问那一行从来不长出数据。
+    assert messages[3]["data"] is None
+    assert messages[0]["data"] is None and messages[2]["data"] is None
+
+
+def test_archived_table_is_not_masked_even_when_a_value_looks_like_an_account(
+    chat_client: TestClient,
+):
+    """结构化结果不过 `mask_pii`：它的字段面是视图定义的封闭列集合。
+
+    种子里没有转账记录（`fin_transfer` 未播种），因此让假查询直接给一个账号形态的
+    字面量——只为了让「回看里的账号与实时逐字相同」这条断言不是空话：先把「这个值
+    确实是三条正则会改的形态」钉住，再断言归档里它一位没少。
+    """
+    question = "我的持仓对应哪些收款账号"
+    account_shaped = "6222020200998877665"
+    assert mask_pii(account_shaped) != account_shaped, (
+        "这个值必须是文本正则会改的形态，否则这条例子在证明一件假事"
+    )
+    analytics_llm.register_fake_query(
+        question,
+        f"SELECT '{account_shaped}' AS payee_account, product_code FROM va_my_holdings"
+        " ORDER BY product_code",
+    )
+
+    token, session_id = _login(chat_client)
+    live = _chat(chat_client, token, question)
+
+    assert account_shaped in {
+        str(value) for row in live["data_answer"]["rows"] for value in row
+    }
+    archived = _history_detail(chat_client, token, session_id)["messages"][1]["data"]
+    assert archived == live["data_answer"]
+
+
+def test_internal_session_detail_never_shows_the_result_table(
+    chat_client: TestClient,
+):
+    """客户经理视角看不到这张表（ADR-0028 决定 4）：内部序列化一个字段不动。
+
+    换个说法，客户视角多出来的那一项不会顺着「同一张表、同一份归档」漏到内部端。
+    """
+    token, session_id = _login(chat_client)
+    _chat(chat_client, token, HOLDINGS_QUESTION)
+
+    login = chat_client.post(
+        "/api/internal/auth/login",
+        json={"username": ADVISOR_USERNAME, "password": SEEDED_PASSWORD},
+    )
+    response = chat_client.get(
+        f"/api/internal/conversations/{session_id}",
+        headers={"Authorization": f"Bearer {login.json()['data']['access_token']}"},
+    )
+    assert response.status_code == 200, response.text
+    messages = response.json()["data"]["messages"]
+    # 看的是同一场会话：否则「没有这个字段」可能只是看错了对象。
+    assert len(messages) == 2
+    for message in messages:
+        assert "data" not in message
 
 
 # ---- 高风险意图识别：数据查询的问题照常过它 ------------------------------------

@@ -124,10 +124,20 @@ def test_customer_reads_own_session_detail_without_internal_fields(chat_client):
     assert [message["role"] for message in messages] == ["user", "assistant"]
     assert messages[0]["content"] == "你好呀"
 
-    # 只读回看：详情只给 role / content / citations / 时间，内部与合规字段不外泄。
+    # 只读回看：详情只给 role / content / citations / 时间 / data，内部与合规字段不外泄。
+    # `data` 是数据回答那一轮的结果表（ADR-0028）——要送达客户得显式加一次，因此这条
+    # 白名单断言刻意被改宽，改断言本身就是「这一步是刻意的」的记录。
     for message in messages:
-        assert set(message.keys()) <= {"role", "content", "citations", "created_at"}
+        assert set(message.keys()) <= {
+            "role",
+            "content",
+            "citations",
+            "created_at",
+            "data",
+        }
     assert isinstance(messages[1]["citations"], list)
+    # 这轮是闲聊，没有结果表：字段在、值为空。
+    assert messages[1]["data"] is None
 
 
 def test_customer_cannot_read_foreign_or_unknown_session(chat_client):

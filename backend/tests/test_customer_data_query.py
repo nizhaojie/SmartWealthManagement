@@ -685,6 +685,8 @@ def test_the_customer_visible_surface_carries_no_internal_identifiers(
     # 整份结构（含视图中文名与逐行数据）里没有内部视图名。`views` 给的是中文，但它与
     # `columns[].key` 同处一个载荷，一起过一遍最省事、也最不容易漏。
     assert "va_" not in json.dumps(table, ensure_ascii=False)
+    # 文本这一半同样不许出现：`views` 是中文，文本更不该把内部视图名念出来。
+    assert "va_" not in data["answer"]
 
     # 文本、表头与视图名里没有 SQL 片段：客户看得到结论，不是查询。
     sql_fragments = ("select ", " from ", " where ", " order by", " group by", "join ")

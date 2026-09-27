@@ -414,9 +414,18 @@ useTabSummary(
   <div class="rules">
     <PanelCard title="规则管理">
       <div class="rules__toolbar">
+        <!--
+          两个筛选的「不筛」都用空串表示，而 el-select 把空串当没选中、显示自己的占位文案
+          （默认是「请选择」）。占位文案写成与空串那一档同一个说法，界面上才读得出「现在是全部」。
+        -->
         <label class="rules__filter">
           <span class="rules__filter-label">状态</span>
-          <el-select v-model="statusFilter" name="rule-status" data-testid="rule-status-filter">
+          <el-select
+            v-model="statusFilter"
+            name="rule-status"
+            placeholder="全部"
+            data-testid="rule-status-filter"
+          >
             <el-option label="全部" value="" />
             <el-option label="已启用" value="已启用" />
             <el-option label="已停用" value="已停用" />
@@ -425,7 +434,12 @@ useTabSummary(
         </label>
         <label class="rules__filter rules__filter--wide">
           <span class="rules__filter-label">判定字段</span>
-          <el-select v-model="fieldFilter" name="rule-field" data-testid="rule-field-filter">
+          <el-select
+            v-model="fieldFilter"
+            name="rule-field"
+            placeholder="全部字段"
+            data-testid="rule-field-filter"
+          >
             <el-option label="全部字段" value="" />
             <el-option
               v-for="field in schema?.fields ?? []"

@@ -66,7 +66,9 @@ EMPLOYEE_VIEW_CATALOG: tuple[ViewSpec, ...] = (
             "product_code": "产品代码",
             "product_name": "产品名称",
             "product_type": "产品类型",
-            "risk_level": "风险等级",
+            # 产品自身的分级叫「产品风险等级」；「风险等级」是 CONTEXT.md 里的 Avoid
+            # 写法（它会被读成客户那一档），客户侧表头因此不省这个前缀。
+            "risk_level": "产品风险等级",
             "expected_return": "预期年化收益率",
             "min_amount": "起投金额",
             "term_days": "期限天数",
@@ -88,9 +90,12 @@ EMPLOYEE_VIEW_CATALOG: tuple[ViewSpec, ...] = (
 CUSTOMER_VIEW_CATALOG: tuple[ViewSpec, ...] = (
     ViewSpec(
         name="va_my_holdings",
+        # 客户域四张视图的口径说明会原样进客户可见的 `answer`（`_basis_text`），
+        # 因此不写英文列名——列名只以 `columns[].key` 存在，不上界面（ADR-0028）。
+        # 字段含义用中文标签表达，模型侧另有内省得到的列清单一并注入。
         summary=(
             "我的持仓明细：一行一条持仓，口径与资产页一致——只含「持有中」的持仓；"
-            "market_value 是当前市值，cost_amount 是成本金额，本人数据不脱敏。"
+            "「当前市值」按最新净值计，「成本金额」为买入成本，本人数据不脱敏。"
         ),
         keywords=("持仓", "持有", "我的产品", "买了什么", "市值", "盈亏", "份额"),
         label="持仓明细",
@@ -111,8 +116,8 @@ CUSTOMER_VIEW_CATALOG: tuple[ViewSpec, ...] = (
         name="va_my_transactions",
         summary=(
             "我的交易流水：一行一笔资金操作，申购 / 赎回 / 转账 / 充值共用同一个形状"
-            "（product_code、product_name 只有申赎有，payee_name、payee_account 只有"
-            "转账有，status 恒为「已确认」）。"
+            "（「产品代码」与「产品名称」只有申赎有，「收款人」与「收款账号」只有转账有，"
+            "「状态」恒为「已确认」）。"
         ),
         # 「转」单字也在关键词里：客户的口语是「这个月转了多少」，不是「转账」；
         # 关键词只决定注入哪些视图定义，不构成权限边界。
@@ -148,8 +153,8 @@ CUSTOMER_VIEW_CATALOG: tuple[ViewSpec, ...] = (
     ViewSpec(
         name="va_my_funding_account",
         summary=(
-            "我的资金账户：一行一位客户，available_balance 是可用余额，口径与资金页"
-            "一致——它不含持仓市值，也不是画像里的总资产。"
+            "我的资金账户：一行一位客户，「可用余额」的口径与资金页一致——它不含"
+            "持仓市值，也不是画像里的总资产。"
         ),
         keywords=("余额", "资金账户", "可用余额", "账户余额", "多少钱"),
         label="资金账户余额",
@@ -161,14 +166,15 @@ CUSTOMER_VIEW_CATALOG: tuple[ViewSpec, ...] = (
     ViewSpec(
         name="va_my_risk_assessment",
         summary=(
-            "我的风险承受等级结论：一行一位客户，只含当前结论——risk_level 为本人"
-            "风险等级（C1–C5），valid_until 为有效期至。"
+            "我的风险承受等级结论：一行一位客户，只含当前结论——「风险承受等级」取"
+            " C1 到 C5，「有效期至」为结论的有效期。"
         ),
         keywords=("风险等级", "风险承受", "风评", "测评", "风险测评"),
         label="风险承受等级",
         column_labels={
             "customer_id": "客户编号",
-            "risk_level": "风险等级",
+            # 本人那一档叫「风险承受等级」，不是「风险等级」（CONTEXT.md 的 Avoid）。
+            "risk_level": "风险承受等级",
             "valid_until": "有效期至",
         },
     ),

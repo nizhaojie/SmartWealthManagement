@@ -55,8 +55,9 @@ def test_customer_interpretation_states_rows_and_basis_without_reciting_them(
     # 逐行明细与低基数列计数都不再进文本：表格是数据的唯一出处。
     assert "P000" not in answer and "P029" not in answer
     assert "R1 15 行" not in answer and "R2 15 行" not in answer
+    # 英文列名一次也不出现（既不念值，也不写进口径）：客户可见的只有中文与中文标签。
     for column in result.columns:
-        assert f"{column} 为 " not in answer
+        assert column not in answer
     # 结果里没有的东西一个也不许出现——这正是客户侧不走模型的原因。
     assert "风险承受等级C1" not in answer
     assert "有效期至20" not in answer
@@ -112,6 +113,8 @@ def test_replay_does_not_hand_the_preset_interpretation_to_customers():
 
     assert customer_answer != preset.interpretation
     assert "va_" not in customer_answer
+    # 口径也不再写英文列名：预置目标视图的口径原先会带出 `risk_level` 之类。
+    assert "risk_level" not in customer_answer and "valid_until" not in customer_answer
     assert "产品要素" in customer_answer  # 中文视图名仍在，口径照给
     assert "为您查到 2 行数据，已列在下表" in customer_answer
 

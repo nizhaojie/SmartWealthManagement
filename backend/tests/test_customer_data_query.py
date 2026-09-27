@@ -275,9 +275,10 @@ def test_customer_asks_for_own_holdings_and_gets_her_own_numbers(
         for value in row
         if value
     )
-    # 列名不再被当人话念给客户（旧形态是「product_name 为 稳健增利；…」）。口径说明
-    # 里仍会出现视图自己提到的字段名，那是口径的组成，不在这一条的范围里。
-    assert all(f"{key} 为 " not in data["answer"] for key in _column_keys(table))
+    # 列名不再被当人话念给客户（旧形态是「product_name 为 稳健增利；…」）；口径说明
+    # 里也不再出现英文列名——客户可见的那一层另有专测
+    # （`test_the_customer_visible_surface_carries_no_internal_identifiers`）。
+    assert all(key not in data["answer"] for key in _column_keys(table))
     assert "va_" not in data["answer"]
 
     # 查询本身进调试级留痕：事后能回答「系统当时查了什么、取回几行」。
@@ -317,6 +318,25 @@ def test_follow_up_question_continues_the_same_session(chat_client: TestClient):
 
 
 # ---- 三种出口彼此可区分 -------------------------------------------------------
+
+
+def test_the_three_exits_keep_todays_wording_verbatim():
+    """三条出口的话术是客户可见的契约文本，这里逐字钉住。
+
+    本 slice 只让「有行」那条出口多带一张结果表：零行、失败/超时、白名单外一个字都没动
+    （ADR-0028 决定 3）。既有用例断的是常量本身——常量被改它们照样绿；下面这几句是屏幕上
+    会出现的话，改了就必须同时改这里与 `docs/demo-script.md` 第七节。
+    """
+    assert agent_graph.DATA_QUERY_EMPTY_MESSAGE == "没有查到符合条件的数据。"
+    assert (
+        agent_graph.DATA_QUERY_FAILURE_MESSAGE
+        == "很抱歉，您的数据我暂时查不了。请稍后再试，或到资产页查看。"
+    )
+    assert agent_graph.data_query_out_of_scope_message() == (
+        "这个问题不在我能查询的范围内。我可以帮您查的是："
+        "持仓明细、交易流水、资金账户余额、风险承受等级、产品要素。"
+        "您可以换个问法问问自己名下的数据。"
+    )
 
 
 def test_question_outside_the_whitelist_gets_the_boundary_message(
@@ -638,6 +658,51 @@ def test_product_screening_filters_by_own_level_and_sorts_by_product_code_only(
         assert wording not in data["answer"]
     # 这条路径是只读的：问过产品不会改变客户的持仓。
     assert _holding_codes(chat_client, WIDER_CUSTOMER) == holdings_before
+
+
+# ---- 客户可见面：不长出内部标识（ADR-0028） --------------------------------------
+#
+# 客户契约的边界钉在 ADR-0028：`va_` 视图名、SQL、英文列名与 `customer_id` 都不进
+# 客户可见的任何地方。下面这条把「文本 + 结果表 + 视图中文名」合在一处看——它们一起
+# 构成客户读得到的那一层，散在各条用例里容易漏掉其中一件。
+
+
+def test_the_customer_visible_surface_carries_no_internal_identifiers(
+    chat_client: TestClient,
+):
+    """一次典型的数据问答里，客户读到的东西不含 `va_`、SQL 与英文列名。
+
+    「客户可见」指界面上读得到的部分：`answer` 文本、`columns[].label` 与 `views`
+    （`columns[].key` 是英文列名，但只用来定位行里的值，不上界面）。口径说明原本会
+    写出 `market_value 是当前市值`——那是视图的 `summary` 原样进文本，本次一并收口。
+    """
+    token, _ = _login(chat_client)
+    data = _chat(chat_client, token, HOLDINGS_QUESTION)
+
+    table = data["data_answer"]
+    assert table is not None
+
+    # 整份结构（含视图中文名与逐行数据）里没有内部视图名。`views` 给的是中文，但它与
+    # `columns[].key` 同处一个载荷，一起过一遍最省事、也最不容易漏。
+    assert "va_" not in json.dumps(table, ensure_ascii=False)
+
+    # 文本、表头与视图名里没有 SQL 片段：客户看得到结论，不是查询。
+    sql_fragments = ("select ", " from ", " where ", " order by", " group by", "join ")
+    for text in (
+        data["answer"],
+        *(column["label"] for column in table["columns"]),
+        *table["views"],
+    ):
+        assert not any(fragment in text.lower() for fragment in sql_fragments)
+
+    # 表头与视图名是中文：英文列名在界面上一个字都没有。
+    assert all(_is_chinese(column["label"]) for column in table["columns"])
+    assert all(_is_chinese(view) for view in table["views"])
+
+    # 文本里一个英文列名也没有：旧形态把 `product_name` 这样的列名当人话念给客户，
+    # 而同一条路径的口径说明又写过 `market_value 是当前市值`——两处都不该再有。
+    for key in _column_keys(table):
+        assert key not in data["answer"], f"英文列名 {key} 出现在客户可见的文本里"
 
 
 # ---- 护栏（ADR-0009 第 3 条）的客户段 -------------------------------------------

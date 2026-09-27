@@ -56,27 +56,39 @@ function sseResponse(
 }
 
 describe("streamChatMessage", () => {
+  // 这是客户侧 SSE 契约第一次长出结构（ADR-0028）：`data_answer` 是一份嵌套载荷，
+  // 用深度相等把它整个钉住——下一次有人往 `ChatResponse` 里静默加字段时，这条会红。
   it("emits deltas in order and the final structured payload on done", async () => {
     const fetchImpl = sseResponse([
-      'data: {"delta":"你"}\n\n',
-      'data: {"delta":"好"}\n\n',
-      'event: done\ndata: {"answer":"你好","citations":[],"intent":"闲聊","content_classification":"事实性内容"}\n\n',
+      'data: {"delta":"为您查到"}\n\n',
+      'data: {"delta":" 1 行数据"}\n\n',
+      'event: done\ndata: {"answer":"为您查到 1 行数据，已列在下表。数据口径：我的持仓明细。","citations":[],"intent":"数据查询","content_classification":"事实性内容","data_answer":{"columns":[{"key":"product_name","label":"产品名称"},{"key":"market_value","label":"当前市值"}],"rows":[["稳健增利","120000.00"]],"row_count":1,"truncated":false,"views":["持仓明细"]}}\n\n',
     ]);
 
     const deltas: string[] = [];
     const done = vi.fn();
     await streamChatMessage(
-      "你好",
+      "我持有哪些产品",
       { onDelta: (delta) => deltas.push(delta), onDone: done, onError: vi.fn() },
       fetchImpl,
     );
 
-    expect(deltas).toEqual(["你", "好"]);
+    expect(deltas).toEqual(["为您查到", " 1 行数据"]);
     expect(done).toHaveBeenCalledWith({
-      answer: "你好",
+      answer: "为您查到 1 行数据，已列在下表。数据口径：我的持仓明细。",
       citations: [],
-      intent: "闲聊",
+      intent: "数据查询",
       content_classification: "事实性内容",
+      data_answer: {
+        columns: [
+          { key: "product_name", label: "产品名称" },
+          { key: "market_value", label: "当前市值" },
+        ],
+        rows: [["稳健增利", "120000.00"]],
+        row_count: 1,
+        truncated: false,
+        views: ["持仓明细"],
+      },
     });
   });
 

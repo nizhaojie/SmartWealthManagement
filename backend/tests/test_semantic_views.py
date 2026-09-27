@@ -1,8 +1,10 @@
-"""语义视图与受限执行账号（ADR-0010、ADR-0025 的地基）。
+"""语义视图与受限执行账号（ADR-0010、ADR-0025、ADR-0029 的地基）。
 
 安全断言分三层：
 - 结构层：执行账号对基础表无权限、对视图只读；
-- 内容层：员工侧视图定义不含敏感字段，返回结果里也不出现敏感值；
+- 内容层：视图里没有敏感字段（身份证号、手机号、银行卡号、密码散列），返回结果里
+  也不出现它们的值；姓名是例外——员工侧客户概况给出实名（ADR-0029），它是员工在
+  工作台其他页面本来就看得见的信息，也只允许出现在那一张视图里；
 - 行级层：员工侧按角色与归属关系收窄，客户域锁死为凭证客户本人，
   两域的身份未设置时都一行都看不到。
 """
@@ -54,8 +56,8 @@ BASE_TABLES = (
 
 SENSITIVE_COLUMN_NAMES = {"id_number", "phone", "password_hash", "real_name", "bank_card"}
 
-# 种子数据里的真实敏感值：任何一个出现在视图结果里都说明脱敏漏了。
-SEED_SECRETS = (
+# 种子数据里的 PII 值：任何一个出现在视图结果里都说明敏感字段漏进了视图。
+SEED_PII_VALUES = (
     "110101198803150218",
     "310101197605220353",
     "440106199211080474",
@@ -66,12 +68,12 @@ SEED_SECRETS = (
     "13800138003",
     "13800138004",
     "13800138005",
-    "王守成",
-    "李思远",
-    "张衡",
-    "赵启明",
-    "钱远航",
 )
+
+# 种子客户姓名。ADR-0029 起员工侧的客户概况给出**实名**（它是员工在客户列表里本来就看
+# 得见的信息，脱敏只让「客户王守成的持仓」这类问题必然问空），因此姓名只允许出现在
+# `va_customer_overview` 里，其余视图（含客户域四张）一行都不许带。
+SEED_CUSTOMER_NAMES = ("王守成", "李思远", "张衡", "赵启明", "钱远航")
 
 ID_NUMBER_PATTERN = re.compile(r"\d{17}[\dXx]")
 PHONE_PATTERN = re.compile(r"1\d{10}")
@@ -228,18 +230,32 @@ def test_view_rows_contain_no_sensitive_values(advisor_identity: Connection):
                 rendered = str(value)
                 assert not ID_NUMBER_PATTERN.search(rendered), f"{view} 出现身份证号样式: {rendered}"
                 assert not PHONE_PATTERN.search(rendered), f"{view} 出现手机号: {rendered}"
-                for secret in SEED_SECRETS:
-                    assert secret not in rendered, f"{view} 泄露了种子敏感值 {secret}"
+                for secret in SEED_PII_VALUES:
+                    assert secret not in rendered, f"{view} 泄露了种子 PII 值 {secret}"
+                # 姓名的唯一出口是员工侧的客户概况（ADR-0029）。
+                if view != "va_customer_overview":
+                    for name in SEED_CUSTOMER_NAMES:
+                        assert name not in rendered, f"{view} 出现了客户姓名 {name}"
 
 
-def test_customer_names_are_masked_in_views(advisor_identity: Connection):
+def test_the_employee_overview_gives_the_real_customer_name(advisor_identity: Connection):
+    """员工侧视图给出实名（迁移 0034、ADR-0029）。
+
+    脱敏值挡不住任何东西——同一批姓名在客户列表、画像、预警里本来就看得见——却让
+    「客户王守成的持仓情况」这类唯一的自然问法必然问空（生成的 `= '王守成'` 在「王**」
+    上永远不成立，0 行又被解读成「该客户没有持仓」）。
+
+    这是刻意的口径而不是漏掉的脱敏：想改回去要连迁移 0034 与本用例一起改，那是一次需要
+    新 ADR 的改动（ADR-0029 的 Considered Options 记着被拒绝的几条备选）。
+    """
     rows = advisor_identity.execute(
         text("SELECT customer_name FROM va_customer_overview")
     ).all()
     assert len(rows) == 5
-    for (name,) in rows:
-        assert name.endswith("*" * (len(name) - 1))
-        assert name not in SEED_SECRETS
+    names = {name for (name,) in rows}
+    assert names == set(SEED_CUSTOMER_NAMES)
+    for name in names:
+        assert "*" not in name
 
 
 def test_account_manager_sees_only_own_customers(

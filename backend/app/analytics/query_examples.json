@@ -10,6 +10,11 @@
     "views": ["va_customer_overview"]
   },
   {
+    "question": "客户王守成的持仓情况",
+    "sql": "SELECT c.customer_id, c.customer_name, h.product_code, h.product_name, h.current_value FROM va_customer_overview c JOIN va_holding_distribution h ON h.customer_id = c.customer_id WHERE c.customer_name = '王守成'",
+    "views": ["va_customer_overview", "va_holding_distribution"]
+  },
+  {
     "question": "最近一个月各产品的申购金额",
     "sql": "SELECT product_name, SUM(amount) AS total_amount FROM va_transaction_stat WHERE transaction_type = '申购' AND trade_time >= DATE_SUB(CURDATE(), INTERVAL 1 MONTH) GROUP BY product_name ORDER BY total_amount DESC",
     "views": ["va_transaction_stat"]

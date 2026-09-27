@@ -252,7 +252,7 @@ def test_prompt_injection_question_does_not_widen_row_scope(
 
 def test_advisor_has_full_row_scope_through_the_same_view(analytics_client: TestClient):
     question = "客户护栏测试 全量行级范围"
-    # SELECT * 取视图全部列（含脱敏姓名），顺带正面断言结果不含敏感值。
+    # SELECT * 取视图全部列（含客户实名），顺带正面断言结果不含 PII。
     analytics_llm.register_fake_query(question, "SELECT * FROM va_customer_overview")
     headers = _employee_headers(analytics_client, "advisor1")
 
@@ -261,9 +261,11 @@ def test_advisor_has_full_row_scope_through_the_same_view(analytics_client: Test
     assert response.status_code == 200
     seen = {int(row[0]) for row in response.json()["data"]["rows"]}
     assert _manager1_customer_ids() < seen  # 理财顾问是全量范围，严格超集
-    # 返回结果中不含身份证号、手机号、真实姓名（种子敏感值）。
-    for secret in (SEED_ID_NUMBER, "13800138001", "王守成"):
+    # PII（身份证号、手机号）一个都不进响应；姓名是刻意的例外——员工侧视图给出实名
+    # （ADR-0029），它是员工在客户列表里本来就看得见的信息。
+    for secret in (SEED_ID_NUMBER, "13800138001"):
         assert secret not in response.text
+    assert "王守成" in response.text
 
 
 # ---- 行数上限与超时 -----------------------------------------------------------

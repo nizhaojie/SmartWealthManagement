@@ -4,6 +4,7 @@ import { EditPen } from "@element-plus/icons-vue";
 import { useChatStore, type ChatMessage } from "../stores/chat";
 import CitationPanel from "./CitationPanel.vue";
 import CiteChip from "./CiteChip.vue";
+import DataAnswerTable from "./DataAnswerTable.vue";
 import { streamChatMessage } from "./api";
 import ChatHistoryDrawer from "./ChatHistoryDrawer.vue";
 import { splitCitations } from "./citations";
@@ -143,6 +144,13 @@ async function send(): Promise<void> {
               </template>
             </p>
             <p v-else class="msg__text">{{ message.text }}</p>
+
+            <!-- 次序是文本播完才出表：表格不参与打字机，数字在这里不需要「逐字上屏」的节奏感。
+                 没有表（零行 / 失败 / 白名单外）时整件不渲染，不留空壳。 -->
+            <DataAnswerTable
+              v-if="message.role === 'assistant' && message.dataAnswer"
+              :data="message.dataAnswer"
+            />
 
             <template v-if="message.role === 'assistant' && message.done">
               <template v-for="(citation, index) in message.citations" :key="`panel-${index}`">

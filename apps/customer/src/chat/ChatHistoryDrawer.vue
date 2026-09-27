@@ -11,6 +11,7 @@ import { ref, watch } from "vue";
 import { formatDateTime, PaginationBar, usePagination } from "@wealth/shared";
 import CitationPanel from "./CitationPanel.vue";
 import CiteChip from "./CiteChip.vue";
+import DataAnswerTable from "./DataAnswerTable.vue";
 import { splitCitations } from "./citations";
 import {
   getCustomerConversation,
@@ -187,6 +188,13 @@ watch(
               </template>
             </p>
             <p v-else class="msg__text">{{ message.content }}</p>
+
+            <!-- 与实时气泡复用同一件（`DataAnswerTable`）：回看与当时看到的必须是同一张表，
+                 没有表（非数据问答那一轮）时就地不渲染，不留空壳。 -->
+            <DataAnswerTable
+              v-if="message.role === 'assistant' && message.data"
+              :data="message.data"
+            />
 
             <span class="msg__time">{{ formatDateTime(message.created_at) }}</span>
 

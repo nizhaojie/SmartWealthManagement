@@ -36,6 +36,18 @@ const CITATION = {
   marker: 1,
 };
 
+// 数据查询「有行」出口带的客户侧结果表（ADR-0028）。
+const DATA_ANSWER = {
+  columns: [
+    { key: "product_name", label: "产品名称" },
+    { key: "market_value", label: "市值（元）" },
+  ],
+  rows: [["稳健增利", 120000]],
+  row_count: 1,
+  truncated: false,
+  views: ["持仓明细"],
+};
+
 describe("ChatPage", () => {
   let pinia: Pinia;
 
@@ -212,5 +224,45 @@ describe("ChatPage", () => {
     await ask(wrapper, "你好");
 
     expect(listElement.scrollTop).toBe(900);
+  });
+
+  // 数据回答的呈现次序：文本还在，数字改由表格承载（ADR-0028）。表随 done 帧到达，
+  // 不参与打字机——这里盯的是「有表就画出来、表头是中文、行数一并给」。
+  it("renders the result table when the done payload carries structured data", async () => {
+    mockStreamOnce((handlers) => {
+      handlers.onDone({
+        answer: "为您查到 1 行数据，已列在下表。数据口径：您当前持有的产品。",
+        citations: [],
+        intent: "数据查询",
+        content_classification: "事实性内容",
+        data_answer: DATA_ANSWER,
+      });
+    });
+
+    const wrapper = mountPage(pinia);
+    await ask(wrapper, "我持有哪些产品");
+
+    const table = wrapper.get('[data-testid="data-answer-table"]');
+    expect(table.findAll("thead th").map((th) => th.text())).toEqual(["产品名称", "市值（元）"]);
+    expect(table.find("tbody tr").text()).toContain("稳健增利");
+    expect(wrapper.get('[data-testid="data-answer-count"]').text()).toContain("共 1 行");
+  });
+
+  it("keeps the bubble text-only when the payload carries no structured data", async () => {
+    mockStreamOnce((handlers) => {
+      handlers.onDone({
+        answer: "为您查到 0 行数据。",
+        citations: [],
+        intent: "数据查询",
+        content_classification: "事实性内容",
+      });
+    });
+
+    const wrapper = mountPage(pinia);
+    await ask(wrapper, "我持有哪些产品");
+
+    expect(wrapper.text()).toContain("为您查到 0 行数据");
+    // 零行（以及失败、白名单外）都在这里出去：不能留下表格容器这个空壳。
+    expect(wrapper.find('[data-testid="data-answer"]').exists()).toBe(false);
   });
 });

@@ -44,8 +44,54 @@ function makeDetail(sessionId: string): CustomerSessionDetail {
     started_at: "2026-09-20T09:00:00",
     ended_at: "2026-09-20T09:05:00",
     messages: [
-      { role: "user", content: "你好", citations: [], created_at: "2026-09-20T09:00:00" },
-      { role: "assistant", content: "你好呀", citations: [], created_at: "2026-09-20T09:01:00" },
+      {
+        role: "user",
+        content: "你好",
+        citations: [],
+        created_at: "2026-09-20T09:00:00",
+        data: null,
+      },
+      {
+        role: "assistant",
+        content: "你好呀",
+        citations: [],
+        created_at: "2026-09-20T09:01:00",
+        data: null,
+      },
+    ],
+  };
+}
+
+/** 一轮数据问答的归档（ADR-0028）：assistant 那一行带结构化结果，提问行没有。 */
+function makeDataDetail(sessionId: string): CustomerSessionDetail {
+  return {
+    session_id: sessionId,
+    started_at: "2026-09-20T09:00:00",
+    ended_at: "2026-09-20T09:05:00",
+    messages: [
+      {
+        role: "user",
+        content: "我持有哪些产品",
+        citations: [],
+        created_at: "2026-09-20T09:00:00",
+        data: null,
+      },
+      {
+        role: "assistant",
+        content: "为您查到 1 行数据，已列在下表。数据口径：您当前持有的产品。",
+        citations: [],
+        created_at: "2026-09-20T09:01:00",
+        data: {
+          columns: [
+            { key: "product_name", label: "产品名称" },
+            { key: "market_value", label: "市值（元）" },
+          ],
+          rows: [["稳健增利", 120000]],
+          row_count: 1,
+          truncated: false,
+          views: ["持仓明细"],
+        },
+      },
     ],
   };
 }
@@ -193,5 +239,35 @@ describe("ChatHistoryDrawer", () => {
     expect(wrapper.find('[data-testid="history-detail"]').exists()).toBe(false);
     expect(wrapper.get('[data-testid="pagination-total"]').text()).toBe("共 45 条");
     expect(listCustomerConversations).toHaveBeenCalledTimes(1);
+  });
+
+  // 文本收敛之后回看里那一轮只剩「N 行 + 口径」，表必须一起归档、一起重绘（ADR-0028）：
+  // 实时与回看看到的是同一张表，渲染的是同一个组件。
+  it("回看里那一轮数据回答带出当时那张表，知识问答那轮没有表", async () => {
+    vi.mocked(listCustomerConversations).mockResolvedValue(makePage([makeSession("s-1")]));
+    vi.mocked(getCustomerConversation).mockResolvedValue(makeDataDetail("s-1"));
+
+    const wrapper = await openDrawer();
+    await wrapper.get('[data-testid="history-item"]').trigger("click");
+    await flushPromises();
+
+    const detail = wrapper.get('[data-testid="history-detail"]');
+    const table = detail.get('[data-testid="data-answer-table"]');
+    expect(table.findAll("thead th").map((th) => th.text())).toEqual(["产品名称", "市值（元）"]);
+    expect(table.find("tbody tr").text()).toContain("稳健增利");
+    expect(detail.get('[data-testid="data-answer-count"]').text()).toContain("共 1 行");
+  });
+
+  it("详情里没有表的那一轮不留下空壳", async () => {
+    vi.mocked(listCustomerConversations).mockResolvedValue(makePage([makeSession("s-1")]));
+    vi.mocked(getCustomerConversation).mockResolvedValue(makeDetail("s-1"));
+
+    const wrapper = await openDrawer();
+    await wrapper.get('[data-testid="history-item"]').trigger("click");
+    await flushPromises();
+
+    const detail = wrapper.get('[data-testid="history-detail"]');
+    expect(detail.text()).toContain("你好呀");
+    expect(detail.find('[data-testid="data-answer"]').exists()).toBe(false);
   });
 });

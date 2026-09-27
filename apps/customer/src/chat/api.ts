@@ -15,6 +15,28 @@ export type Citation = {
   marker: number;
 };
 
+export type DataAnswerColumn = {
+  key: string;
+  label: string;
+};
+
+/**
+ * 客户侧数据查询的结果表（ADR-0028）。
+ *
+ * 它是一份客户契约，与后端 `DataAnswerResponse` 逐字段对齐，不是内部
+ * `AnalyticsQueryResponse` 的裁剪版：没有 SQL、没有 `va_*` 视图名（`views` 是中文名）、
+ * 没有 `customer_id` 列。`columns[].key` 是英文列名，只用来定位行里的值，不上界面。
+ * `row_count` 是**已返回**的行数，是否被行数上限截断由 `truncated` 表达。
+ */
+export type DataAnswer = {
+  columns: DataAnswerColumn[];
+  // 拉链式二维数组：每行的值与 `columns` 一一对应。
+  rows: unknown[][];
+  row_count: number;
+  truncated: boolean;
+  views: string[];
+};
+
 export type ChatStreamDone = {
   answer: string;
   citations: Citation[];
@@ -25,6 +47,9 @@ export type ChatStreamDone = {
   // 这一轮是否走了降级路径（模型兜底、向量超时转关键词……）。降级后的回答照常渲染，
   // 缺引用也不报错；这个标记只用于说明这次回答的成色。
   degraded?: boolean;
+  // 数据查询「有行」时才有的结果表。零行、失败/超时、白名单外三种出口都不带它——
+  // 一张空表会把「没有数据」与「查询挂了」在观感上抹平。
+  data_answer?: DataAnswer | null;
 };
 
 export type ChatStreamHandlers = {

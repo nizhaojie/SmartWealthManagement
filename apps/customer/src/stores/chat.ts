@@ -4,13 +4,15 @@
 // 这里只存消息本身与它的增删改，不发起请求——SSE 的收发留在页面与 chat/api。
 import { ref } from "vue";
 import { defineStore } from "pinia";
-import type { ChatStreamDone, Citation } from "../chat/api";
+import type { ChatStreamDone, Citation, DataAnswer } from "../chat/api";
 
 export type ChatMessage = {
   id: number;
   role: "user" | "assistant";
   text: string;
   citations: Citation[];
+  // 数据查询「有行」时这一轮的结果表（ADR-0028）；其余轮次没有它，气泡据此不渲染空表壳。
+  dataAnswer?: DataAnswer | null;
   done: boolean;
 };
 
@@ -63,6 +65,8 @@ export const useChatStore = defineStore("chat", () => {
     }
     message.text = payload.answer;
     message.citations = payload.citations;
+    // 结果表与引用走同一条路径：随 `done` 帧一次落定，不在增量里出现。
+    message.dataAnswer = payload.data_answer ?? null;
     message.done = true;
   }
 

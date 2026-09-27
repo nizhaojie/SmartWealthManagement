@@ -41,6 +41,8 @@
 
 再一条横切 slice（2026-09-24）：`risk-rule-management` —— **规则的编辑器**。`risk-monitoring-agent` 的用户故事 22 承诺「规则存在库中而非硬编码，so that 调整阈值不需要改代码发版」，但只兑现了一半：两个 `PATCH` 让专员能改既有规则的灵敏度，20 条种子却仍是唯一来源（`rules.py:84-322`），想加一条本地口径的规则只能改代码出迁移。本 slice 补上创建、修改与删除，同时把可写的边界钉死：专员能配的是**组合**（在给定的字段、算子与值域里挑），不是**表达**（拼逻辑、造新算子）——后者会让 `fin_risk_rule` 变成存在数据库里的代码，而 `operators.py:9-11` 与 `fields.py:3-8` 两处开篇都写着集合是有限且封闭的。顺带修掉一个潜伏的崩点：三条 CHECK 各自守住一列，却不校验两列搭配，于是 `field = product_id` + `operator = gt` 两列各自合法、DB 收下，直到**下一笔交易到达**才抛 `TypeError`；写入侧因此加三档校验（名录 → 字段×算子允许矩阵 → 阈值值域）。它**推翻** `risk-monitoring-agent` 的 Out of Scope 第二条（「规则的可视化编辑器（本 slice 只做查看与启停）」）并**修改**其 `#01` 的三处（启停理由从可空收紧为必填、`category` 补一条 DB CHECK、种子从「只补缺失」改为「表为空才播种」），清单见该 spec 的头表。新增两条 ADR：0026（规则的身份就是它的判定形状——判定形状不可改，换形状只能删除重建）、0027（删除是软删、编号永不复用、种子只在建库时播种）。拆五份 issue：数据层与种子语义 → 允许矩阵与值域校验 → 三个写接口与留痕 → 规则管理界面 → 端到端收口，顺序推进；**第四份做完就有可演示的完整状态**（专员新建一条必然命中的规则 → 补录一笔交易 → 预警列表出现对应预警，而**已有交易不产生任何新预警**——不做回算是一条明确的决定，见该 spec 的 Q18）。纯后端加内部端，不依赖任何未完成的 slice（`risk-monitoring-agent` 五份 issue 均已 `implemented`）。
 
+再一条横切 slice（2026-09-27）：`customer-data-answer-table` —— **客户数据查询的回显从文本换成表格**。`customer-nl2sql` 把客户侧的 NL2SQL 接通了，但结果以文本解读送达；而客户侧解读是确定性模板，模板把每一行的每个字段念一遍，列名又来自客户域视图的英文 snake_case（迁移 `0030`），于是客户读到的是 `product_name 为 稳健增利，market_value 为 120000` 这样的句子。本 slice 让有行的回答携带一份客户侧结果表（`done` 帧的 `data_answer`：中文列标签、剔除 `customer_id`、SQL 与视图名一律不给客户），文本收敛为「N 行 + 截断提示 + 口径」；归档也存这份结构化结果，客户历史回看因此能重绘同一张表；零行、失败/超时、白名单外三种出口仍是文本——一张空表会把「没有数据」与「查询挂了」在观感上抹平。它**推翻** ADR-0025 的「结果以文本解读送达，不扩展 SSE 表格帧」，并**修改** ADR-0015 的决定 4（客户历史详情**显式**新增一个 `data` 字段）与决定 5（结构化结果不过 `mask_pii` 的三条文本正则——那是给自然语言文本用的），清单见该 spec 的头表；**新增 ADR-0028**。顺带收口一条既有泄露：回放模式下客户可能拿到员工口吻、且写出内部视图名的预置解读。内部端 `el-table`、`AnalyticsQueryResponse` 与客户经理视角的会话详情一行不动。拆四份 issue，顺序推进，**第三份做完即有可演示的完整状态**。
+
 上面两份新 spec 共拆 7 份 ticket（`advisor-review-reminder` 2 份：计数 store → 导航角标；`operation-advice-product-choice` 5 份：可选项端点 → 发起受理接手产品与金额 → 赎回按份额成交 → 发起表单 → 端到端与既有断言收口）。全部 spec 已拆成 ticket，存于 `.scratch/<slug>/issues/`，共 106 个（本行此前写 83，已经过期——`list-pagination`、`session-renewal`、`rag-retrieval-upgrade` 三条 slice 的 issue 也不在本节列出；数字按 `.scratch/*/issues/*.md` 实际清点，2026-09-24。其中 `customer-deposit` 的四份在链尾：它的前置 `operation-advice-and-customer-trading` 与 `onboarding-funding-account-and-target-allocation` 都已实现，因此那四份里的 #01 可直接开始）。依赖是一条串行链：每份 spec 的第一个 ticket 被上一份 spec 的最后一个 ticket 阻塞，spec 内部亦为顺序推进。唯一的例外是 `foundation-and-customer-service-slice #07`（共享包边界检查），它只依赖 #01，可提前做。
 
 **当前 frontier**：待重新核对。`.scratch/*/issues/*.md` 里的 `Status:` 标记已经落后于代码——例如 `advisory-plan-visibility` 的三份仍标 `ready-for-agent`，但 `apps/customer/src/advisory/AdvisoryPlanPage.vue` 与 `backend/app/advisory/final.py` 的 `serialize_final_for_customer` 都已经存在；`advisory-agent-and-review-flow` 的 #01–#03 同理。在逐份核对 `Status:` 之前，本行不作断言——写一个过时的答案比留白更容易误导人。
@@ -149,6 +151,7 @@
 - [ ] 前端从零重做（`frontend-rebuild`：按 `02-企业浅色.html` 重写两端骨架与页面，取代 `frontend-restyle`）
 - [ ] 数据分析界面改对话式（`analytics-chat-ui`：数据分析页换成线程与追问，历史查询进抽屉，会话改走登录凭证）
 - [ ] 客户端数据查询（`customer-nl2sql`：客服图接 NL2SQL 分支 + 客户域语义视图，见 ADR-0025）
+- [ ] 客户端数据查询的结果表（`customer-data-answer-table`：客服的 NL2SQL 回显换成表格，归档随行，见 ADR-0028）
 - [ ] 答辩材料：PPT、API 文档、数据库文档、架构说明
 - [x] 端到端演示脚本：`docs/demo-script.md`（`operation-advice-and-customer-trading` 的验收标准、重度预警的讲法与断言索引）
 - [ ] 会议纪要补齐（评分表 -5，成本近零）

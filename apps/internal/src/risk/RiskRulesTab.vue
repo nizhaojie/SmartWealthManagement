@@ -423,7 +423,7 @@ useTabSummary(
             <el-option label="已删除" value="已删除" />
           </el-select>
         </label>
-        <label class="rules__filter">
+        <label class="rules__filter rules__filter--wide">
           <span class="rules__filter-label">判定字段</span>
           <el-select v-model="fieldFilter" name="rule-field" data-testid="rule-field-filter">
             <el-option label="全部字段" value="" />
@@ -718,15 +718,38 @@ useTabSummary(
   display: flex;
   align-items: center;
   gap: var(--wm-space-2);
+  /* 标签与下拉是一个整体：宽度由它们自己定，不被工具栏压缩（压缩的后果见下方两处）。 */
+  flex: none;
 }
 
 .rules__filter-label {
+  /* 「判定字段」四个字要在一行里显示完：断行后标签与下拉的中线对不齐，看着像两个控件。 */
+  white-space: nowrap;
   color: var(--wm-text-secondary);
   font-size: 0.85rem;
 }
 
+/*
+  下拉自己给宽度，不靠内容撑：工具栏是横向 flex，下拉默认的 `width: 100%` 会跟着被压缩的
+  容器一起缩，缩到放不下「已启用」「全部字段」时就截字。刻度取筛选字段的既有值（160px）。
+*/
+.rules__filter :deep(.el-select) {
+  width: calc(var(--wm-space-6) * 5);
+}
+
+/*
+  判定字段的选项来自字段名录，名字长的有 15 个字（「产品风险等级与风险承受等级之差」量下来
+  210px，加上控件自己的内边距与箭头是 254px）：按 160px 给会截字，选的人看不出自己选的是
+  哪一类判定字段。宽度因此单独给一档，与「预警列表」里日期区间那种宽筛选同一个做法。
+*/
+.rules__filter--wide :deep(.el-select) {
+  width: calc(var(--wm-space-6) * 8);
+}
+
 .rules__toolbar {
   display: flex;
+  /* 窄了换行（「新建规则」独占一行靠右），而不是把两个筛选框压窄到截字。 */
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--wm-space-3);
   margin-bottom: var(--wm-space-3);

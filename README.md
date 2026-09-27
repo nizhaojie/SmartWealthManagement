@@ -24,7 +24,7 @@ cd backend
 python -m app.db.setup
 ```
 
-`pnpm dev` 启动后端前会再跑一次上述命令。
+`pnpm dev` 启动后端前会再跑一次上述命令（等价于把演示状态复位：余额、历史成交、预警）。反复重启后端窗口时用 `SKIP_DB_SETUP=1 pnpm dev` 跳过这一步，需要显式复位时用 `pnpm dev:backend --reset-seed`。
 
 测试账号密码统一为 `Test@1234`。客户：`wangc1`–`qianc5`（风险承受等级 C1–C5）；员工：`advisor1`（理财顾问）、`manager1`（客户经理）、`risk1`（风控专员）。
 

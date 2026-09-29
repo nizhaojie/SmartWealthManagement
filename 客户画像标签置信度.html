@@ -1,0 +1,583 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>智能财富管家系统 · 画像标签置信度详解</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@600;700;900&family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --paper:#F7F4EE;
+  --paper-2:#FFFFFF;
+  --ink:#1D2433;
+  --ink-soft:#4A5164;
+  --ink-faint:#8A8FA0;
+  --hairline:#DDD6C7;
+  --navy:#22365E;
+  --navy-2:#1F4287;
+  --gold:#A8842C;
+  --gold-soft:#F0E6CC;
+  --vector:#2E6FBA;
+  --vector-bg:#E7EFFA;
+  --keyword:#2F7D5B;
+  --keyword-bg:#E5F2EB;
+  --graph:#6D4FA1;
+  --graph-bg:#EEE8F7;
+  --perm:#B4372F;
+  --perm-bg:#F9E9E7;
+  --model:#0F6E8C;
+  --model-bg:#E3F1F5;
+  --radius:10px;
+  --shadow:0 1px 2px rgba(29,36,51,.05),0 8px 24px rgba(29,36,51,.06);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{
+  background:var(--paper);
+  color:var(--ink);
+  font-family:"Noto Sans SC","Microsoft YaHei",system-ui,sans-serif;
+  font-size:15.5px;line-height:1.75;
+}
+::selection{background:var(--gold-soft)}
+code,.mono{
+  font-family:"Cascadia Code","JetBrains Mono",Consolas,"Courier New",monospace;
+  font-size:.86em;
+  background:rgba(34,54,94,.07);
+  padding:.08em .38em;border-radius:4px;
+  color:var(--navy);word-break:break-all;
+}
+h1,h2,h3,.serif{font-family:"Noto Serif SC","Source Han Serif SC","STSong","SimSun",serif}
+
+/* ---------- 顶栏 ---------- */
+.topbar{
+  position:sticky;top:0;z-index:50;
+  background:rgba(247,244,238,.92);backdrop-filter:blur(10px);
+  border-bottom:1px solid var(--hairline);
+  display:flex;align-items:center;gap:18px;flex-wrap:wrap;
+  padding:10px 28px;
+}
+.topbar .brand{font-family:"Noto Serif SC",serif;font-weight:900;font-size:17px;letter-spacing:.02em}
+.topbar .brand small{display:block;font-family:"Noto Sans SC",sans-serif;font-weight:400;font-size:11px;color:var(--ink-faint);letter-spacing:.14em}
+.topbar .crumb{margin-left:auto;font-size:13px;color:var(--ink-soft);letter-spacing:.05em}
+.topbar .crumb code{background:transparent;padding:0}
+
+/* ---------- 布局 ---------- */
+.layout{display:grid;grid-template-columns:230px minmax(0,1fr);max-width:1440px;margin:0 auto}
+.sidenav{
+  position:sticky;top:57px;align-self:start;height:calc(100vh - 57px);
+  padding:28px 18px;border-right:1px solid var(--hairline);overflow:auto;
+}
+.sidenav a{
+  display:block;padding:7px 12px;margin-bottom:2px;border-radius:7px;
+  color:var(--ink-soft);text-decoration:none;font-size:13.5px;
+  border-left:2px solid transparent;transition:all .15s;
+}
+.sidenav a:hover{background:rgba(34,54,94,.06);color:var(--ink)}
+.sidenav a.active{background:rgba(168,132,44,.1);color:var(--navy);border-left-color:var(--gold);font-weight:500}
+.sidenav a .nav-num{color:var(--gold);font-family:"Noto Serif SC",serif;font-weight:700;margin-right:7px}
+main{padding:0 44px 90px;min-width:0}
+section{padding-top:46px}
+.sec-head{display:flex;align-items:baseline;gap:16px;border-bottom:2px solid var(--ink);padding-bottom:12px;margin-bottom:8px}
+.sec-num{font-family:"Noto Serif SC",serif;font-weight:900;font-size:15px;color:var(--gold);letter-spacing:.1em;white-space:nowrap}
+.sec-head h2{font-size:27px;font-weight:900;letter-spacing:.01em}
+.sec-sub{color:var(--ink-soft);font-size:14px;margin:10px 0 26px;max-width:900px}
+
+/* ---------- Hero ---------- */
+.hero{
+  position:relative;overflow:hidden;color:#fff;
+  margin-top:30px;padding:48px 44px 44px;border-radius:16px;
+  background:
+    radial-gradient(900px 460px at 84% -12%, rgba(168,132,44,.35), transparent 62%),
+    linear-gradient(120deg,#0E2044 0%,#22365E 54%,#26539E 100%);
+  box-shadow:0 2px 4px rgba(16,24,40,.06),0 22px 50px -22px rgba(23,53,107,.45);
+}
+.hero::before{
+  content:"";position:absolute;inset:0;pointer-events:none;
+  background-image:
+    linear-gradient(rgba(255,255,255,.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,.045) 1px, transparent 1px);
+  background-size:44px 44px;
+  mask-image:linear-gradient(180deg, rgba(0,0,0,.75), transparent 88%);
+}
+.hero>*{position:relative;z-index:1}
+.hero .eyebrow{
+  display:inline-flex;align-items:center;gap:8px;
+  font-size:12.5px;letter-spacing:.28em;color:#F4D992;font-weight:700;
+  border:1px solid rgba(244,217,146,.45);border-radius:999px;
+  padding:5px 18px;margin-bottom:22px;background:rgba(244,217,146,.08);
+}
+.hero h1{font-size:clamp(27px,3.6vw,42px);font-weight:900;line-height:1.3;letter-spacing:.01em}
+.hero h1 em{font-style:normal;color:#F4D992}
+.hero .lede{margin-top:18px;max-width:860px;color:#C9D6EE;font-size:15.5px}
+.hero .lede b{color:#F4D992;font-weight:600}
+.hero .lede code{background:rgba(255,255,255,.1);color:#EAF1FF}
+.hero-stats{display:flex;flex-wrap:wrap;margin-top:36px}
+.hero-stats .item{padding:0 30px;border-left:1px solid rgba(255,255,255,.18)}
+.hero-stats .item:first-child{padding-left:0;border-left:none}
+.hero-stats .num{font-family:"Noto Serif SC",serif;font-size:30px;font-weight:900;color:#F4D992;line-height:1.25}
+.hero-stats .lbl{font-size:12.5px;color:#AEBDD8;margin-top:2px;letter-spacing:.04em}
+
+/* ---------- 通用卡片与表格 ---------- */
+.card{
+  background:var(--paper-2);border:1px solid var(--hairline);border-radius:var(--radius);
+  padding:20px 24px;box-shadow:var(--shadow);margin-bottom:16px;
+}
+.card h3{font-size:17px;font-weight:700;margin-bottom:8px}
+.card p{color:var(--ink-soft);font-size:14px}
+.card ul{margin:6px 0 0 18px;color:var(--ink-soft);font-size:14px}
+.card ul li{margin-bottom:4px}
+.grid-2{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px}
+.grid-3{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px}
+table{width:100%;border-collapse:collapse;background:var(--paper-2);border-radius:var(--radius);overflow:hidden;box-shadow:var(--shadow);font-size:14px;margin-bottom:16px}
+th{background:var(--navy);color:#fff;text-align:left;padding:10px 14px;font-weight:500;font-size:13px;letter-spacing:.04em}
+td{padding:10px 14px;border-top:1px solid var(--hairline);vertical-align:top}
+tr:nth-child(even) td{background:rgba(34,54,94,.025)}
+td.num,th.num{font-family:"Cascadia Code",Consolas,monospace;white-space:nowrap}
+
+/* ---------- 标记 ---------- */
+.tag{
+  display:inline-flex;align-items:center;gap:5px;
+  font-size:12px;font-weight:700;padding:2px 10px;border-radius:999px;
+  letter-spacing:.03em;white-space:nowrap;vertical-align:1px;
+}
+.tag::before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor}
+.tag-perm{background:var(--perm-bg);color:var(--perm)}
+.tag-vector{background:var(--vector-bg);color:var(--vector)}
+.tag-keyword{background:var(--keyword-bg);color:var(--keyword)}
+.tag-graph{background:var(--graph-bg);color:var(--graph)}
+.tag-model{background:var(--model-bg);color:var(--model)}
+.tag-navy{background:rgba(34,54,94,.09);color:var(--navy)}
+.tag-gold{background:var(--gold-soft);color:var(--gold)}
+
+/* ---------- 公式条 ---------- */
+.formula{
+  font-family:"Cascadia Code",Consolas,monospace;font-size:15px;
+  background:var(--ink);color:#EDE6D6;border-radius:8px;padding:16px 20px;margin:14px 0;
+  overflow-x:auto;white-space:nowrap;
+}
+.formula .hl{color:#E8C36A}
+.formula .dim{color:#9AA3B4}
+
+/* ---------- 流程节点 ---------- */
+.flow{position:relative;margin:18px 0 8px}
+.fnode{
+  position:relative;background:var(--paper-2);border:1px solid var(--hairline);
+  border-radius:var(--radius);padding:16px 20px 16px 62px;box-shadow:var(--shadow);
+  margin-bottom:34px;
+}
+.fnode::after{
+  content:"";position:absolute;left:31px;bottom:-34px;height:34px;width:2px;
+  background:linear-gradient(var(--hairline),var(--ink-faint));
+}
+.fnode:last-child::after{display:none}
+.fnode::before{
+  content:"";position:absolute;left:26px;bottom:-22px;width:12px;height:12px;
+  border-right:2px solid var(--ink-faint);border-bottom:2px solid var(--ink-faint);
+  transform:rotate(45deg) translateX(-2px);
+}
+.fnode:last-child::before{display:none}
+.fnum{
+  position:absolute;left:16px;top:16px;width:32px;height:32px;border-radius:50%;
+  background:var(--navy);color:#fff;display:flex;align-items:center;justify-content:center;
+  font-family:"Noto Serif SC",serif;font-weight:900;font-size:15px;
+}
+.fnode h4{font-size:16px;font-weight:700;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.fnode h4 .loc{font-weight:400;font-size:12px;color:var(--ink-faint)}
+.fnode p{margin-top:6px;color:var(--ink-soft);font-size:14px}
+.fnode.accent-perm{border-left:4px solid var(--perm)}
+.fnode.accent-gold{border-left:4px solid var(--gold)}
+.fnode.accent-navy{border-left:4px solid var(--navy)}
+.fnode.accent-vector{border-left:4px solid var(--vector)}
+
+/* ---------- 起步分条形 ---------- */
+.srcbars{display:flex;flex-direction:column;gap:12px;margin:18px 0 6px}
+.srcbar{display:grid;grid-template-columns:170px minmax(0,1fr) 58px;gap:14px;align-items:center;font-size:13.5px}
+.srcbar .name{color:var(--ink);white-space:nowrap}
+.srcbar .track{display:block;height:10px;border-radius:999px;background:rgba(34,54,94,.08);overflow:hidden}
+.srcbar .fill{display:block;height:10px;border-radius:999px}
+.srcbar .val{font-family:"Cascadia Code",Consolas,monospace;font-weight:700;color:var(--navy);text-align:right}
+.fill-95{width:95%;background:var(--navy)}
+.fill-90{width:90%;background:var(--vector)}
+.fill-70{width:70%;background:var(--model)}
+.fill-55{width:55%;background:var(--keyword)}
+.fill-30{width:30%;background:var(--gold)}
+
+/* ---------- 数值推演链 ---------- */
+.chain{display:flex;align-items:stretch;gap:8px;flex-wrap:wrap;margin:18px 0 8px}
+.chain .node{
+  flex:1 1 150px;background:var(--paper-2);border:1px solid var(--hairline);
+  border-radius:var(--radius);padding:13px 16px;box-shadow:var(--shadow);
+}
+.chain .node .k{font-size:12px;color:var(--ink-faint);letter-spacing:.06em}
+.chain .node .v{font-family:"Cascadia Code",Consolas,monospace;font-size:21px;font-weight:700;color:var(--navy);line-height:1.35}
+.chain .node .d{font-size:12.5px;color:var(--ink-soft)}
+.chain .node.final{border-color:var(--gold);box-shadow:0 0 0 3px var(--gold-soft),var(--shadow)}
+.chain .node.final .v{color:var(--gold)}
+.chain .arrow{align-self:center;color:var(--ink-faint);font-size:17px}
+
+/* ---------- 说明块 ---------- */
+.note{
+  margin:14px 0 4px;padding:14px 18px;
+  background:rgba(34,54,94,.035);border:1px solid var(--hairline);
+  border-left:3px solid var(--gold);border-radius:8px;
+}
+.note h5{font-size:13.5px;font-weight:700;color:var(--navy);margin-bottom:8px}
+.note ul{margin:0 0 0 18px;color:var(--ink-soft);font-size:13.5px}
+.note ul li{margin-bottom:4px}
+.note table{box-shadow:none;margin-bottom:10px;font-size:13px}
+.note table th{padding:7px 12px;font-size:12px}
+.note table td{padding:8px 12px}
+
+/* ---------- 出处 ---------- */
+.src{font-size:12.5px;color:var(--ink-faint);margin-top:10px}
+.src code{background:transparent;padding:0;color:var(--ink-faint)}
+footer{border-top:1px solid var(--hairline);margin-top:60px;padding:26px 0 10px;color:var(--ink-faint);font-size:13px}
+
+/* ---------- 入场动画 ---------- */
+.reveal{opacity:0;transform:translateY(14px);transition:opacity .5s ease,transform .5s ease}
+.reveal.in{opacity:1;transform:none}
+@media(prefers-reduced-motion:reduce){
+  html{scroll-behavior:auto}
+  .reveal{opacity:1;transform:none;transition:none}
+  *{transition:none!important}
+}
+@media(max-width:980px){
+  .layout{grid-template-columns:1fr}
+  .sidenav{display:none}
+  main{padding:0 20px 70px}
+  .hero{padding:36px 24px 34px}
+  .hero-stats .item{padding:0 18px}
+  .srcbar{grid-template-columns:120px minmax(0,1fr) 52px}
+}
+@media print{
+  .topbar,.sidenav{display:none}
+  .layout{grid-template-columns:1fr}
+  body{background:#fff}
+  .hero{background:#22365E}
+  .reveal{opacity:1;transform:none}
+}
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">智能财富管家系统<small>CUSTOMER PROFILE · TAG CONFIDENCE</small></div>
+  <div class="crumb">画像标签的置信度 · <code>confidence.py</code></div>
+</header>
+
+<div class="layout">
+<nav class="sidenav" aria-label="目录">
+  <a href="#formula"><span class="nav-num">一</span>公式与四个输入</a>
+  <a href="#sources"><span class="nav-num">二</span>来源初值</a>
+  <a href="#evidence"><span class="nav-num">三</span>证据增益</a>
+  <a href="#penalty"><span class="nav-num">四</span>冲突惩罚</a>
+  <a href="#write"><span class="nav-num">五</span>写入时改哪四个量</a>
+  <a href="#aggregate"><span class="nav-num">六</span>与汇总置信度的区别</a>
+</nav>
+
+<main>
+
+<!-- ================= HERO ================= -->
+<div class="hero">
+  <div class="eyebrow">客户画像专题 · 答辩展示</div>
+  <h1>画像标签的「置信度」<br>是读画像时<em>当场算出来的</em>一个数</h1>
+  <p class="lede">
+    标签表上并不存置信度。读取入口 <code>get_internal_profile</code> 时，把标签上的<b>来源</b>、<b>证据条数</b>、<b>观察时间</b>，
+    加上数出来的<b>冲突次数</b>，代入 <code>compute_confidence</code> 现算一次；前端只把这个 0 到 1 的数乘 100，画成进度条。
+  </p>
+  <div class="hero-stats">
+    <div class="item"><div class="num">4</div><div class="lbl">项加减（初值 / 增益 / 惩罚 / 衰减）</div></div>
+    <div class="item"><div class="num">5</div><div class="lbl">种写入来源，各有起步分</div></div>
+    <div class="item"><div class="num">0–1</div><div class="lbl">结果夹取区间</div></div>
+    <div class="item"><div class="num">4</div><div class="lbl">位小数</div></div>
+  </div>
+</div>
+
+<!-- ================= 一 公式 ================= -->
+<section id="formula">
+  <div class="sec-head"><span class="sec-num">SECTION 01</span><h2>公式与四个输入</h2></div>
+  <p class="sec-sub">
+    置信度由四项相加相减得到：一个起步分、正面的证据增益、负面的冲突惩罚，以及随时间流逝的衰减。
+    结果夹在 0 和 1 之间，保留四位小数。
+  </p>
+
+  <div class="formula">
+    置信度 = <span class="hl">来源初值</span> + <span class="hl">证据增益</span> − <span class="hl">冲突惩罚</span> − <span class="hl">时间衰减</span>
+  </div>
+
+  <table>
+    <thead><tr><th style="width:150px">项</th><th>规则</th></tr></thead>
+    <tbody>
+      <tr><td><b>来源初值</b></td><td>由写入渠道决定的起步分，见<a href="#sources" style="color:var(--navy)">第二节</a>的来源初值表</td></tr>
+      <tr><td><b>证据增益</b></td><td>每多一次同值确认 +0.05，最多 +0.15（第 4 次起不再加）</td></tr>
+      <tr><td><b>冲突惩罚</b></td><td>该标签历史上每有一条冲突记录 −0.10，不封顶</td></tr>
+      <tr><td><b>时间衰减</b></td><td>从 <code>observed_at</code> 到本次读取的 <code>now</code>，每年 −0.20</td></tr>
+    </tbody>
+  </table>
+
+  <div class="grid-2">
+    <div class="card">
+      <h3><span class="tag tag-navy">标签上存什么</span></h3>
+      <ul>
+        <li><b>来源</b>：这条标签由哪一种渠道写下来的</li>
+        <li><b>证据条数</b>：同一个值被确认过几次</li>
+        <li><b>观察时间</b>（<code>observed_at</code>）：当前这个值是什么时候被写下的</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3><span class="tag tag-gold">冲突次数是数出来的</span></h3>
+      <p>
+        冲突次数不在标签行上。读取时把该客户该标签的冲突记录数一遍，作为「历史上被够格来源改过几次」的计数代进公式。
+      </p>
+    </div>
+  </div>
+
+  <p class="src">代码出处：计算在 <code>backend/app/customer_profile/confidence.py</code> 的 <code>compute_confidence</code>；读取入口是 <code>get_internal_profile</code>。</p>
+</section>
+
+<!-- ================= 二 来源初值 ================= -->
+<section id="sources">
+  <div class="sec-head"><span class="sec-num">SECTION 02</span><h2>来源初值</h2></div>
+  <p class="sec-sub">
+    来源初值不是标签算完之后的最终置信度，而是这条标签刚被某一种方式写下来时的起步分。
+    最终显示的置信度，是在这个起步分上再加上证据增益、减去冲突惩罚和时间衰减。
+  </p>
+
+  <table>
+    <thead><tr><th style="width:220px">写入方式</th><th class="num" style="width:110px">起步分</th><th>说明</th></tr></thead>
+    <tbody>
+      <tr><td>理财顾问手工修正</td><td class="num">0.95</td><td>人已经看过并改正过，起步分最高</td></tr>
+      <tr><td>风评问卷</td><td class="num">0.90</td><td>由正式风评流程产出</td></tr>
+      <tr><td>AI 对话提取</td><td class="num">0.70</td><td>模型从对话里抽出来的标签</td></tr>
+      <tr><td>客户自述</td><td class="num">0.55</td><td>客户自己说的，未经校验</td></tr>
+      <tr><td>默认值</td><td class="num">0.30</td><td>占位用，等真正的来源写回</td></tr>
+    </tbody>
+  </table>
+
+  <div class="srcbars">
+    <div class="srcbar"><span class="name">理财顾问手工修正</span><span class="track"><span class="fill fill-95"></span></span><span class="val">0.95</span></div>
+    <div class="srcbar"><span class="name">风评问卷</span><span class="track"><span class="fill fill-90"></span></span><span class="val">0.90</span></div>
+    <div class="srcbar"><span class="name">AI 对话提取</span><span class="track"><span class="fill fill-70"></span></span><span class="val">0.70</span></div>
+    <div class="srcbar"><span class="name">客户自述</span><span class="track"><span class="fill fill-55"></span></span><span class="val">0.55</span></div>
+    <div class="srcbar"><span class="name">默认值</span><span class="track"><span class="fill fill-30"></span></span><span class="val">0.30</span></div>
+  </div>
+
+  <div class="note">
+    <h5>起步分看的是写入渠道，不看标签内容</h5>
+    <p style="font-size:13.5px;color:var(--ink-soft)">
+      同样一条风险承受等级标签，走风评问卷写进来起步分就是 0.90，走客户自述写进来就是 0.55——与标签的值本身是 C3 还是「10 万以下」无关。
+    </p>
+  </div>
+
+  <h3 style="margin:26px 0 10px;font-size:17px">例子</h3>
+  <div class="grid-3">
+    <div class="card">
+      <h3><span class="tag tag-vector">风评问卷首写</span></h3>
+      <p>风险承受等级第一次由风评问卷写入，当时没有旁证、没有冲突、也还没过时间，置信度就是 <span class="mono">0.90</span>。</p>
+    </div>
+    <div class="card">
+      <h3><span class="tag tag-gold">默认值占位</span></h3>
+      <p>开户时自述字段先用「默认值」占位，起步分就是 <span class="mono">0.30</span>。真正的风险承受等级随后由风评问卷写回。</p>
+    </div>
+    <div class="card">
+      <h3><span class="tag tag-perm">种子数据会衰减到接近 0</span></h3>
+      <p>演示种子数据的标签标成「风评问卷」，观察时间是画像的 <code>computed_at</code>（约 2021–2022 年）。按每年减 0.20，读到今天会衰减到接近 0。</p>
+    </div>
+  </div>
+</section>
+
+<!-- ================= 三 证据增益 ================= -->
+<section id="evidence">
+  <div class="sec-head"><span class="sec-num">SECTION 03</span><h2>证据增益</h2></div>
+  <p class="sec-sub">
+    证据增益是「同一个值又被确认了一次」。后来再写入时，如果新值和当前值相同，而且新来源的起步分不低于当前来源，证据条数加 1。
+    每条这样的确认给置信度加 0.05，加满 0.15 为止，也就是最多认 3 次。
+  </p>
+
+  <div class="grid-2">
+    <div class="card">
+      <h3><span class="tag tag-keyword">来源更高时</span></h3>
+      <p>来源和观察时间也换成这次的，衰减从新时间重新算。</p>
+    </div>
+    <div class="card">
+      <h3><span class="tag tag-perm">来源更低时</span></h3>
+      <p>起步分更低的来源再说一遍同样的话，直接丢掉，不算证据。</p>
+    </div>
+  </div>
+
+  <h3 style="margin:26px 0 4px;font-size:17px">例子：风评问卷写出的 0.90，被同级或更高来源反复确认</h3>
+  <div class="chain">
+    <div class="node">
+      <div class="k">写入起点</div>
+      <div class="v">0.90</div>
+      <div class="d">风评问卷首次写入</div>
+    </div>
+    <div class="arrow">→</div>
+    <div class="node">
+      <div class="k">确认 1 次</div>
+      <div class="v">0.95</div>
+      <div class="d">0.90 + 0.05</div>
+    </div>
+    <div class="arrow">→</div>
+    <div class="node">
+      <div class="k">确认 3 次</div>
+      <div class="v">1.05</div>
+      <div class="d">0.90 + 0.15（加满）</div>
+    </div>
+    <div class="arrow">→</div>
+    <div class="node final">
+      <div class="k">夹取后</div>
+      <div class="v">1.00</div>
+      <div class="d">超过 1 被限制成 1</div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= 四 冲突惩罚 ================= -->
+<section id="penalty">
+  <div class="sec-head"><span class="sec-num">SECTION 04</span><h2>冲突惩罚</h2></div>
+  <p class="sec-sub">
+    冲突惩罚是「这个标签曾经被一个够格的来源改成了另一个值」。新值不同、且新来源起步分不低于当前来源时，走三步。
+    改写之后用的是<b>改写来源那一次的起步分</b>：改写来源与当前来源<b>同级</b>时起步分不变，只扣冲突；
+    改写来源<b>更高</b>时，起步分换成新来源的，再扣冲突。
+  </p>
+
+  <div class="flow">
+    <div class="fnode accent-perm">
+      <div class="fnum">1</div>
+      <h4>记一条冲突</h4>
+      <p>记下旧值、旧来源、新值、新来源。</p>
+    </div>
+    <div class="fnode accent-navy">
+      <div class="fnum">2</div>
+      <h4>标签改成新值</h4>
+      <p>当前值被新来源的说法覆盖。</p>
+    </div>
+    <div class="fnode accent-gold">
+      <div class="fnum">3</div>
+      <h4>证据清零，观察时间改成本次</h4>
+      <p>之前累积的同值确认不再算数，衰减从这个新时间重新开始。</p>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3><span class="tag tag-perm">扣分规则</span></h3>
+    <p>历史上每有一条这样的冲突记录，置信度减 <span class="mono">0.10</span>，不封顶。</p>
+    <p style="margin-top:8px">起步分更低的来源提出不同说法时同样丢掉，不记冲突，也不扣分。</p>
+  </div>
+
+  <h3 style="margin:22px 0 4px;font-size:17px">例子</h3>
+  <div class="chain">
+    <div class="node">
+      <div class="k">改写来源同级（同为 0.55 的客户自述）</div>
+      <div class="v">0.55</div>
+      <div class="d">起步分保持不动</div>
+    </div>
+    <div class="arrow">→</div>
+    <div class="node final">
+      <div class="k">值被改成另一个</div>
+      <div class="v">0.45</div>
+      <div class="d">0.55 − 0.10（证据回 0，冲突为 1）</div>
+    </div>
+  </div>
+  <div class="chain">
+    <div class="node">
+      <div class="k">改写来源更高：风评问卷</div>
+      <div class="v">0.90</div>
+      <div class="d">起步分换成问卷的 0.90，不再用 0.55</div>
+    </div>
+    <div class="arrow">→</div>
+    <div class="node final">
+      <div class="k">再减掉这一次冲突</div>
+      <div class="v">0.80</div>
+      <div class="d">0.90 − 0.10（冲突为 1）</div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= 五 写入 ================= -->
+<section id="write">
+  <div class="sec-head"><span class="sec-num">SECTION 05</span><h2>写入时怎么改这四个量</h2></div>
+  <p class="sec-sub">
+    四个输入由 <code>write_tag</code>（<code>backend/app/customer_profile/service.py</code>）在写入时维护，按来源高低决定能不能改。
+  </p>
+
+  <table>
+    <thead><tr><th style="width:290px">情况</th><th>效果</th></tr></thead>
+    <tbody>
+      <tr><td>第一次写入</td><td>证据条数为 0，观察时间就是写入时刻</td></tr>
+      <tr><td>后来又写到同一个值，且来源不低于当前</td><td>证据条数 +1；来源更高时，来源和观察时间也更新</td></tr>
+      <tr><td>写到不同的值，且来源不低于当前</td><td>记一条冲突，覆盖标签，证据条数清零，观察时间改为这次</td></tr>
+      <tr><td>来源更低</td><td>直接丢掉，不计入证据，也不记冲突</td></tr>
+    </tbody>
+  </table>
+
+  <div class="note">
+    <h5>顾问手工修正</h5>
+    <p style="font-size:13.5px;color:var(--ink-soft)">顾问手工修正会把来源抬到 <span class="mono">0.95</span>，并重置观察时间。</p>
+  </div>
+</section>
+
+<!-- ================= 六 汇总置信度 ================= -->
+<section id="aggregate">
+  <div class="sec-head"><span class="sec-num">SECTION 06</span><h2>和画像汇总置信度的区别</h2></div>
+  <p class="sec-sub">画像表上还有一个汇总字段 <code>confidence_score</code>，它和标签卡片上看到的数字不是一回事。</p>
+
+  <div class="grid-2">
+    <div class="card">
+      <h3><span class="tag tag-navy">confidence_score</span></h3>
+      <p>周期校准时各标签置信度的平均值，给不看明细的读取方用。</p>
+    </div>
+    <div class="card">
+      <h3><span class="tag tag-vector">标签卡片上的进度条</span></h3>
+      <p>不读这个汇总数。每次打开画像，都按第一节的公式重算一遍。</p>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <p>智能财富管家系统 · 客户画像标签置信度详解 —— 内容依据《客户画像标签置信度》整理，代码出处以 <code>backend/app/customer_profile/</code> 为准（<code>confidence.py::compute_confidence</code>、<code>service.py::write_tag</code>、读取入口 <code>get_internal_profile</code>）。供答辩展示使用。</p>
+</footer>
+
+</main>
+</div>
+
+<script>
+(function(){
+  /* 目录高亮 */
+  var links = Array.prototype.slice.call(document.querySelectorAll('.sidenav a'));
+  var secs = links.map(function(a){ return document.querySelector(a.getAttribute('href')); }).filter(Boolean);
+  if ('IntersectionObserver' in window && secs.length) {
+    var spy = new IntersectionObserver(function(entries){
+      entries.forEach(function(entry){
+        if (entry.isIntersecting) {
+          links.forEach(function(l){
+            l.classList.toggle('active', l.getAttribute('href') === '#' + entry.target.id);
+          });
+        }
+      });
+    }, { rootMargin: '-12% 0px -72% 0px' });
+    secs.forEach(function(s){ spy.observe(s); });
+  }
+
+  /* 入场动画 */
+  if (!('IntersectionObserver' in window) ||
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    return;
+  }
+  var targets = document.querySelectorAll('.card, .fnode, .chain .node, .srcbar, .hero-stats .item');
+  targets.forEach(function(el){ el.classList.add('reveal'); });
+  var io = new IntersectionObserver(function(entries){
+    entries.forEach(function(entry){
+      if (entry.isIntersecting) {
+        entry.target.classList.add('in');
+        io.unobserve(entry.target);
+      }
+    });
+  }, { threshold: 0.08 });
+  targets.forEach(function(el){ io.observe(el); });
+})();
+</script>
+</body>
+</html>

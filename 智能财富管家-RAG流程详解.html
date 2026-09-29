@@ -480,12 +480,15 @@ footer{border-top:1px solid var(--hairline);margin-top:60px;padding:26px 0 10px;
     <div class="fnode" data-tags="">
       <span class="fnum">4</span>
       <h4>RRF 融合 <span class="loc">knowledge/hybrid.py::rrf_fuse</span></h4>
+      <p><b>进什么、出什么</b>：两臂各出 <code>hybrid_recall_top_k = 20</code> 条（各自带分臂原始分），融合成一张按融合分排好的候选池，取前 20 条交给重排——这就是重排看到的那一整池。融合的 20 与最终送进模型的 <code>retrieval_top_k = 5</code> 是两个量：一个是「候选池」，一个是「取货」。向量臂超时 / 不可用时并不是换一段代码，而是把输入的臂从两路变成一路，同一个融合函数照样跑一遍（<code>service._keyword_only_results</code>），只是那一次会写一条 <code>vector_store</code> 降级留痕。</p>
       <p>选 RRF 而不是配权重，因为余弦（0~1）与 BM25（随语料漂移的无界分）之间没有稳定的归一化关系——RRF 只用位次，天然跨量纲：</p>
       <div class="formula">rrf_score(chunk) = Σ<sub>臂</sub> 1 / (<span class="hl">rrf_k = 60</span> + rank<sub>臂</sub>)，rank 从 1 起</div>
       <ul>
-        <li>去重身份是 <code>(knowledge_id, chunk_index)</code>；两路都命中的块合并为一条，<code>source = "hybrid"</code>，证据分取两路较大值</li>
-        <li><code>score</code> 写归一化 RRF（本次候选最高记 1.0），只服务排序，跨查询不可比</li>
-        <li>两臂还分着的时候算好各臂最高原始分带出（<code>RetrievedChunks.evidence</code>）——事后无法从融合结果反推</li>
+        <li><b>rrf_k = 60 是平滑常数</b>，它把「第几名」的差距压平：第 1 名记 1/61 ≈ 0.0164、第 20 名记 1/80 = 0.0125，只差 24%。k 越大越平，「一条臂排第一」不再一票定生死，而「两条臂都进前列」稳定胜过「一条臂排第一」——这正是混合召回想要的取舍</li>
+        <li><b>去重身份是 <code>(knowledge_id, chunk_index)</code></b>：两路都命中的块只出现一次，代表块取先被遍历到的那条（两臂顺序是向量在前），<code>source = "hybrid"</code>，<code>evidence_score</code> 取两路里的较大值（分臂判定用）</li>
+        <li><code>score</code> 写<b>归一化 RRF</b>（本次候选最高记 1.0，其余按比例）：它仍是 0~1 且单调不增，与图谱分（1.0）同一量纲，下游的加权融合因此继续成立。它跨查询不可比，要展示「这条有多相关」应当读 <code>evidence_score</code></li>
+        <li><b>同分怎么定序</b>：按 <code>(knowledge_id, chunk_index)</code> 升序兜底。融合结果因此不依赖字典 / 集合的遍历顺序，回放与测试可确定性复现（ADR-0008）</li>
+        <li>两臂还分着的时候算好各臂最高原始分带出（<code>RetrievedChunks.evidence</code>）——事后无法从融合结果反推：hybrid 块的证据分是两路取大，拿 BM25 的量纲去冒充余弦，会让向量臂凭空达标</li>
       </ul>
     </div>
 
@@ -496,6 +499,7 @@ footer{border-top:1px solid var(--hairline);margin-top:60px;padding:26px 0 10px;
       <ul>
         <li>关闭 / fake / 回放时恒等保序、不发调用（按配置本来就不调用）</li>
         <li><b>达标块保底组装</b>：已达标的块保底占位、未达标块按重排序补足名额（知识候选最终取 <code>retrieval_top_k = 5</code> 条；图谱增强会在此之后另追加图谱段落，总数不设上限）。重排不得把达标块挤出上下文——否则一次增强环节就改写了「有没有依据」的合规结论</li>
+        <li>模型输出是<b>不可信输入</b>：越界序号、重复序号、非数值分一律丢弃，相关度截断到 [0,1]；结构本身不合预期（不是 JSON / 没有 ranking / 一条可用的都没有）时走降级退回 RRF 序，而不是拿一个空排序去覆盖它</li>
       </ul>
     </div>
 

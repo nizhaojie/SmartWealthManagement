@@ -1,0 +1,871 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>智能财富管家系统 · Memory（记忆）使用详解（答辩展示）</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@600;700;900&family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --paper:#F7F4EE;
+  --paper-2:#FFFFFF;
+  --ink:#1D2433;
+  --ink-soft:#4A5164;
+  --ink-faint:#8A8FA0;
+  --hairline:#DDD6C7;
+  --navy:#22365E;
+  --gold:#A8842C;
+  --gold-soft:#F0E6CC;
+  --vector:#2E6FBA;
+  --vector-bg:#E7EFFA;
+  --keyword:#2F7D5B;
+  --keyword-bg:#E5F2EB;
+  --graph:#6D4FA1;
+  --graph-bg:#EEE8F7;
+  --perm:#B4372F;
+  --perm-bg:#F9E9E7;
+  --model:#0F6E8C;
+  --model-bg:#E3F1F5;
+  --radius:10px;
+  --shadow:0 1px 2px rgba(29,36,51,.05),0 8px 24px rgba(29,36,51,.06);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{
+  background:var(--paper);
+  color:var(--ink);
+  font-family:"Noto Sans SC","Microsoft YaHei",system-ui,sans-serif;
+  font-size:15.5px;line-height:1.75;
+}
+::selection{background:var(--gold-soft)}
+code,.mono{
+  font-family:"Cascadia Code","JetBrains Mono",Consolas,"Courier New",monospace;
+  font-size:.86em;
+  background:rgba(34,54,94,.07);
+  padding:.08em .38em;border-radius:4px;
+  color:var(--navy);word-break:break-all;
+}
+h1,h2,h3,.serif{font-family:"Noto Serif SC","Source Han Serif SC","STSong","SimSun",serif}
+
+/* ---------- 顶栏与视角切换 ---------- */
+.topbar{
+  position:sticky;top:0;z-index:50;
+  background:rgba(247,244,238,.92);backdrop-filter:blur(10px);
+  border-bottom:1px solid var(--hairline);
+  display:flex;align-items:center;gap:18px;flex-wrap:wrap;
+  padding:10px 28px;
+}
+.topbar .brand{font-family:"Noto Serif SC",serif;font-weight:900;font-size:17px;letter-spacing:.02em}
+.topbar .brand small{display:block;font-family:"Noto Sans SC",sans-serif;font-weight:400;font-size:11px;color:var(--ink-faint);letter-spacing:.14em}
+.lens-switch{margin-left:auto;display:flex;align-items:center;gap:8px;font-size:13px;color:var(--ink-soft)}
+.lens-switch .lens-label{letter-spacing:.05em}
+.lens-btns{display:flex;border:1px solid var(--hairline);border-radius:999px;overflow:hidden;background:var(--paper-2)}
+.lens-btns button{
+  border:0;background:transparent;padding:6px 16px;font-size:13px;cursor:pointer;
+  color:var(--ink-soft);font-family:inherit;transition:all .2s;
+}
+.lens-btns button.active{background:var(--navy);color:#fff}
+.lens-btns button[data-lens="degrade"].active{background:var(--perm)}
+
+/* ---------- 布局 ---------- */
+.layout{display:grid;grid-template-columns:230px minmax(0,1fr);max-width:1440px;margin:0 auto}
+.sidenav{
+  position:sticky;top:57px;align-self:start;height:calc(100vh - 57px);
+  padding:28px 18px;border-right:1px solid var(--hairline);overflow:auto;
+}
+.sidenav a{
+  display:block;padding:7px 12px;margin-bottom:2px;border-radius:7px;
+  color:var(--ink-soft);text-decoration:none;font-size:13.5px;
+  border-left:2px solid transparent;transition:all .15s;
+}
+.sidenav a:hover{background:rgba(34,54,94,.06);color:var(--ink)}
+.sidenav a .nav-num{color:var(--gold);font-family:"Noto Serif SC",serif;font-weight:700;margin-right:7px}
+main{padding:0 44px 90px;min-width:0}
+section{padding-top:46px}
+.sec-head{display:flex;align-items:baseline;gap:16px;border-bottom:2px solid var(--ink);padding-bottom:12px;margin-bottom:8px}
+.sec-num{font-family:"Noto Serif SC",serif;font-weight:900;font-size:15px;color:var(--gold);letter-spacing:.1em;white-space:nowrap}
+.sec-head h2{font-size:27px;font-weight:900;letter-spacing:.01em}
+.sec-sub{color:var(--ink-soft);font-size:14px;margin:10px 0 26px;max-width:880px}
+
+/* ---------- Hero ---------- */
+.hero{padding:64px 0 30px;border-bottom:1px solid var(--hairline)}
+.hero .eyebrow{font-size:12.5px;letter-spacing:.32em;color:var(--gold);font-weight:700;margin-bottom:18px}
+.hero h1{font-size:clamp(30px,4.2vw,48px);font-weight:900;line-height:1.28;letter-spacing:.01em}
+.hero h1 em{font-style:normal;color:var(--navy);border-bottom:5px solid var(--gold-soft);box-shadow:inset 0 -2px 0 var(--gold)}
+.hero .lede{margin-top:20px;max-width:860px;color:var(--ink-soft);font-size:16px}
+.hero-stats{display:flex;flex-wrap:wrap;gap:14px;margin-top:34px}
+.stat{
+  background:var(--paper-2);border:1px solid var(--hairline);border-radius:var(--radius);
+  padding:14px 22px;min-width:130px;box-shadow:var(--shadow);
+}
+.stat b{display:block;font-family:"Noto Serif SC",serif;font-size:30px;font-weight:900;color:var(--navy);line-height:1.2}
+.stat span{font-size:12.5px;color:var(--ink-faint);letter-spacing:.06em}
+
+/* ---------- 通用卡片与表格 ---------- */
+.card{
+  background:var(--paper-2);border:1px solid var(--hairline);border-radius:var(--radius);
+  padding:20px 24px;box-shadow:var(--shadow);margin-bottom:16px;
+}
+.card h3{font-size:17px;font-weight:700;margin-bottom:8px}
+.grid-2{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px}
+.grid-3{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px}
+table{width:100%;border-collapse:collapse;background:var(--paper-2);border-radius:var(--radius);overflow:hidden;box-shadow:var(--shadow);font-size:14px;margin-bottom:16px}
+th{background:var(--navy);color:#fff;text-align:left;padding:10px 14px;font-weight:500;font-size:13px;letter-spacing:.04em}
+td{padding:10px 14px;border-top:1px solid var(--hairline);vertical-align:top}
+tr:nth-child(even) td{background:rgba(34,54,94,.025)}
+
+/* ---------- 标记：层级 / 组件 ---------- */
+.tag{
+  display:inline-flex;align-items:center;gap:5px;
+  font-size:12px;font-weight:700;padding:2px 10px;border-radius:999px;
+  letter-spacing:.03em;white-space:nowrap;vertical-align:1px;
+}
+.tag::before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor}
+.tag-perm{background:var(--perm-bg);color:var(--perm)}
+.tag-vector{background:var(--vector-bg);color:var(--vector)}
+.tag-keyword{background:var(--keyword-bg);color:var(--keyword)}
+.tag-graph{background:var(--graph-bg);color:var(--graph)}
+.tag-model{background:var(--model-bg);color:var(--model)}
+.tag-navy{background:rgba(34,54,94,.09);color:var(--navy)}
+
+/* ---------- 流程图 ---------- */
+.flow{position:relative;margin:22px 0 8px}
+.fnode{
+  position:relative;background:var(--paper-2);border:1px solid var(--hairline);
+  border-radius:var(--radius);padding:16px 20px 16px 62px;box-shadow:var(--shadow);
+  margin-bottom:34px;transition:opacity .3s,filter .3s;
+}
+.fnode::after{
+  content:"";position:absolute;left:31px;bottom:-34px;height:34px;width:2px;
+  background:linear-gradient(var(--hairline),var(--ink-faint));
+}
+.fnode:last-child::after{display:none}
+.fnode::before{
+  content:"";position:absolute;left:26px;bottom:-22px;width:12px;height:12px;
+  border-right:2px solid var(--ink-faint);border-bottom:2px solid var(--ink-faint);
+  transform:rotate(45deg) translateX(-2px);
+}
+.fnode:last-child::before{display:none}
+.fnum{
+  position:absolute;left:16px;top:16px;width:32px;height:32px;border-radius:50%;
+  background:var(--navy);color:#fff;display:flex;align-items:center;justify-content:center;
+  font-family:"Noto Serif SC",serif;font-weight:900;font-size:15px;
+}
+.fnode h4{font-size:16px;font-weight:700;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.fnode h4 .loc{font-weight:400;font-size:12px;color:var(--ink-faint)}
+.fnode p{margin-top:6px;color:var(--ink-soft);font-size:14px}
+.fnode .gates{margin-top:10px;display:flex;flex-wrap:wrap;gap:6px}
+.fnode ul{margin:8px 0 0 18px;color:var(--ink-soft);font-size:14px}
+.fnode ul li{margin-bottom:3px}
+.fnode.accent-vector{border-left:4px solid var(--vector)}
+.fnode.accent-keyword{border-left:4px solid var(--keyword)}
+.fnode.accent-graph{border-left:4px solid var(--graph)}
+.fnode.accent-perm{border-left:4px solid var(--perm)}
+.fnode.accent-model{border-left:4px solid var(--model)}
+.fnode.accent-gold{border-left:4px solid var(--gold)}
+
+/* 视角切换：淡化无关节点 */
+body[data-lens="degrade"] .fnode:not([data-tags*="degrade"]){opacity:.28;filter:saturate(.4)}
+body[data-lens="degrade"] .fnode[data-tags*="degrade"]{border-color:var(--perm);box-shadow:0 0 0 3px var(--perm-bg),var(--shadow)}
+body[data-lens="degrade"] .card[data-tags]:not([data-tags*="degrade"]){opacity:.35}
+.lens-hint{display:none;margin:6px 0 20px;font-size:13px;padding:9px 16px;border-radius:8px}
+body[data-lens="degrade"] .lens-hint-degrade{display:block}
+.lens-hint-degrade{background:var(--perm-bg);color:var(--perm)}
+
+/* 并行双臂 */
+.arms{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:14px 0}
+@media(max-width:760px){.arms{grid-template-columns:1fr}}
+.arm{border-radius:var(--radius);padding:14px 18px;border:1px solid var(--hairline);background:var(--paper-2)}
+.arm h5{font-size:14px;display:flex;align-items:center;gap:8px;margin-bottom:6px}
+.arm p,.arm li{font-size:13.5px;color:var(--ink-soft)}
+.arm ul{margin-left:16px}
+.arm-vector{border-top:4px solid var(--vector)}
+.arm-keyword{border-top:4px solid var(--keyword)}
+.arm-graph{border-top:4px solid var(--graph)}
+.merge-note{
+  text-align:center;font-size:13px;color:var(--ink-faint);margin:4px 0 0;
+}
+.merge-note b{color:var(--navy)}
+
+/* 公式条 */
+.formula{
+  font-family:"Cascadia Code",Consolas,monospace;font-size:14px;
+  background:var(--ink);color:#EDE6D6;border-radius:8px;padding:12px 18px;margin:12px 0;
+  overflow-x:auto;white-space:nowrap;
+}
+.formula .hl{color:#E8C36A}
+
+/* 分支路由 */
+.branches{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin:14px 0}
+.branch{
+  border:1px solid var(--hairline);border-radius:8px;padding:12px 16px;background:var(--paper-2);
+  font-size:13.5px;color:var(--ink-soft);
+}
+.branch b{display:block;color:var(--ink);font-size:14px;margin-bottom:3px}
+
+/* 节点内的补充说明块 */
+.note{
+  margin:14px 0 4px;padding:14px 18px;
+  background:rgba(34,54,94,.035);border:1px solid var(--hairline);
+  border-left:3px solid var(--gold);border-radius:8px;
+}
+.note h5{font-size:13.5px;font-weight:700;color:var(--navy);margin-bottom:8px}
+.note table{box-shadow:none;margin-bottom:10px;font-size:13px}
+.note table th{padding:7px 12px;font-size:12px}
+.note table td{padding:8px 12px}
+.note ul{margin:0 0 0 18px;color:var(--ink-soft);font-size:13.5px}
+.note ul li{margin-bottom:4px}
+.note .src{margin-top:8px}
+
+/* 编号清单 */
+.num-list{counter-reset:item;display:flex;flex-direction:column;gap:10px}
+.num-item{
+  counter-increment:item;display:grid;grid-template-columns:46px 1fr;gap:14px;
+  background:var(--paper-2);border:1px solid var(--hairline);border-radius:var(--radius);
+  padding:14px 18px;box-shadow:var(--shadow);transition:opacity .3s;
+}
+.num-item::before{
+  content:"M" counter(item,decimal-leading-zero);
+  font-family:"Noto Serif SC",serif;font-weight:900;color:var(--gold);font-size:15px;padding-top:2px;
+}
+.num-item b{font-size:14.5px}
+.num-item p{font-size:13.5px;color:var(--ink-soft);margin-top:2px}
+.num-group{
+  font-family:"Noto Serif SC",serif;font-weight:700;color:var(--navy);font-size:15px;
+  margin:22px 0 10px;display:flex;align-items:center;gap:10px;
+}
+.num-group::after{content:"";flex:1;height:1px;background:var(--hairline)}
+
+/* 脚注/出处 */
+.src{font-size:12.5px;color:var(--ink-faint);margin-top:8px}
+.src code{background:transparent;padding:0;color:var(--ink-faint)}
+footer{border-top:1px solid var(--hairline);margin-top:60px;padding:26px 0 10px;color:var(--ink-faint);font-size:13px}
+
+/* 入场动画 */
+.reveal{opacity:0;transform:translateY(14px);transition:opacity .5s ease,transform .5s ease}
+.reveal.in{opacity:1;transform:none}
+@media(prefers-reduced-motion:reduce){
+  html{scroll-behavior:auto}
+  .reveal{opacity:1;transform:none;transition:none}
+  *{transition:none!important}
+}
+@media(max-width:980px){
+  .layout{grid-template-columns:1fr}
+  .sidenav{display:none}
+  main{padding:0 20px 70px}
+}
+@media print{
+  .topbar,.sidenav{display:none}
+  .layout{grid-template-columns:1fr}
+  body{background:#fff}
+  .reveal{opacity:1;transform:none}
+}
+</style>
+</head>
+<body data-lens="all">
+
+<header class="topbar">
+  <div class="brand">智能财富管家系统<small>THREE-TIER MEMORY · DEFENSE DOSSIER</small></div>
+  <div class="lens-switch">
+    <span class="lens-label">视角</span>
+    <div class="lens-btns" role="group" aria-label="视角切换">
+      <button data-lens="all" class="active">全流程</button>
+      <button data-lens="degrade">只看降级路径</button>
+    </div>
+  </div>
+</header>
+
+<div class="layout">
+<nav class="sidenav" aria-label="目录">
+  <a href="#overview"><span class="nav-num">〇</span>全景总览</a>
+  <a href="#short"><span class="nav-num">一</span>短期记忆</a>
+  <a href="#mid"><span class="nav-num">二</span>中期记忆</a>
+  <a href="#long"><span class="nav-num">三</span>长期记忆</a>
+  <a href="#archive"><span class="nav-num">四</span>会话归档</a>
+  <a href="#degrade"><span class="nav-num">五</span>降级路径总表</a>
+  <a href="#source"><span class="nav-num">六</span>代码出处索引</a>
+</nav>
+
+<main>
+
+<!-- ================= HERO ================= -->
+<div class="hero">
+  <div class="eyebrow">答辩展示 · Memory 专题</div>
+  <h1>系统记得什么、记多久、谁说了算：<br>本系统中<em>三层记忆</em>的使用方式</h1>
+  <p class="lede">
+    记忆分三层，但分层<b>不按「存在 Redis / MySQL / Milvus」来划</b>，而按两个问题划：这条信息<b>活多久</b>，
+    以及<b>谁</b>是它的权威来源（ADR-0012）。短期记忆是当前会话的消息列表（Redis，30 分钟滑动过期、2000 token 预算）；
+    中期记忆是客户画像与工单状态（MySQL 为权威，缓存只做加速）；长期记忆是知识向量、图谱与原始文档（知识元数据为权威，
+    其余都是它的投影，坏了可全量重建）。<b>会话归档与置信度常被误当成「第四层记忆」，它们都不是</b>——本文说明理由。
+  </p>
+  <div class="hero-stats">
+    <div class="stat"><b>3</b><span>层记忆（生命周期 × 权威来源）</span></div>
+    <div class="stat"><b>30</b><span>分钟 · 短期记忆滑动过期</span></div>
+    <div class="stat"><b>2000</b><span>token · 上下文预算</span></div>
+    <div class="stat"><b>0</b><span>处把缓存当权威</span></div>
+  </div>
+</div>
+
+<!-- ================= 〇 全景总览 ================= -->
+<section id="overview">
+  <div class="sec-head"><span class="sec-num">SECTION 00</span><h2>全景总览</h2></div>
+  <p class="sec-sub">三层记忆的判据是「生命周期」与「权威来源」，存储技术只是实现细节——短期记忆从 Redis 换成别的缓存，分层不变。</p>
+
+  <table>
+    <thead>
+      <tr><th style="width:96px">层</th><th>内容</th><th style="width:210px">生命周期</th><th style="width:230px">权威来源</th><th style="width:260px">读取方式</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><span class="tag tag-vector">短期记忆</span></td>
+        <td>当前会话的消息列表</td>
+        <td>一次登录的会话内，<b>滑动过期</b>（<code>chat_memory_ttl_minutes = 30</code>），总量受 token 预算约束</td>
+        <td>本次对话本身</td>
+        <td>Redis 列表，超预算时<b>截断最旧消息</b></td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-keyword">中期记忆</span></td>
+        <td>客户画像、工单状态</td>
+        <td>跨会话存在，但<b>会被业务改写</b></td>
+        <td>画像由离线计算产生、工单由流程流转产生，均落在 MySQL</td>
+        <td>画像走 <b>Cache-Aside</b>；工单<b>直接查库</b>（缓存不是权威）</td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-graph">长期记忆</span></td>
+        <td>知识向量、知识图谱、原始文档与知识元数据</td>
+        <td>长期</td>
+        <td><b>知识元数据（MySQL）为权威</b>，Milvus / Neo4j / MinIO 都是它的投影</td>
+        <td>检索与多跳查询；投影可<b>全量重建</b></td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="grid-3">
+    <div class="card">
+      <h3><span class="tag tag-navy">存储分工</span></h3>
+      <ul style="margin:6px 0 0 18px;color:var(--ink-soft);font-size:14px">
+        <li><b>Redis</b>：短期记忆列表 <code>agent:memory:{session_id}</code>、画像缓存 <code>customer_profile:{id}</code>、登录会话白名单</li>
+        <li><b>MySQL</b>：中期记忆（<code>fin_customer_profile</code> / <code>fin_profile_tag</code> / <code>biz_work_order</code>）、长期记忆的权威元数据（<code>fin_knowledge_meta</code>）、归档（<code>conversation_archive</code>）</li>
+        <li><b>Milvus / Neo4j / MinIO</b>：长期记忆的三处<b>投影</b>——向量、图谱、原始文档字节</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3><span class="tag tag-navy">谁在读这些记忆</span></h3>
+      <ul style="margin:6px 0 0 18px;color:var(--ink-soft);font-size:14px">
+        <li><b>短期记忆</b>：智能客服 Agent（<code>run_customer_service_turn</code>）、数据分析 / 风控问答链路（<code>run_query</code>）</li>
+        <li><b>中期记忆</b>：画像供投顾助手与推荐使用，工单供内部工单页与风控处置使用</li>
+        <li><b>长期记忆</b>：智能客服的知识检索、客服「数据查询」分支与数据分析 Agent 的视图检索、GraphRAG 增强</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3><span class="tag tag-navy">设计不变式</span></h3>
+      <ul style="margin:6px 0 0 18px;color:var(--ink-soft);font-size:14px">
+        <li><b>缓存永远不是权威</b>：失效时直连 MySQL；缓存不可用不影响正确性</li>
+        <li><b>短期记忆只用于组装上下文，不是留痕</b>——留痕归归档与调试留痕</li>
+        <li><b>记忆丢失不阻断开服务</b>：缓存抖动退化成「没有上下文的一轮」，仍然正常作答</li>
+        <li><b>投影坏了就全量重建</b>，不做双向同步、不做增量捕获</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="note">
+    <h5>要新增一类信息时，依次问三个问题（ADR-0012 的判据）</h5>
+    <div class="branches">
+      <div class="branch"><b>① 它随会话结束就失去意义？</b>是 → <span class="tag tag-vector">短期记忆</span></div>
+      <div class="branch"><b>② 跨会话存在、会被业务改写、有明确写入方？</b>是 → <span class="tag tag-keyword">中期记忆</span></div>
+      <div class="branch"><b>③ 长期稳定、由知识导入或全量重建产生、只读？</b>是 → <span class="tag tag-graph">长期记忆</span></div>
+      <div class="branch"><b>都不是？</b>那它多半<b>不是记忆</b>——例如会话归档与置信度</div>
+    </div>
+  </div>
+
+  <div class="lens-hint lens-hint-degrade">当前视角：<b>只看降级路径</b>。所有「依赖不可用时怎么办」的节点已高亮（红色描边），其余节点淡化。点击顶栏「全流程」恢复。</div>
+</section>
+
+<!-- ================= 一 短期记忆 ================= -->
+<section id="short">
+  <div class="sec-head"><span class="sec-num">SECTION 01</span><h2>短期记忆：一轮对话的上下文</h2></div>
+  <p class="sec-sub">实现只有一处（<code>agent/memory.py</code>）：一个 Redis List，键 <code>agent:memory:{session_id}</code>。它随会话结束失去意义，因此按会话隔离、滑动过期、受 token 预算约束；读不到就不带上下文地作答——<b>缓存是优化不是依赖</b>。</p>
+
+  <div class="flow">
+
+    <div class="fnode accent-vector">
+      <span class="fnum">1</span>
+      <h4>读：取上一轮为止的消息列表 <span class="loc">agent/memory.py::read_history</span></h4>
+      <p><code>LRANGE agent:memory:{session_id} 0 -1</code> → 反序列化成 <code>[{"role","content"}, …]</code>。返回的不是裸列表而是 <code>HistoryRead(history, degraded)</code>——调用方需要知道<b>这次读取有没有走降级</b>，才能决定是否留痕。</p>
+      <p>只需要消息列表时用便捷读法 <code>get_history</code>（数据分析链路就是这种用法，它不关心降级留痕）。</p>
+      <p class="src">出处：<code>backend/app/agent/memory.py</code></p>
+    </div>
+
+    <div class="fnode accent-model">
+      <span class="fnum">2</span>
+      <h4>注入上下文：历史作为提示词的一部分 <span class="loc">agent/graph.py::generate_node · llm/provider.py</span></h4>
+      <p>历史随图状态进入运行时（<code>graph.invoke({"question", "history", …})</code>），由生成节点的消息组装函数拼成：</p>
+      <div class="formula">messages = [ <span class="hl">system</span>(检索约束+引用要求), <span class="hl">*history</span>, user(编号片段 + 本轮问题) ]</div>
+      <ul>
+        <li><b>只有需要多轮语境的节点吃历史</b>：知识生成节点与客服的「数据查询」分支都带历史；<b>闲聊节点不带</b>——闲聊不引用片段，也就没有需要承接的上下文。</li>
+        <li><b>数据分析 / 风控问答链路</b>用历史问题参与<b>视图检索</b>与 SQL 生成，支撑「那上个季度呢」「那今天呢」这类不含主语的追问。</li>
+        <li>历史是<b>用户与助手的逐轮原文</b>，不压缩、不摘要——超出预算的部分在写入时已经截掉了。</li>
+      </ul>
+      <p class="src">出处：<code>backend/app/llm/provider.py::build_grounded_messages</code>、<code>app/agent/graph.py</code>、<code>app/analytics/service.py</code></p>
+    </div>
+
+    <div class="fnode accent-vector">
+      <span class="fnum">3</span>
+      <h4>写回：一轮两条消息，每次追加都续期 <span class="loc">agent/memory.py::append_turn</span></h4>
+      <ul>
+        <li>本轮结束后追加两条：<code>role="user"</code>（问题）+ <code>role="assistant"</code>（最终定案回答）——<b>写的是最终答案，不是流式过程中的半成品</b></li>
+        <li><code>RPUSH</code> 追加后 <code>EXPIRE</code> 重置为整窗 30 分钟：这就是<b>滑动过期</b>，不再说话就自然消失</li>
+        <li>返回值是布尔：<b>缓存不可用时返回 <code>False</code> 而不是抛错</b>，本轮的答案不受影响</li>
+      </ul>
+      <p class="src">出处：<code>backend/app/agent/memory.py::append_turn</code>、<code>app/agent/graph.py:649-654</code>、<code>app/analytics/service.py:143-154</code></p>
+    </div>
+
+    <div class="fnode accent-vector">
+      <span class="fnum">4</span>
+      <h4>截断：token 预算之内，最新一条一定保留 <span class="loc">agent/memory.py::_truncate_to_budget</span></h4>
+      <p>预算 <code>chat_memory_token_budget = 2000</code>。追加后立刻重算消息列表总 token，超预算就<b>从最旧的消息开始丢</b>，<code>LTRIM</code> 落回 Redis。</p>
+      <div class="formula">while 总量 &gt; 2000 <b>且</b> 剩余条数 &gt; <span class="hl">1</span>：丢掉最旧一条</div>
+      <ul>
+        <li>「剩余条数 &gt; 1」这个条件是刻意的：<b>再长的对话也不会被截成空列表</b>，最新一条永远在——否则用户会看到系统突然失忆成陌生人。</li>
+        <li>token 口径与知识库分块一致（<code>knowledge/tokenizer.py::count_tokens</code>）：<b>一个汉字算一个 token</b>，因此 2000 token 大致相当于 2000 个汉字。</li>
+        <li>截断失败不影响本轮：消息已经写进去了，下一轮读出来时调用方仍按同一预算处理。</li>
+      </ul>
+      <p class="src">出处：<code>backend/app/agent/memory.py:78-96</code>、<code>backend/app/settings.py:134</code></p>
+    </div>
+
+    <div class="fnode accent-model">
+      <span class="fnum">5</span>
+      <h4>隔离：会话不跨登录，用途靠命名空间区分 <span class="loc">agent/memory.py::_key · analytics/service.py::_memory_session</span></h4>
+      <ul>
+        <li><b>按会话隔离</b>：<code>session_id</code> 取自登录凭证（<code>sid</code>），每次登录新签发——<b>会话不跨登录延续</b>，「重新登录」是唯一结束会话的方式。</li>
+        <li><b>按身份隔离</b>：客服链路用凭证里的 <code>sid</code> 直接做键；客户只能读到自己的会话，这一层由鉴权保证。</li>
+        <li><b>按用途命名空间隔离</b>：内部侧同一员工可能在多个链路提问，键里带上命名空间与员工号——
+          <div class="formula">analytics:{employee_id}:{session_id}　|　risk_query:{employee_id}:{session_id}</div>
+          同库存储、靠键前缀区分，<b>数据分析与风控问答的多轮上下文互不串味</b>；客服链路是裸 <code>session_id</code>（客户身份域本就独立）。</li>
+        <li><code>session_id</code> 由请求体给出时优先于凭证 <code>sid</code>（内部侧可显式指定会话），缺省则回落到凭证。</li>
+      </ul>
+      <p class="src">出处：<code>backend/app/analytics/service.py:42-48</code>、<code>app/agent/risk_query.py:33</code>、<code>app/api/analytics.py:42</code>、<code>app/auth/service.py</code></p>
+    </div>
+
+    <div class="fnode accent-perm" data-tags="degrade">
+      <span class="fnum">6</span>
+      <h4>降级：读返空、写跳过，本轮照常作答 <span class="loc">agent/memory.py · agent/graph.py::run_customer_service_turn</span></h4>
+      <ul>
+        <li><b>读降级</b>：<code>RedisError</code> → 返回空列表 + <code>degraded=True</code>，调用方写一条降级留痕，然后照常跑图——这一轮退化成「没有上下文的一轮」，答案仍然可用。</li>
+        <li><b>写降级</b>：<code>append_turn</code> 返回 <code>False</code>，静默跳过，不抛错、不回滚回答。</li>
+        <li><b>一轮最多留一条</b>：写回失败时，只在<b>读时没有记过降级</b>的前提下补记一条；两条都失败也只留一条，避免一轮刷两行。</li>
+        <li><b>超时是必须的</b>：Redis 客户端连与读写都设超时——没有超时，一次「连得上但不应答」的抖动会把请求线程一直吊着，降级路径永远触发不了。</li>
+      </ul>
+      <div class="gates">
+        <span class="tag tag-perm">缓存不可用 → 无上下文的单轮回答</span>
+        <span class="tag tag-perm">降级留痕 cache / unavailable</span>
+      </div>
+      <p class="src">出处：<code>backend/app/agent/memory.py:45-75</code>、<code>app/agent/graph.py:618-627,655-664</code>、<code>app/redis_client.py</code>、<code>app/degradation.py</code></p>
+    </div>
+
+    <div class="fnode accent-model">
+      <span class="fnum">7</span>
+      <h4>回放模式：不连 Redis，用进程级替身 <span class="loc">app/redis_client.py · app/replay/local_cache.py</span></h4>
+      <p>演示回放（<code>demo_replay</code>）下不发起任何网络调用：登录会话白名单、短期记忆、画像缓存共用同一个<b>进程级单例</b>内存替身。</p>
+      <ul>
+        <li>必须是单例——每个请求各发一个新实例的话，登录时写进的会话在下一个请求就读不到了。</li>
+        <li>替身实现各消费者用到的<b>方法子集</b>且<b>从不抛 <code>RedisError</code></b>：回放态下缓存永远可用，降级路径不会被触发。</li>
+      </ul>
+      <p class="src">出处：<code>backend/app/redis_client.py:35-54</code>（ADR-0008）</p>
+    </div>
+
+  </div>
+
+  <div class="note">
+    <h5>键与配置一览</h5>
+    <table>
+      <thead><tr><th style="width:230px">项</th><th>值 / 说明</th></tr></thead>
+      <tbody>
+        <tr><td>键</td><td><code>agent:memory:{session_id}</code>（客服）· <code>agent:memory:analytics:{employee_id}:{session_id}</code>（数据分析）· <code>agent:memory:risk_query:{employee_id}:{session_id}</code>（风控问答）</td></tr>
+        <tr><td>结构</td><td>Redis List，元素为 <code>{"role","content"}</code> 的 JSON</td></tr>
+        <tr><td>写入方式</td><td><code>RPUSH</code> 追加 + <code>EXPIRE</code> 滑动续期 + 超预算 <code>LTRIM</code></td></tr>
+        <tr><td>TTL</td><td><code>chat_memory_ttl_minutes = 30</code>（每次追加重置为整窗）</td></tr>
+        <tr><td>token 预算</td><td><code>chat_memory_token_budget = 2000</code>（汉字 ≈ 1 token）</td></tr>
+        <tr><td>降级语义</td><td>读 → 空列表；写 → 静默跳过；两者都不抛错</td></tr>
+      </tbody>
+    </table>
+    <h5 style="margin-top:12px">谁在用短期记忆</h5>
+    <ul>
+      <li><b>智能客服 Agent</b>（<code>agent/graph.py::run_customer_service_turn</code>）：读 → 跑图 → 写回 user / assistant 两条 → 写归档</li>
+      <li><b>数据分析 Agent / 风控监测问答</b>（<code>analytics/service.py::run_query</code>）：读历史问题用于视图检索与 SQL 生成，成功后写回</li>
+    </ul>
+    <p class="src">出处：<code>backend/app/settings.py:133-134</code> · <code>docs/system-architecture.md</code>（Redis 键与 TTL 表）· ADR-0012</p>
+  </div>
+</section>
+
+<!-- ================= 二 中期记忆 ================= -->
+<section id="mid">
+  <div class="sec-head"><span class="sec-num">SECTION 02</span><h2>中期记忆：跨会话存在，但会被业务改写</h2></div>
+  <p class="sec-sub">中期记忆有明确的写入方与权威来源，因此：<b>权威在 MySQL，缓存在 Redis 只做加速</b>。读缓存失败不是错误——直连数据库，恢复后自动回填（Cache-Aside）。</p>
+
+  <div class="flow">
+
+    <div class="fnode accent-keyword">
+      <span class="fnum">1</span>
+      <h4>客户画像 · 读路径：先缓存，未命中就回源并回填 <span class="loc">customer_profile/service.py::get_internal_profile</span></h4>
+      <div class="formula">GET <span class="hl">customer_profile:{customer_id}</span> → 命中即返回；未命中 / 降级 → 读 MySQL → 尝试回填（TTL 300 秒）</div>
+      <ul>
+        <li>缓存值是<b>整份画像快照</b>的 JSON；<code>_cache_get</code> 返回 <code>(snapshot, degraded)</code>，把「没缓存」与「缓存坏了」分开——前者正常，后者要留痕。</li>
+        <li>回填失败不影响这次读取：缓存是优化，不是依赖。</li>
+      </ul>
+      <p class="src">出处：<code>backend/app/customer_profile/service.py:37-92,308</code></p>
+    </div>
+
+    <div class="fnode accent-keyword">
+      <span class="fnum">2</span>
+      <h4>客户画像 · 失效点：写画像后、置信度校准后 <span class="loc">service.py::_finish_write · calibration.py</span></h4>
+      <ul>
+        <li><b>每次写标签 / 手工修正后</b>：提交事务，然后按客户删缓存——先落库再失效，读方最差拿到 300 秒内的旧快照，不会拿到未提交的脏数据。</li>
+        <li><b>离线置信度校准后</b>：按客户逐个失效，让下一次读重新计算置信度。</li>
+        <li>失效本身可能失败：此时旧快照会留到 TTL 自然过期——<b>属于缓存降级，要留痕以便统计</b>。</li>
+      </ul>
+      <p class="src">出处：<code>backend/app/customer_profile/service.py:95-101,128-138</code>、<code>customer_profile/calibration.py</code></p>
+    </div>
+
+    <div class="fnode accent-model">
+      <span class="fnum">3</span>
+      <h4>置信度不是一层记忆，是画像标签上的派生数值 <span class="loc">service.py::compute_confidence · rerank.py::MemoryUnit</span></h4>
+      <ul>
+        <li><b>不单独存储</b>：读取时由来源、被证据确认次数、冲突次数与观测时间<b>现算</b>，时间基准显式传入（ADR-0011「清理必须带显式的 now」）。</li>
+        <li><b>标签参与重排</b>：每个标签被适配成一个记忆单元 <code>MemoryUnit</code>，排序因子含语义相似度、时间新鲜度、历史准确率、基础置信与冲突惩罚——「这条记忆该不该被采信」是一次打分，不是一次查表。</li>
+        <li>冲突不被静默覆盖：相反证据会写进冲突记录表，并在打分里形成惩罚。</li>
+      </ul>
+      <p class="src">出处：<code>backend/app/customer_profile/rerank.py</code>、<code>customer_profile/service.py</code>（<code>fin_customer_profile</code> / <code>fin_profile_tag</code> / <code>fin_profile_tag_conflict</code>）</p>
+    </div>
+
+    <div class="fnode accent-keyword">
+      <span class="fnum">4</span>
+      <h4>工单状态：直接查库，不做缓存 <span class="loc">work_order/ · biz_work_order</span></h4>
+      <p>工单是「会被流程持续改写」的权威事实：状态机每流转一次就落一行留痕。这里<b>不引入缓存</b>——缓存只能加速读，却要为状态流转的可见性承担失效责任，得不偿失。</p>
+      <p>ADR-0012 留了口子（「热点可加缓存」），但代码目前<b>没有加</b>：工单页与风控处置直接读表。</p>
+      <p class="src">出处：<code>backend/app/work_order/</code>、<code>app/api/work_orders.py</code>、ADR-0012</p>
+    </div>
+
+    <div class="fnode accent-perm" data-tags="degrade">
+      <span class="fnum">5</span>
+      <h4>降级：画像直连数据库，缓存坏了也能读 <span class="loc">service.py::get_internal_profile</span></h4>
+      <ul>
+        <li>缓存不可用 / 超时 → <b>直连 MySQL 读画像</b>，结果照常返回，同时写一条 <code>cache / unavailable</code> 降级留痕。</li>
+        <li>缓存恢复后下一次读自动回填，<b>不需要人工干预</b>。</li>
+        <li>结论：缓存抖动不会让「客户画像」这个能力消失，只会让响应慢一点、降级统计多一条。</li>
+      </ul>
+      <div class="gates">
+        <span class="tag tag-perm">缓存不可用 → 直连 MySQL</span>
+        <span class="tag tag-perm">失效失败 → 旧快照留到 TTL</span>
+      </div>
+      <p class="src">出处：<code>backend/app/customer_profile/service.py:308-337</code>、<code>backend/tests/test_degradation_paths.py</code></p>
+    </div>
+
+  </div>
+</section>
+
+<!-- ================= 三 长期记忆 ================= -->
+<section id="long">
+  <div class="sec-head"><span class="sec-num">SECTION 03</span><h2>长期记忆：MySQL 为权威，其余都是投影</h2></div>
+  <p class="sec-sub">长期记忆长期稳定、由知识导入产生、对读方只读。因此它只有一个权威：<b>知识元数据（MySQL）</b>；向量、图谱、原始文档都是它的<b>投影读模型</b>——只读、单向、坏了全量重建。</p>
+
+  <table>
+    <thead>
+      <tr><th style="width:150px">落地</th><th>装什么</th><th style="width:200px">角色</th><th style="width:250px">坏了怎么办</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><span class="tag tag-graph">MySQL</span></td>
+        <td>知识元数据 <code>fin_knowledge_meta</code> + 分块镜像 <code>fin_knowledge_chunk</code></td>
+        <td><b>权威</b>：文档状态（processing / active / failed / expired）、有效期、分块正文</td>
+        <td>真实来源，不需要重建；分块镜像同时是关键词臂的语料（ADR-0014）</td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-vector">Milvus</span></td>
+        <td>分块向量（1024 维，COSINE 度量）</td>
+        <td><b>投影</b>：语义检索臂</td>
+        <td>维度不一致时删集合重建，按 MySQL 分块重新向量化</td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-graph">Neo4j</span></td>
+        <td>客户 / 产品 / 行业 / 风险等级 / 基金经理的关系网</td>
+        <td><b>投影读模型</b>：GraphRAG 多跳查询</td>
+        <td>全量重建（<code>rebuild_graph</code>）：清空命名空间后按 MySQL 当前状态重新生成</td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-navy">MinIO</span></td>
+        <td>原始文档字节（bucket <code>wealth-knowledge</code>，键 <code>knowledge/{knowledge_id}/{filename}</code>）</td>
+        <td><b>投影</b>：原文归档，供引用溯源</td>
+        <td>删除文档时打 <code>archived</code> 标签<b>归档而非物理删除</b></td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="flow">
+
+    <div class="fnode accent-graph">
+      <span class="fnum">1</span>
+      <h4>写入：一次入库，三处落地，失败整体回滚 <span class="loc">knowledge/service.py::_run_ingestion_pipeline</span></h4>
+      <p>员工上传知识文档后走四阶段流水线 <code>parse → chunk → embed → store</code>：MySQL 落元数据与分块镜像、Milvus 落向量、MinIO 落原文。<b>任一写入失败则三处一起回滚</b>（删对象、删向量、清镜像行），元数据置 <code>failed</code>；全部成功才置 <code>active</code>。</p>
+      <p>为什么强调这一点：投影与权威<b>不能各自为真</b>。半写入的投影比没有投影更危险——检索会命中一个权威不承认的分块。</p>
+      <p class="src">出处：<code>backend/app/knowledge/service.py</code>、<code>knowledge/vector_store.py</code>、<code>knowledge/object_store.py</code></p>
+    </div>
+
+    <div class="fnode accent-graph">
+      <span class="fnum">2</span>
+      <h4>读取：检索与多跳查询，只读不回写 <span class="loc">knowledge/service.py::search_chunks · knowledge_graph/graphrag.py</span></h4>
+      <ul>
+        <li><b>检索</b>：向量臂（Milvus）∥ 关键词臂（MySQL 分块镜像 BM25）→ RRF 融合 → 重排；命中后<b>回查 MySQL 元数据，仅 <code>active</code> 文档可返回</b>——权威说了算，投影只是候选来源。</li>
+        <li><b>多跳查询</b>：GraphRAG 用固定的六个查询工具读图谱，把事实写成句子掺进候选。<b>图谱是增强不是依赖</b>：查不到段落就按相似度结果继续，分数不打折。</li>
+      </ul>
+      <p class="src">出处：<code>backend/app/knowledge/service.py</code>、<code>app/knowledge_graph/</code>（详见同目录的《RAG 流程详解》）</p>
+    </div>
+
+    <div class="fnode accent-graph">
+      <span class="fnum">3</span>
+      <h4>重建：全量、幂等、有互斥与留痕 <span class="loc">knowledge_graph/service.py::rebuild · sync.py::rebuild_graph</span></h4>
+      <ul>
+        <li><b>唯一同步方式</b>：删光命名空间内全部节点与关系，再按 MySQL 当前状态重新生成；<b>幂等</b>，不做增量同步或变更捕获。</li>
+        <li><b>互斥</b>：重建期间不允许第二次重建；运行状态与结果落在 <code>biz_graph_sync_run</code>（running / success / failure）。</li>
+        <li><b>触发</b>：内部 API <code>POST /api/internal/graph/rebuild</code>（要求内部身份域，回放模式下明确拒绝），或命令行种子脚本 <code>scripts/seed_demo.py</code>。</li>
+      </ul>
+      <p class="src">出处：<code>backend/app/knowledge_graph/service.py:44</code>、<code>knowledge_graph/sync.py:284</code>、<code>app/api/graph.py</code>（ADR-0002）</p>
+    </div>
+
+    <div class="fnode accent-perm" data-tags="degrade">
+      <span class="fnum">4</span>
+      <h4>降级：投影缺席，权威仍在 <span class="loc">knowledge/hybrid.py · agent/graph.py</span></h4>
+      <ul>
+        <li><b>向量库超时 / 报错</b> → 关键词臂（MySQL 分块镜像）单独出结果，仍能给出带引用的回答——这正是分块镜像存在的理由（ADR-0014）。</li>
+        <li><b>图谱不可用</b> → 跳过图谱增强，按知识片段继续，<b>证据分一个都不打折</b>。</li>
+        <li><b>投影整体损坏</b> → 全量重建；因为权威是 MySQL，重建<b>不丢事实</b>，只丢重建期间的服务能力。</li>
+      </ul>
+      <div class="gates">
+        <span class="tag tag-perm">投影可缺席 · 权威不可缺席</span>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<!-- ================= 四 会话归档 ================= -->
+<section id="archive">
+  <div class="sec-head"><span class="sec-num">SECTION 04</span><h2>会话归档：不是第四层记忆</h2></div>
+  <p class="sec-sub">会话归档（<code>conversation_archive</code>）永久保存、脱敏后只读，<b>不参与上下文组装</b>。它回答的是「当时发生了什么」，不是「系统现在记得什么」——把它当成一层记忆，就会在「为什么这句话没进上下文」与「归档里明明有」之间产生混淆。</p>
+
+  <table>
+    <thead>
+      <tr><th style="width:170px">对照</th><th>短期记忆</th><th>会话归档</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>生命周期</td><td>滑动过期，30 分钟不活跃即消失</td><td><b>永久</b></td></tr>
+      <tr><td>是否进上下文</td><td><b>是</b>——它就是上下文</td><td><b>否</b>——只读回看与举证</td></tr>
+      <tr><td>写入时机</td><td>本轮结束后追加两条消息</td><td>本轮结束<b>即刻落库</b>，不等会话断开</td></tr>
+      <tr><td>内容</td><td>角色 + 文本</td><td>使用者、Agent、问题、最终答案、引用、工具调用、内容分类、结果表</td></tr>
+      <tr><td>脱敏</td><td>不脱敏（只在 Redis 内、按会话隔离）</td><td><b>落库前脱敏</b>（PII 正则 + 真实姓名）</td></tr>
+      <tr><td>为何不合并</td><td colspan="2">合并会同时失去两个特性：归档要长期可读，就必须脱敏；上下文要能引用原文，就不能被脱敏改写。二者是不同的用途，只能各存一份。</td></tr>
+    </tbody>
+  </table>
+
+  <div class="flow">
+
+    <div class="fnode accent-model">
+      <span class="fnum">1</span>
+      <h4>即刻落库：每轮两行，进程中途退出也不丢 <span class="loc">agent/archive.py::record_turn</span></h4>
+      <p>一轮问答结束时立即提交：<b>一行提问（role=user）、一行回答（role=assistant）</b>，而不是等会话断开再批量写。工具调用记录、引用文档与内容分类随回答那一行留下。</p>
+      <p>数据查询的那一轮还多留一份<b>客户看到的结果表</b>（ADR-0028）：回看因此能重绘出与实时同一张表。</p>
+      <p class="src">出处：<code>backend/app/agent/archive.py:76-124</code>、<code>app/agent/graph.py:666-679</code></p>
+    </div>
+
+    <div class="fnode accent-perm">
+      <span class="fnum">2</span>
+      <h4>落库前脱敏：三类正则 + 真实姓名 <span class="loc">archive.py::mask_pii</span></h4>
+      <table style="margin-top:10px">
+        <thead><tr><th style="width:180px">形态</th><th>处理方式</th></tr></thead>
+        <tbody>
+          <tr><td>身份证号（18 位）</td><td>保留前 6 位（地区码）+ 后 4 位，中间打码</td></tr>
+          <tr><td>银行卡号（16–19 位）</td><td>只保留后 4 位，其余打码</td></tr>
+          <tr><td>手机号（1 开头 11 位）</td><td>保留前 3 + 后 4，中间打码</td></tr>
+          <tr><td>真实姓名</td><td>按当前客户姓名做字面替换：首字保留 + 其余打码</td></tr>
+        </tbody>
+      </table>
+      <ul>
+        <li><b>结果表不过脱敏</b>：三条正则认的是自然语言文本里的 PII 形态，而结果表的字段面是视图定义的<b>封闭列集合</b>、值就是客户可见视图里的值——对账号再打一次码，只会让回看与实时不是同一张表。</li>
+        <li>文本脱敏是<b>形态识别</b>，不是语义理解：18 位身份证与 18 位银行卡在字符上无法区分，统一按身份证处理（保留地区码）——这是可接受的折衷，脱敏文本没有字段语义可供消歧。</li>
+      </ul>
+      <p class="src">出处：<code>backend/app/agent/archive.py:35-73</code>、ADR-0028</p>
+    </div>
+
+    <div class="fnode accent-navy" style="border-left:4px solid var(--navy)">
+      <span class="fnum">3</span>
+      <h4>读取：两个身份域，两套可见范围 <span class="loc">api/conversations.py · api/customer_conversations.py</span></h4>
+      <div class="arms">
+        <div class="arm arm-vector">
+          <h5><span class="tag tag-navy">内部端</span><code>/api/internal/conversations</code></h5>
+          <ul>
+            <li>要求内部员工身份；列表可按会话标识或客户标识筛选</li>
+            <li><b>客户经理只见自己名下客户的会话</b>，与工单、预警同一口径</li>
+            <li>返回工具调用与内容分类等合规字段</li>
+          </ul>
+        </div>
+        <div class="arm arm-keyword">
+          <h5><span class="tag tag-navy">客户端</span><code>/api/customer/conversations</code></h5>
+          <ul>
+            <li>要求客户身份；列表<b>排除当前会话</b>（当前会话在对话页可见，历史只收已结束的登录会话）</li>
+            <li>详情按 <code>session_id + user_id</code> 过滤：别人的会话即使知道标识也查不到，与「不存在」同等待遇（404，不暴露存在性）</li>
+            <li>只给 role / 文本 / 引用 / 时间 / 结果表——工具调用与内容分类是内部字段</li>
+          </ul>
+        </div>
+      </div>
+      <p><b>分页口径</b>：列表按会话分组后分页（ADR-0024），<code>total</code> 是「<b>多少场会话</b>」而不是归档行数；排序键是最后一次发言时间倒序 + 会话标识兜底——发言时间是秒精度，同一秒结束的两场会话若不分先后，翻页时会在两页之间来回跳。</p>
+      <p class="src">出处：<code>backend/app/api/conversations.py</code>、<code>api/customer_conversations.py</code>、<code>agent/archive.py</code>（ADR-0015 / ADR-0024）</p>
+    </div>
+
+    <div class="fnode accent-model">
+      <span class="fnum">4</span>
+      <h4>界面：客户侧有历史抽屉，内部侧只有 API <span class="loc">apps/customer/src/chat/ChatHistoryDrawer.vue</span></h4>
+      <p>客户在对话页可以打开「历史会话」抽屉：列表取会话标题（该会话<b>第一条客户提问</b>，批量查询取标题，避免一页历史退化成每场会话一次查询）、消息数与起止时间；点进去是只读流水。</p>
+      <p>内部端归档 API 已具备（供合规与留痕追溯），<b>但没有对应的前端页面</b>——内部界面上的「历史」是数据分析的查询历史，与归档不是同一个能力。</p>
+      <p class="src">出处：<code>apps/customer/src/chat/ChatHistoryDrawer.vue</code>、<code>apps/customer/src/chat/history.ts</code></p>
+    </div>
+
+  </div>
+</section>
+
+<!-- ================= 五 降级总表 ================= -->
+<section id="degrade">
+  <div class="sec-head"><span class="sec-num">SECTION 05</span><h2>降级路径总表</h2></div>
+  <p class="sec-sub">降级不是失败：外部依赖不可用时改走备用路径，<b>响应仍是成功响应</b>，只是依据更弱、上下文更少。每一处降级都留下可统计的痕迹（<code>biz_degradation_trace</code>）。</p>
+
+  <table>
+    <thead>
+      <tr><th style="width:230px">位置</th><th>依赖不可用时</th><th style="width:230px">后果</th><th style="width:180px">留痕</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><span class="tag tag-vector">短期记忆 · 读</span><br><code>memory.read_history</code></td>
+        <td>返回空列表 + <code>degraded=True</code></td>
+        <td>本轮退化成「无上下文的单轮回答」，<b>答案照常给出</b></td>
+        <td><code>cache / unavailable</code></td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-vector">短期记忆 · 写 / 截断</span><br><code>memory.append_turn</code></td>
+        <td>返回 <code>False</code>，静默跳过</td>
+        <td>本轮答案不受影响；后续轮次少一段上下文</td>
+        <td>仅当读时未记过时补一条</td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-keyword">画像缓存 · 读</span><br><code>get_internal_profile</code></td>
+        <td>直连 MySQL 读画像</td>
+        <td>结果照常返回，只是慢一点；缓存恢复后自动回填</td>
+        <td><code>cache / unavailable</code></td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-keyword">画像缓存 · 失效</span><br><code>invalidate_profile_cache</code></td>
+        <td>删除失败</td>
+        <td>读方可能拿到旧快照，直到 TTL（300 秒）自然过期</td>
+        <td><code>cache / unavailable</code></td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-vector">向量检索臂</span></td>
+        <td>超时 / 报错</td>
+        <td>关键词臂（MySQL 分块镜像 BM25）单独出结果，仍有引用</td>
+        <td>检索侧降级</td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-graph">知识图谱</span></td>
+        <td>查询不可用 / 无实体命中</td>
+        <td>跳过图谱增强，按知识片段继续，<b>证据分不打折</b></td>
+        <td>图谱降级标记</td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-model">回放模式</span><br><code>redis_client()</code></td>
+        <td>不连 Redis，改用进程级内存替身</td>
+        <td>替身从不抛 <code>RedisError</code>，因此<b>回放态下缓存永远可用、降级路径不触发</b></td>
+        <td>—（不发外部调用）</td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-navy">会话归档</span><br><code>archive.record_turn</code></td>
+        <td>—（与缓存无关，直接落 MySQL）</td>
+        <td>文档：本轮对话不会因为缓存抖动而丢掉审计级留痕</td>
+        <td>—</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="note">
+    <h5>为什么缓存降级不能只做一半</h5>
+    <ul>
+      <li><b>超时必须显式设置</b>：连得上但不应答的抖动如果没超时，线程会被一直吊着，「缓存不可用就直连数据库」这条路径永远触发不了——因为永远等不到那个异常。</li>
+      <li><b>降级要可统计</b>：留痕不为了给用户看，而是让「有多少次协作其实没发出去 / 有多少轮对话其实没有上下文」成为可查询的数字（内部有降级统计接口）。</li>
+      <li><b>降级不改结论</b>：上下文缺失、图谱缺席都不改变「有没有依据」这个合规判断——那由证据分闸门单独判定。</li>
+    </ul>
+    <p class="src">出处：<code>backend/app/degradation.py</code>、<code>app/redis_client.py</code>、<code>backend/tests/test_degradation_paths.py</code></p>
+  </div>
+</section>
+
+<!-- ================= 六 出处 ================= -->
+<section id="source">
+  <div class="sec-head"><span class="sec-num">SECTION 06</span><h2>代码出处索引</h2></div>
+  <table>
+    <thead><tr><th style="width:260px">环节</th><th>代码位置</th></tr></thead>
+    <tbody>
+      <tr><td>短期记忆（读 / 写 / 截断 / 降级）</td><td><code>backend/app/agent/memory.py</code>（<code>read_history</code> · <code>get_history</code> · <code>append_turn</code> · <code>_truncate_to_budget</code>）</td></tr>
+      <tr><td>短期记忆配置</td><td><code>backend/app/settings.py:133-134</code>（<code>chat_memory_ttl_minutes = 30</code> · <code>chat_memory_token_budget = 2000</code>）</td></tr>
+      <tr><td>客服链路的记忆读写与留痕</td><td><code>backend/app/agent/graph.py:606-679</code>（<code>run_customer_service_turn</code>）</td></tr>
+      <tr><td>数据分析 / 风控链路的记忆命名空间</td><td><code>backend/app/analytics/service.py:42-48,78-154</code> · <code>app/agent/risk_query.py:33</code></td></tr>
+      <tr><td>Token 口径（与分块共用）</td><td><code>backend/app/knowledge/tokenizer.py::count_tokens</code></td></tr>
+      <tr><td>Redis 客户端与回放替身</td><td><code>backend/app/redis_client.py</code> · <code>app/replay/local_cache.py</code></td></tr>
+      <tr><td>中期记忆：画像 Cache-Aside</td><td><code>backend/app/customer_profile/service.py</code>（<code>_cache_get</code> · <code>_cache_set</code> · <code>invalidate_profile_cache</code> · <code>get_internal_profile</code>）· <code>customer_profile/calibration.py</code></td></tr>
+      <tr><td>中期记忆：标签重排（记忆单元）</td><td><code>backend/app/customer_profile/rerank.py</code>（<code>MemoryUnit</code>）</td></tr>
+      <tr><td>中期记忆：工单（无缓存）</td><td><code>backend/app/work_order/</code> · <code>app/api/work_orders.py</code></td></tr>
+      <tr><td>长期记忆：入库与投影写入</td><td><code>backend/app/knowledge/service.py</code> · <code>knowledge/vector_store.py</code>（Milvus）· <code>knowledge/object_store.py</code>（MinIO）</td></tr>
+      <tr><td>长期记忆：图谱全量重建</td><td><code>backend/app/knowledge_graph/service.py::rebuild</code> · <code>knowledge_graph/sync.py::rebuild_graph</code> · <code>app/api/graph.py</code></td></tr>
+      <tr><td>会话归档</td><td><code>backend/app/agent/archive.py</code>（<code>record_turn</code> · <code>mask_pii</code> · <code>list_sessions</code> · <code>get_session</code> · <code>list_customer_sessions</code> · <code>get_customer_session</code>）</td></tr>
+      <tr><td>归档对外接口</td><td><code>backend/app/api/conversations.py</code>（内部）· <code>api/customer_conversations.py</code>（客户）</td></tr>
+      <tr><td>归档前端（客户侧历史抽屉）</td><td><code>apps/customer/src/chat/ChatHistoryDrawer.vue</code> · <code>chat/history.ts</code></td></tr>
+      <tr><td>降级留痕</td><td><code>backend/app/degradation.py</code>（<code>DEPENDENCY_CACHE</code> · <code>REASON_UNAVAILABLE</code>）</td></tr>
+      <tr><td>测试</td><td><code>backend/tests/test_short_term_memory.py</code>（滑动过期 · 超长对话只留最新 · HTTP 链路不超预算）· <code>tests/test_degradation_paths.py</code>（缓存坏时画像仍可读并回填 · 缓存抖动下本轮仍作答）</td></tr>
+      <tr><td>架构决定</td><td><code>docs/adr/0012</code>（三层记忆的分层判据）· <code>0002</code>（Neo4j 是 MySQL 的投影）· <code>0008</code>（回放模式）· <code>0011</code>（清理显式 now）· <code>0014</code>（关键词臂镜像分块）· <code>0015</code>（客户历史复用会话归档）· <code>0024</code>（统一的 offset 分页）· <code>0028</code>（客户数据回答携带结果表）</td></tr>
+      <tr><td>术语</td><td><code>CONTEXT.md</code>（会话 · 历史记录 · 客户画像 · 降级 · 全量重建）· <code>docs/system-architecture.md</code>（Redis 键与 TTL 一览）</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<footer>
+  <p>智能财富管家系统 · Memory（记忆）使用详解 —— 本文件由代码阅读归纳而成，术语以 <code>CONTEXT.md</code> 为准，架构决定以 <code>docs/adr/</code> 为准（分层判据见 ADR-0012）。文中数值均取自代码常量：<code>chat_memory_ttl_minutes = 30</code>、<code>chat_memory_token_budget = 2000</code>、画像缓存 TTL <code>300</code> 秒、Redis 读写超时 <code>2.0</code> 秒。生成于 2026-09-29。供答辩展示使用。</p>
+</footer>
+
+</main>
+</div>
+
+<script>
+(function(){
+  var buttons = document.querySelectorAll('.lens-btns button');
+  buttons.forEach(function(btn){
+    btn.addEventListener('click', function(){
+      document.body.dataset.lens = btn.dataset.lens;
+      buttons.forEach(function(b){ b.classList.toggle('active', b === btn); });
+    });
+  });
+
+  if (!('IntersectionObserver' in window) ||
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    return;
+  }
+  var targets = document.querySelectorAll('.fnode, .card, .num-item, .stat');
+  targets.forEach(function(el){ el.classList.add('reveal'); });
+  var io = new IntersectionObserver(function(entries){
+    entries.forEach(function(entry){
+      if (entry.isIntersecting) {
+        entry.target.classList.add('in');
+        io.unobserve(entry.target);
+      }
+    });
+  }, { threshold: 0.08 });
+  targets.forEach(function(el){ io.observe(el); });
+})();
+</script>
+</body>
+</html>

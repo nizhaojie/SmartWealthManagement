@@ -6,7 +6,7 @@ import CustomerGraphPanel from "../graph/CustomerGraphPanel.vue";
 import AllocationComparisonChart from "./AllocationComparisonChart.vue";
 import ProfileHistoryPanel from "./ProfileHistoryPanel.vue";
 import ProfileTagsPanel from "./ProfileTagsPanel.vue";
-import { profileWarnings, targetAllocationOf } from "./profileView";
+import { profileWarnings, riskLevelOf, targetAllocationOf } from "./profileView";
 import type { CustomerProfileView, Holding } from "./types";
 
 // 画像主体：档案头、警示、熔断与评级、两张图，再把标签与历史交给下层两块。
@@ -29,6 +29,11 @@ const emit = defineEmits<{
 }>();
 
 const warnings = computed(() => profileWarnings(props.profile, props.riskValidUntil));
+
+// 大字说的是**风险承受等级**（画像标签），不是四维度研判算出来的那个等级：研判的分数
+// 与评测结论互为印证，两者不同是常态。把研判的等级当成承受等级挂在这里，顾问会按一个
+// 系统并不执行的刻度去理解适当性（适当性按的是最近一次评测的结论）。
+const riskLevel = computed(() => riskLevelOf(props.profile.tags));
 
 const targetAllocation = computed(() => targetAllocationOf(props.profile.tags));
 </script>
@@ -62,9 +67,20 @@ const targetAllocation = computed(() => targetAllocationOf(props.profile.tags));
         </div>
       </div>
 
-      <p v-else class="grade" data-testid="risk-grade">
-        {{ gradeCaption(profile.judgement.risk_level) }}
-      </p>
+      <div v-else class="grade-block">
+        <p class="grade__caption">风险承受等级</p>
+        <p class="grade" data-testid="risk-grade">{{ gradeCaption(riskLevel) }}</p>
+        <p
+          v-if="profile.judgement.risk_level"
+          class="grade__judgement"
+          data-testid="judgement-grade"
+        >
+          四维度研判 {{ gradeCaption(profile.judgement.risk_level) }}
+          <template v-if="profile.judgement.weighted_score !== null">
+            （加权 {{ profile.judgement.weighted_score }}）
+          </template>
+        </p>
+      </div>
     </PanelCard>
 
     <AllocationComparisonChart
@@ -183,10 +199,26 @@ const targetAllocation = computed(() => targetAllocationOf(props.profile.tags));
   line-height: 1.7;
 }
 
-.grade {
+.grade__caption {
   margin: var(--wm-space-4) 0 0;
+  color: var(--wm-text-muted);
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+}
+
+.grade {
+  margin: var(--wm-space-1) 0 0;
   color: var(--wm-text-primary);
   font-size: 1.6rem;
   font-weight: 700;
+}
+
+.grade__judgement {
+  margin: var(--wm-space-2) 0 0;
+  color: var(--wm-text-muted);
+  font-size: 0.8rem;
+  line-height: 1.7;
+  font-variant-numeric: tabular-nums;
 }
 </style>

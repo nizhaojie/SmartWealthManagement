@@ -62,6 +62,18 @@ export function parseCorrectionValue(raw: string, original: unknown): unknown {
   return trimmed;
 }
 
+/**
+ * 画像里的风险承受等级：标签 `risk_level` 的值。
+ *
+ * 它与 `judgement.risk_level` 不是一个东西——后者是四维度加权研判算出来的等级，用来与
+ * 评测结论互为印证，且几乎必然与它不同（王守成：标签 C5，研判加权 59.83 → C3）。界面上
+ * 说「C5 激进型」时说的是这个标签：它是适当性匹配的依据，也是历次评测写进来的结论。
+ */
+export function riskLevelOf(tags: readonly ProfileTag[]): string | null {
+  const value = tags.find((item) => item.key === "risk_level")?.value;
+  return typeof value === "string" && value ? value : null;
+}
+
 export function targetAllocationOf(tags: readonly ProfileTag[]): Record<string, number> | null {
   const tag = tags.find((item) => item.key === "target_allocation");
   if (!tag || tag.value === null || typeof tag.value !== "object") return null;

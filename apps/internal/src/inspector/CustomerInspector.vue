@@ -12,6 +12,7 @@ import {
 import { listAllCustomers } from "../customers/api";
 import type { CustomerListItem } from "../customers/types";
 import { getCustomerAssets, getCustomerProfile } from "../profile/api";
+import { riskLevelOf } from "../profile/profileView";
 import type { CustomerAssets, CustomerProfileView, ProfileTag } from "../profile/types";
 import { listAlerts } from "../risk/api";
 import { levelTagType } from "../risk/riskView";
@@ -124,6 +125,9 @@ const customerLevel = computed(
 );
 
 const tags = computed<ProfileTag[]>(() => profile.value?.tags ?? []);
+
+/** 等级大字说的是客户的**风险承受等级**，与画像主体的那一处同一个口径。 */
+const riskLevel = computed(() => riskLevelOf(tags.value));
 const warnings = computed(() => profile.value?.judgement.reasons.map((item) => item.message) ?? []);
 
 /** 综合置信度：接口没有单一字段，取各标签置信度的均值——是聚合计出，不是编造。 */
@@ -202,8 +206,16 @@ function confidenceAccent(tag: ProfileTag): Accent {
 
       <InspectorBlock title="风险画像" :state="profileState">
         <template v-if="profile">
+          <p class="grade__caption">风险承受等级</p>
           <p class="grade__level" data-testid="inspector-risk-level">
-            {{ gradeCaption(profile.judgement.risk_level) }}
+            {{ gradeCaption(riskLevel) }}
+          </p>
+          <p
+            v-if="profile.judgement.risk_level"
+            class="grade__judgement"
+            data-testid="inspector-judgement"
+          >
+            四维度研判 {{ gradeCaption(profile.judgement.risk_level) }}
           </p>
           <p
             v-if="overallConfidence !== null"
@@ -344,11 +356,26 @@ function confidenceAccent(tag: ProfileTag): Accent {
   font-variant-numeric: tabular-nums;
 }
 
-.grade__level {
+.grade__caption {
   margin: 0;
+  color: var(--wm-text-muted);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+}
+
+.grade__level {
+  margin: var(--wm-space-1) 0 0;
   color: var(--wm-text-primary);
   font-size: 1.3rem;
   font-weight: 700;
+}
+
+.grade__judgement {
+  margin: var(--wm-space-1) 0 0;
+  color: var(--wm-text-muted);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
 }
 
 .grade__confidence {

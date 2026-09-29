@@ -71,6 +71,13 @@ def _get_history(client: TestClient, token: str, session_id: str):
     )
 
 
+def _get_current(client: TestClient, token: str):
+    return client.get(
+        "/api/customer/conversations/current",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+
 def test_customer_lists_own_history_excluding_current_session(chat_client):
     token1, sid1, user1 = _customer_login(chat_client, CUSTOMER_USERNAME)
     _chat(chat_client, token1, "第一场的第一句提问")
@@ -152,9 +159,63 @@ def test_customer_cannot_read_foreign_or_unknown_session(chat_client):
     assert _get_history(chat_client, token_b, "no-such-session").status_code == 404
 
 
+def test_customer_reads_back_current_session_after_reload(chat_client):
+    """刷新页面丢掉前端内存态后，这一场会话要能读回来。
+
+    刷新不是重新登录：session_id 没变，因此刚才那两轮归档在「当前会话」名下——
+    历史列表排除它（它还没结束），列表之外的这条读法负责把它补回对话框。
+    """
+    token, sid, _ = _customer_login(chat_client, CUSTOMER_USERNAME)
+    _chat(chat_client, token, "刷新前的一句提问")
+
+    current = _get_current(chat_client, token)
+    assert current.status_code == 200
+    data = current.json()["data"]
+    assert data["session_id"] == sid
+
+    messages = data["messages"]
+    assert [message["role"] for message in messages] == ["user", "assistant"]
+    assert messages[0]["content"] == "刷新前的一句提问"
+    # 与历史详情同一套客户可见字段，不多不少。
+    for message in messages:
+        assert set(message.keys()) <= {"role", "content", "citations", "created_at", "data"}
+    assert isinstance(messages[1]["citations"], list)
+    assert messages[1]["data"] is None
+
+    # 同一场会话仍被历史列表排除：两条读法各管一段，不重叠。
+    items = _list_history(chat_client, token).json()["data"]["items"]
+    assert sid not in {item["session_id"] for item in items}
+
+
+def test_current_session_is_empty_before_the_first_question(chat_client):
+    """刚登录还没说过话：空列表，不是 404——「没有对话可补」是正常状态，不是错误。"""
+    token, sid, _ = _customer_login(chat_client, CUSTOMER_USERNAME)
+
+    current = _get_current(chat_client, token)
+    assert current.status_code == 200
+    data = current.json()["data"]
+    assert data["session_id"] == sid
+    assert data["messages"] == []
+
+
+def test_current_session_is_scoped_to_the_credential(chat_client):
+    """当前会话由凭证里的 session_id 决定：别的客户读自己的，读不到别人那一场。"""
+    token_a, _, _ = _customer_login(chat_client, CUSTOMER_USERNAME)
+    _chat(chat_client, token_a, "A 当前会话里的提问")
+
+    token_b, sid_b, _ = _customer_login(chat_client, OTHER_CUSTOMER_USERNAME)
+    current_b = _get_current(chat_client, token_b)
+    assert current_b.status_code == 200
+    data_b = current_b.json()["data"]
+    assert data_b["session_id"] == sid_b
+    # B 还没说过话：A 的那场不能漏过来。
+    assert data_b["messages"] == []
+
+
 def test_customer_history_endpoints_require_customer_identity(chat_client):
     # 未认证。
     assert chat_client.get("/api/customer/conversations").status_code == 401
+    assert chat_client.get("/api/customer/conversations/current").status_code == 401
 
     # 内部员工凭证在客户端点上无效（身份域隔离，ADR-0009 护栏 2）。
     login = chat_client.post(
@@ -162,8 +223,6 @@ def test_customer_history_endpoints_require_customer_identity(chat_client):
         json={"username": ADVISOR_USERNAME, "password": SEEDED_PASSWORD},
     )
     internal_token = login.json()["data"]["access_token"]
-    response = chat_client.get(
-        "/api/customer/conversations",
-        headers={"Authorization": f"Bearer {internal_token}"},
-    )
-    assert response.status_code == 403
+    for path in ("/api/customer/conversations", "/api/customer/conversations/current"):
+        response = chat_client.get(path, headers={"Authorization": f"Bearer {internal_token}"})
+        assert response.status_code == 403

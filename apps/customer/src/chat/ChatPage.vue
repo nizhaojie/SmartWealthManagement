@@ -8,6 +8,7 @@ import DataAnswerTable from "./DataAnswerTable.vue";
 import { streamChatMessage } from "./api";
 import ChatHistoryDrawer from "./ChatHistoryDrawer.vue";
 import { splitCitations } from "./citations";
+import { getCurrentConversation } from "./history";
 import { createTypewriter } from "./typewriter";
 
 // 断流时的兜底话术：客服链路的合规呈现面——客户必须始终有一条人工去路。
@@ -24,14 +25,50 @@ const chat = useChatStore();
 const historyOpen = ref(false);
 const draft = ref("");
 const sending = ref(false);
+// 正在把当前会话读回来。这期间不显示空态引导语——老客户看到「可以问我…」会以为对话被清空了。
+const restoring = ref(false);
 const openCitationKey = ref<string | null>(null);
 const listEl = ref<HTMLElement | null>(null);
 
 const hasMessages = computed(() => chat.messages.length > 0);
 
+/**
+ * 刷新页面后把这一场登录会话的对话读回来。
+ *
+ * 刷新丢掉的只有内存态：令牌与 session_id 都还在，所以后端眼里这一场会话并没有结束，
+ * 归档里的那几轮问答仍属于「当前会话」（历史记录只收已结束的登录会话，不负责这一段）。
+ * 同一次登录只读一次，切走再切回时不重来——那时列表里已经有现场。
+ */
+async function restoreCurrentSession(): Promise<void> {
+  // 补过一次就不再补；列表里已经有现场时也不补——现场可能比归档新（刚发出、尚未归档的
+  // 那一轮，或一次断流留下的兜底话术，它们都不进归档）。
+  if (chat.restored || chat.messages.length > 0) {
+    return;
+  }
+  restoring.value = true;
+  try {
+    const session = await getCurrentConversation();
+    chat.restore(
+      session.messages.map((message) => ({
+        role: message.role,
+        text: message.content,
+        citations: message.citations,
+        dataAnswer: message.data,
+        // 归档里没有「正在生成」这回事：读回来的都是定案消息。
+        done: true,
+      })),
+    );
+  } catch {
+    // 读不回来不等于对话不可用：这一场会话退化成「从现在开始」，客户照常能提问。
+  } finally {
+    restoring.value = false;
+  }
+}
+
 // 消息存在 store 里，切换模块再切回时组件重新挂载，DOM 从顶部重新渲染。
 // 进来就滚到底部，让客户直接看到最新一条，而不是停在最旧的历史上。
-onMounted(() => {
+onMounted(async () => {
+  await restoreCurrentSession();
   void scrollToBottom();
 });
 
@@ -118,7 +155,7 @@ async function send(): Promise<void> {
 
     <div class="chat__panel">
       <div ref="listEl" class="chat__list" data-testid="chat-list">
-        <p v-if="!hasMessages" class="chat__empty" data-testid="chat-empty">
+        <p v-if="!hasMessages && !restoring" class="chat__empty" data-testid="chat-empty">
           可以问我产品要素、政策条款或常见问题，例如「这支产品的最短持有期是多久」。
         </p>
 

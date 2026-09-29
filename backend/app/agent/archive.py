@@ -11,6 +11,10 @@
 
 历史会话列表按会话分组后分页（ADR-0024），`total` 因此是「多少场会话」。会话详情
 里的 `messages` 不分页：那是会话回看本身，一次会话的消息量与页长无关。
+
+**当前会话也在归档里**：每一轮即时落库这件事不区分「还在进行」与「已经结束」，只区分
+「已经发生过」。刷新页面丢掉的是前端的内存态（令牌与 session_id 都还在），这一场会话
+因此仍可按 session_id 读回——`get_current_customer_session` 就是这条读法。
 """
 
 import re
@@ -327,19 +331,27 @@ def list_customer_sessions(
     return paginated_response(items, total=total, params=params)
 
 
-def get_customer_session(db: Session, *, session_id: str, user_id: int) -> dict:
-    """客户本人查看一次会话的完整流水（只读回看）。
-
-    直接按 session_id + user_id 过滤：别人的会话即使知道 session_id 也查不到，
-    与「不存在」同等待遇（404），不暴露存在性。详情只给 role / content / citations /
-    时间 / ``data``——tool_calls 与 content_classification 是内部/合规字段，不进客户
-    可见视图。
+def _customer_visible_messages(rows: list[ConversationArchive]) -> list[dict]:
+    """归档行 → 客户可见视图里的消息（ADR-0015 决定 4）。
 
     ``data`` 是那一轮客户看到的结果表（ADR-0028）：它是**显式**加进客户可见视图的
     一项（要送达客户得显式加一次，ADR-0016 的手法），无表时为 ``null``。内部端的
     ``_serialize_message`` 不加它——客户经理视角要看数据另有授权面更宽的视图。
     """
-    rows = list(
+    return [
+        {
+            "role": row.role,
+            "content": row.content,
+            "citations": row.citations or [],
+            "created_at": row.create_time.isoformat(),
+            "data": row.answer_data,
+        }
+        for row in rows
+    ]
+
+
+def _customer_session_rows(db: Session, *, session_id: str, user_id: int):
+    return list(
         db.scalars(
             select(ConversationArchive)
             .where(
@@ -350,20 +362,37 @@ def get_customer_session(db: Session, *, session_id: str, user_id: int) -> dict:
             .order_by(ConversationArchive.id.asc())
         )
     )
+
+
+def get_customer_session(db: Session, *, session_id: str, user_id: int) -> dict:
+    """客户本人查看一次会话的完整流水（只读回看）。
+
+    直接按 session_id + user_id 过滤：别人的会话即使知道 session_id 也查不到，
+    与「不存在」同等待遇（404），不暴露存在性。详情只给 role / content / citations /
+    时间 / ``data``——tool_calls 与 content_classification 是内部/合规字段，不进客户
+    可见视图。
+    """
+    rows = _customer_session_rows(db, session_id=session_id, user_id=user_id)
     if not rows:
         raise AppError(404, SESSION_NOT_FOUND_MESSAGE)
     return {
         "session_id": session_id,
         "started_at": rows[0].create_time.isoformat(),
         "ended_at": rows[-1].create_time.isoformat(),
-        "messages": [
-            {
-                "role": row.role,
-                "content": row.content,
-                "citations": row.citations or [],
-                "created_at": row.create_time.isoformat(),
-                "data": row.answer_data,
-            }
-            for row in rows
-        ],
+        "messages": _customer_visible_messages(rows),
     }
+
+
+def get_current_customer_session(db: Session, *, session_id: str, user_id: int) -> dict:
+    """客户本人读回**当前**登录会话，把刷新页面丢掉的那段对话补回对话框。
+
+    与 ``get_customer_session`` 走完全相同的可见范围（session_id + user_id + 客户身份域）
+    与字段，差别只有一处：这一场会话还活着，「一条消息都没有」是正常状态而不是错误——
+    刚登录、还没说过话的客户拿到的是空 ``messages``，不是 404。因此这里也**不**校验
+    会话是否存在：一个全新的 session_id 本来就该回空列表。
+
+    它只用于**呈现**，不组装上下文（ADR-0015 决定 3 与 ADR-0012 不变）：这一场会话的
+    上下文仍由 Redis 短期记忆负责，读归档不会把任何东西塞回模型。
+    """
+    rows = _customer_session_rows(db, session_id=session_id, user_id=user_id)
+    return {"session_id": session_id, "messages": _customer_visible_messages(rows)}

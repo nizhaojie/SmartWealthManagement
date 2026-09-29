@@ -1,7 +1,9 @@
 // 当前会话的消息列表。
 //
 // 会话不跨登录延续：重新登录即新会话，登录与登出都会调用 reset()。
-// 这里只存消息本身与它的增删改，不发起请求——SSE 的收发留在页面与 chat/api。
+// 这里只存消息本身与它的增删改，不发起请求——SSE 的收发留在页面与 chat/api；
+// 刷新页面后的补水也一样，读回来的动作在对话页（`chat/history.ts` 取数），
+// store 只负责把结果落成列表。
 import { ref } from "vue";
 import { defineStore } from "pinia";
 import type { ChatStreamDone, Citation, DataAnswer } from "../chat/api";
@@ -16,8 +18,13 @@ export type ChatMessage = {
   done: boolean;
 };
 
+/** 消息的 `id` 由 store 发号，读回来的消息因此不带它。 */
+export type RestoredMessage = Omit<ChatMessage, "id">;
+
 export const useChatStore = defineStore("chat", () => {
   const messages = ref<ChatMessage[]>([]);
+  // 这一场登录会话是否已经补过水（刷新后把当前会话读回来）。
+  const restored = ref(false);
   let nextId = 1;
 
   function find(id: number): ChatMessage | undefined {
@@ -27,7 +34,24 @@ export const useChatStore = defineStore("chat", () => {
   /** 清空会话（登录 / 登出时调用，保证重新登录不会看到上一场的消息）。 */
   function reset(): void {
     messages.value = [];
+    restored.value = false;
     nextId = 1;
+  }
+
+  /**
+   * 用后端读回的当前会话消息重建列表：刷新页面后，Pinia 随页面重建、消息随之清空，
+   * 而这一场登录会话的归档还在——这就是把它补回对话框的那一步。
+   *
+   * 只补一次：补过之后切走再切回不会重来（现场可能有刚发出、归档里还没有的那一轮）。
+   * 读回来的消息都是定案状态（`done`）——归档里没有「正在生成」这回事。
+   */
+  function restore(archived: RestoredMessage[]): void {
+    if (restored.value) {
+      return;
+    }
+    messages.value = archived.map((message, index) => ({ ...message, id: index + 1 }));
+    nextId = messages.value.length + 1;
+    restored.value = true;
   }
 
   /** 追加用户提问，并开一条待填充的回答消息；返回回答消息的 id 供流式增量写入。 */
@@ -85,5 +109,5 @@ export const useChatStore = defineStore("chat", () => {
     message.done = true;
   }
 
-  return { messages, reset, beginTurn, appendDelta, finishTurn, failTurn };
+  return { messages, restored, reset, restore, beginTurn, appendDelta, finishTurn, failTurn };
 });

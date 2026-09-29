@@ -1,15 +1,33 @@
 // 对话页的合规呈现面：引用角标可点可定位；检索不到依据时的兜底话术与人工热线原样保留。
 // 只测这些，不测排版。
+//
+// 另盯一条：刷新页面后当前登录会话的消息要回到对话框里。刷新只丢内存态（Pinia 重建），
+// 令牌与 session_id 都还在，因此这一场会话归档仍然属于「当前会话」——对话页挂载时把它读回来。
 import ElementPlus from "element-plus";
 import { createPinia, setActivePinia, type Pinia } from "pinia";
 import { flushPromises, mount, type VueWrapper } from "@vue/test-utils";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import ChatPage from "./ChatPage.vue";
-import { streamChatMessage, type ChatStreamHandlers } from "./api";
+import type { CurrentConversation } from "./history";
 
-vi.mock("./api", () => ({
-  streamChatMessage: vi.fn(),
+const { streamChatMessage } = vi.hoisted(() => ({ streamChatMessage: vi.fn() }));
+const { getCurrentConversation, listCustomerConversations, getCustomerConversation } = vi.hoisted(
+  () => ({
+    getCurrentConversation: vi.fn(),
+    listCustomerConversations: vi.fn(),
+    getCustomerConversation: vi.fn(),
+  }),
+);
+
+vi.mock("./api", () => ({ streamChatMessage }));
+vi.mock("./history", () => ({
+  getCurrentConversation,
+  listCustomerConversations,
+  getCustomerConversation,
 }));
+
+import ChatPage from "./ChatPage.vue";
+import { useChatStore } from "../stores/chat";
+import type { ChatStreamHandlers } from "./api";
 
 function mockStreamOnce(run: (handlers: ChatStreamHandlers) => void) {
   vi.mocked(streamChatMessage).mockImplementationOnce(async (_message, handlers) => {
@@ -25,6 +43,11 @@ async function ask(wrapper: VueWrapper, message: string) {
 
 function mountPage(pinia: Pinia): VueWrapper {
   return mount(ChatPage, { global: { plugins: [pinia, ElementPlus] } });
+}
+
+/** 当前会话（登录凭证里的 session_id 那一场）——刷新后对话页读它的归档。 */
+function makeCurrentConversation(overrides: Partial<CurrentConversation> = {}): CurrentConversation {
+  return { session_id: "current-session", messages: [], ...overrides };
 }
 
 const CITATION = {
@@ -55,6 +78,8 @@ describe("ChatPage", () => {
     pinia = createPinia();
     setActivePinia(pinia);
     vi.mocked(streamChatMessage).mockReset();
+    getCurrentConversation.mockReset();
+    getCurrentConversation.mockResolvedValue(makeCurrentConversation());
   });
 
   it("streams deltas into the assistant bubble before the final answer arrives", async () => {
@@ -264,5 +289,86 @@ describe("ChatPage", () => {
     expect(wrapper.text()).toContain("为您查到 0 行数据");
     // 零行（以及失败、白名单外）都在这里出去：不能留下表格容器这个空壳。
     expect(wrapper.find('[data-testid="data-answer"]').exists()).toBe(false);
+  });
+
+  // 刷新页面后，这一场登录会话的消息要回到对话框里：刷新只丢内存态，令牌与 session_id
+  // 都还在，所以「当前会话」的归档就是刚才那几轮问答。回看要连引用角标与结果表一起重绘
+  // （ADR-0028：归档存的与实时看到的是同一份）。
+  it("restores the current session's messages when the page is reloaded", async () => {
+    getCurrentConversation.mockResolvedValue(
+      makeCurrentConversation({
+        messages: [
+          {
+            role: "user",
+            content: "我持有哪些产品",
+            citations: [],
+            created_at: "2026-09-20T09:00:00",
+            data: null,
+          },
+          {
+            role: "assistant",
+            content: "为您查到 1 行数据[1]。",
+            citations: [CITATION],
+            created_at: "2026-09-20T09:01:00",
+            data: DATA_ANSWER,
+          },
+        ],
+      }),
+    );
+
+    const wrapper = mountPage(pinia);
+    await flushPromises();
+
+    expect(wrapper.findAll(".msg")).toHaveLength(2);
+    expect(wrapper.text()).toContain("我持有哪些产品");
+    expect(wrapper.get(".msg--assistant .msg__text").text()).toContain("为您查到 1 行数据");
+    // 引用角标与结果表随消息一起回来，不是只剩一段裸文本。
+    expect(wrapper.find("button.cite-chip").exists()).toBe(true);
+    expect(wrapper.find('[data-testid="data-answer-table"]').exists()).toBe(true);
+  });
+
+  // 这一次登录还没说过话：读回来是空会话，对话框仍是那句引导语，而不是一条假的对话。
+  it("shows the empty hint when the current session has no archived messages", async () => {
+    const wrapper = mountPage(pinia);
+    await flushPromises();
+
+    expect(wrapper.find('[data-testid="chat-empty"]').exists()).toBe(true);
+    expect(wrapper.findAll(".msg")).toHaveLength(0);
+  });
+
+  // 反过来：对话框里已经有现场时不去读归档、更不覆盖它。现场可能比归档新——刚发出、
+  // 尚未归档的那一轮，或一次断流留下的兜底话术，它们都不进归档（切走再切回会重新挂载）。
+  it("does not overwrite a conversation that is already on screen", async () => {
+    const chat = useChatStore();
+    chat.beginTurn("刚发出的那一句");
+
+    const wrapper = mountPage(pinia);
+    await flushPromises();
+
+    expect(getCurrentConversation).not.toHaveBeenCalled();
+    expect(wrapper.text()).toContain("刚发出的那一句");
+    expect(wrapper.findAll(".msg")).toHaveLength(2);
+  });
+
+  // 读不回当前会话不该把对话页弄坏：客户仍然能正常提问（只是看不到刷新前那几轮）。
+  it("keeps the page usable when restoring the current session fails", async () => {
+    getCurrentConversation.mockRejectedValue(new Error("boom"));
+    mockStreamOnce((handlers) => {
+      handlers.onDone({
+        answer: "早上好",
+        citations: [],
+        intent: "闲聊",
+        content_classification: "事实性内容",
+      });
+    });
+
+    const wrapper = mountPage(pinia);
+    await flushPromises();
+
+    expect(wrapper.find('[data-testid="chat-empty"]').exists()).toBe(true);
+
+    await ask(wrapper, "你好");
+
+    expect(wrapper.text()).toContain("早上好");
   });
 });
